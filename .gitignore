@@ -55,6 +55,8 @@ coverage.html
 /jot-local
 /local
 /server
+/migrate_knowledge_metadata
+/clean-test-data
 cmd/jot/jot-go
 /ca-certificates.crt
 
