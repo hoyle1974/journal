@@ -49,11 +49,6 @@ find . -type f \
   echo ""
   echo "## $path"
   echo '```'"$lang"
-  # Avoid breaking on binary or weird encoding; skip nulls
-  if LC_ALL=C grep -q $'\x00' "$path" 2>/dev/null; then
-    echo "(binary or binary-like file skipped)"
-  else
-    cat "$path"
-  fi
+  cat "$path"
   echo '```'
 done
