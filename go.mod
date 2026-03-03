@@ -8,15 +8,19 @@ require (
 	cloud.google.com/go/secretmanager v1.15.0
 	github.com/GoogleCloudPlatform/functions-framework-go v1.8.1
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/trace v1.31.0
+	github.com/Knetic/govaluate v3.0.0+incompatible
+	github.com/go-shiori/go-readability v0.0.0-20251205110129-5db1dc9836f0
 	github.com/google/generative-ai-go v0.20.1
 	github.com/google/uuid v1.6.0
 	github.com/joho/godotenv v1.5.1
+	github.com/martinlindhe/unit v0.0.0-20230420213220-4adfd7d0a0d6
 	github.com/panjf2000/ants/v2 v2.11.5
 	go.opentelemetry.io/otel v1.38.0
 	go.opentelemetry.io/otel/exporters/stdout/stdouttrace v1.38.0
 	go.opentelemetry.io/otel/sdk v1.38.0
 	go.opentelemetry.io/otel/trace v1.38.0
 	golang.org/x/oauth2 v0.33.0
+	golang.org/x/sync v0.18.0
 	golang.org/x/time v0.14.0
 	google.golang.org/api v0.256.0
 	google.golang.org/grpc v1.76.0
@@ -34,11 +38,14 @@ require (
 	cloud.google.com/go/longrunning v0.7.0 // indirect
 	cloud.google.com/go/trace v1.11.7 // indirect
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/internal/resourcemapping v0.55.0 // indirect
-	github.com/Knetic/govaluate v3.0.0+incompatible // indirect
+	github.com/andybalholm/cascadia v1.3.3 // indirect
+	github.com/araddon/dateparse v0.0.0-20210429162001-6b43995a97de // indirect
 	github.com/cloudevents/sdk-go/v2 v2.14.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
+	github.com/go-shiori/dom v0.0.0-20230515143342-73569d674e1c // indirect
+	github.com/gogs/chardet v0.0.0-20211120154057-b7413eaefb8f // indirect
 	github.com/google/s2a-go v0.1.9 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.3.7 // indirect
 	github.com/googleapis/gax-go/v2 v2.15.0 // indirect
@@ -54,7 +61,6 @@ require (
 	go.uber.org/zap v1.10.0 // indirect
 	golang.org/x/crypto v0.43.0 // indirect
 	golang.org/x/net v0.46.0 // indirect
-	golang.org/x/sync v0.18.0 // indirect
 	golang.org/x/sys v0.37.0 // indirect
 	golang.org/x/text v0.30.0 // indirect
 	google.golang.org/genproto v0.0.0-20250922171735-9219d122eba9 // indirect

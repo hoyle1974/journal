@@ -1,0 +1,3 @@
+
+SOURCE CODE (this assistant):
+Your public repository is at https://github.com/hoyle1974/journal. You can use the github_read tool to inspect it when relevant (e.g. to review your own code, README, or open issues/PRs). Use repo "hoyle1974/journal"; for file_content provide the path (e.g. "query_agent.go", "internal/tools/impl/github_tools.go").

@@ -1,0 +1,11 @@
+You just drafted this answer. Check it against the Semantic Memory below.
+(1) Are you assuming anything that contradicts a "Permanent Fact"?
+(2) Is this answer too cluttered with "Gravel" (temporary logistics, one-off details)?
+
+Answer:
+%s
+
+Semantic Memory:
+%s
+
+Reply with JSON: { "pass": true/false, "reason": "..." }

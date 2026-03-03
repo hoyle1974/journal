@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/firestore"
+	"github.com/jackstrohm/jot/internal/prompts"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/api/iterator"
 )
@@ -509,7 +510,7 @@ func RunProfileSynthesis(ctx context.Context, personaFacts []string) error {
 	userPrompt := fmt.Sprintf("Current Profile:\n%s\n\nNew Identity Markers:\n%s",
 		WrapAsUserData(node.Content), WrapAsUserData(strings.Join(personaFacts, "\n")))
 
-	newProfile, err := GenerateContentSimple(ctx, IdentityArchitectSystemPrompt, userPrompt, &GenConfig{MaxOutputTokens: 1024, ModelOverride: DreamerModel})
+	newProfile, err := GenerateContentSimple(ctx, prompts.IdentityArchitect(), userPrompt, &GenConfig{MaxOutputTokens: 1024, ModelOverride: DreamerModel})
 	if err != nil {
 		return err
 	}

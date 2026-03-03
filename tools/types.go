@@ -19,12 +19,14 @@ type Result struct {
 type ExecuteFunc func(ctx context.Context, args *Args) Result
 
 // Tool defines a tool that can be called by the LLM agent.
+// DocURL is optional; when set, it is included in the tool description sent to the LLM so it can refer to library docs.
 type Tool struct {
 	Name        string
 	Description string
 	Category    string
 	Params      []Param
 	Execute     ExecuteFunc
+	DocURL      string // Optional link to library or API docs (e.g. GitHub or pkg.go.dev).
 }
 
 // Param defines a parameter for a tool.

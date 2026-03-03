@@ -5,7 +5,15 @@
 #
 set -e
 
-PROJECT="${GOOGLE_CLOUD_PROJECT:?Set GOOGLE_CLOUD_PROJECT (e.g. export GOOGLE_CLOUD_PROJECT=your-project-id)}"
+# Load .env if present (GOOGLE_CLOUD_PROJECT and other vars)
+if [ -f .env ]; then
+  set -a
+  # shellcheck source=.env
+  source .env
+  set +a
+fi
+
+PROJECT="${GOOGLE_CLOUD_PROJECT:?Set GOOGLE_CLOUD_PROJECT in .env or export GOOGLE_CLOUD_PROJECT=your-project-id}"
 REGION="us-central1"
 FUNCTION_NAME="jot-api-go"
 IMAGE="$REGION-docker.pkg.dev/$PROJECT/jot/$FUNCTION_NAME"

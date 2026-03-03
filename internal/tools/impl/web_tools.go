@@ -17,6 +17,7 @@ func registerWebTools() {
 		Name:        "fetch_url",
 		Description: "Fetch and extract text content from a web page URL. Returns the main text content, stripped of HTML.",
 		Category:    "web",
+		DocURL:      "https://github.com/go-shiori/go-readability",
 		Params: []tools.Param{
 			tools.RequiredStringParam("url", "The URL to fetch"),
 			tools.IntParam("max_length", "Maximum characters to return (default 5000)", false, 5000),

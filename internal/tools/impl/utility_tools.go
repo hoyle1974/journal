@@ -16,6 +16,7 @@ func registerUtilityTools() {
 		Name:        "calculate",
 		Description: "Evaluate mathematical expressions. Supports basic arithmetic (+, -, *, /), percentages, powers (^), square roots, and common functions.",
 		Category:    "utility",
+		DocURL:      "https://github.com/Knetic/govaluate",
 		Params: []tools.Param{
 			tools.RequiredStringParam("expression", "The math expression to evaluate (e.g., '2+2', '15% of 200', 'sqrt(144)', '2^10')"),
 		},
@@ -36,6 +37,7 @@ func registerUtilityTools() {
 		Name:        "date_calc",
 		Description: "Perform date calculations: days between dates, add/subtract days, get day of week, parse natural dates.",
 		Category:    "utility",
+		DocURL:      "https://pkg.go.dev/time",
 		Params: []tools.Param{
 			tools.EnumParam("operation", "Operation: 'days_between', 'add_days', 'subtract_days', 'day_of_week', 'parse'", true, []string{"days_between", "add_days", "subtract_days", "day_of_week", "parse"}),
 			tools.RequiredStringParam("date1", "First date (YYYY-MM-DD format or 'today', 'tomorrow', 'yesterday')"),
@@ -82,6 +84,7 @@ func registerUtilityTools() {
 		Name:        "convert_units",
 		Description: "Convert between common units: temperature (C/F/K), length (m/ft/in/cm/km/mi), weight (kg/lb/oz/g), data (B/KB/MB/GB/TB).",
 		Category:    "utility",
+		DocURL:      "https://github.com/martinlindhe/unit",
 		Params: []tools.Param{
 			tools.NumberParam("value", "The numeric value to convert", true),
 			tools.RequiredStringParam("from_unit", "Source unit (e.g., 'C', 'kg', 'm', 'GB')"),
@@ -162,6 +165,7 @@ func registerUtilityTools() {
 		Name:        "encode_decode",
 		Description: "Encode or decode text: base64, URL encoding, or format JSON.",
 		Category:    "utility",
+		DocURL:      "https://pkg.go.dev/encoding/base64",
 		Params: []tools.Param{
 			tools.EnumParam("operation", "Operation: 'base64_encode', 'base64_decode', 'url_encode', 'url_decode', 'json_format', 'json_minify'", true, []string{"base64_encode", "base64_decode", "url_encode", "url_decode", "json_format", "json_minify"}),
 			tools.RequiredStringParam("text", "The text to process"),

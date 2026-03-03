@@ -1,0 +1,5 @@
+
+KNOWLEDGE GAPS (we looked but found nothing for these; if the user provides information that fills one, save it immediately):
+%s
+
+If the user provides information that fills a previously identified Knowledge Gap, prioritize saving that fact to the user_profile (via upsert_knowledge with node_type fact/preference or by ensuring it is reflected in context) immediately.

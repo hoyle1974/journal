@@ -85,9 +85,13 @@ func toolToDeclaration(tool *Tool) *genai.FunctionDeclaration {
 		}
 	}
 
+	desc := tool.Description
+	if tool.DocURL != "" {
+		desc = desc + "\nDocs: " + tool.DocURL
+	}
 	return &genai.FunctionDeclaration{
 		Name:        tool.Name,
-		Description: tool.Description,
+		Description: desc,
 		Parameters: &genai.Schema{
 			Type:       genai.TypeObject,
 			Properties: properties,
