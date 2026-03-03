@@ -1,0 +1,47 @@
+# JOT Project Rules
+
+## Architecture & Dependency Injection
+
+- **Rule:** Never initialize Firestore, Gemini, or Loggers directly.
+- **Requirement:** Always use `app := jot.GetApp(ctx)` to retrieve shared resources.
+- **Pattern:** `app := GetApp(ctx)` then `client, err := app.Firestore(ctx)`.
+
+## Structured Logging
+
+- **Rule:** No `fmt.Print` or raw `slog` global calls.
+- **Requirement:** Always use `LoggerFrom(ctx)` to ensure logs are request-scoped and forwarded to the Google Doc correctly.
+- **Pattern:** `LoggerFrom(ctx).Info("message", "key", value)`.
+
+## LLM Tooling
+
+- **Rule:** Tools must be modular and co-located by domain.
+- **Requirement:** Register new tools via `tools.Register(*tools.Tool)` inside an `init()` function.
+- **Location:** Modularize `tool_impls.go` by moving logic to domain-specific files (e.g., `journal_tools.go`, `web_tools.go`).
+
+## Prompt Engineering & Safety
+
+- **Rule:** Never trust user input strings inside a prompt.
+- **Requirement:** Wrap all user-origin strings or tool results in `<user_data>` tags using the `WrapAsUserData()` helper.
+- **Rule:** Use `llmjson.RepairAndUnmarshal` for all LLM JSON parsing to handle truncation.
+
+## Observability
+
+- **Rule:** Every significant agentic step must be traceable.
+- **Requirement:** Use `StartSpan(ctx, "operation_name")`.
+- **Requirement:** Add metadata via `span.SetAttributes(map[string]string{...})` and always `defer span.End()`.
+
+## Go Style
+
+- **Context:** Every exported function must take `ctx context.Context` as the first argument.
+- **Errors:** Use `%w` for error wrapping: `fmt.Errorf("context: %w", err)`.
+- **Files:** Keep files under 400 lines. Suggest a refactor if a file becomes a "junk drawer."
+
+## Domain Terms
+
+- **Gold:** Permanent facts for Semantic Memory.
+- **Gravel:** Temporary logs to be ignored by the Dreamer.
+- **FOH:** Front of House (the `query_agent.go` loop).
+
+## Logic Updates
+
+- Check `blueprint.md` before changing core agentic loops.

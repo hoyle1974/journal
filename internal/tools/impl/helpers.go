@@ -1,0 +1,89 @@
+package impl
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/jackstrohm/jot"
+)
+
+// formatKnowledgeNodes formats knowledge nodes for LLM context.
+func formatKnowledgeNodes(nodes []jot.KnowledgeNode) string {
+	var lines []string
+	for i, n := range nodes {
+		content := n.Content
+		if len(content) > 200 {
+			content = content[:197] + "..."
+		}
+		ts := n.Timestamp
+		if len(ts) > 19 {
+			ts = ts[:19]
+		}
+		if ts == "" {
+			ts = "(no date)"
+		}
+		lines = append(lines, fmt.Sprintf("%d. [%s] [%s] %s", i+1, n.NodeType, ts, content))
+		if n.Metadata != "" && n.Metadata != "{}" {
+			lines = append(lines, fmt.Sprintf("   Metadata: %s", n.Metadata))
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// formatEntries formats entries for LLM context (short form).
+func formatEntries(entries []jot.Entry) string {
+	var lines []string
+	for i, e := range entries {
+		content := e.Content
+		if len(content) > 200 {
+			content = content[:197] + "..."
+		}
+		ts := e.Timestamp
+		if len(ts) > 19 {
+			ts = ts[:19]
+		}
+		if ts == "" {
+			ts = "(no date)"
+		}
+		src := ""
+		if e.Source != "" {
+			src = fmt.Sprintf(" (%s)", e.Source)
+		}
+		lines = append(lines, fmt.Sprintf("%d. [%s]%s %s", i+1, ts, src, content))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// formatContexts formats context nodes and metadata for LLM context.
+func formatContexts(nodes []jot.KnowledgeNode, metas []jot.ContextMetadata) string {
+	var lines []string
+	for i, n := range nodes {
+		meta := metas[i]
+		content := n.Content
+		if len(content) > 150 {
+			content = content[:147] + "..."
+		}
+		lastTouched := meta.LastTouched
+		if len(lastTouched) > 19 {
+			lastTouched = lastTouched[:19]
+		}
+		if lastTouched == "" {
+			lastTouched = "(no date)"
+		}
+		updated := n.Timestamp
+		if len(updated) > 19 {
+			updated = updated[:19]
+		}
+		if updated == "" {
+			updated = "(no date)"
+		}
+		lines = append(lines, fmt.Sprintf("%d. [%s] %s (%.0f%% relevance)\n   UUID: %s\n   %s\n   Updated: %s | Last touched: %s",
+			i+1, meta.ContextType, meta.ContextName, meta.Relevance*100, n.UUID, content, updated, lastTouched))
+	}
+	return strings.Join(lines, "\n\n")
+}
+
+// formatQueriesForContext formats query history for LLM context using jot's formatter.
+func formatQueriesForContext(queries []jot.QueryLog) string {
+	return jot.FormatQueriesForContext(queries, 10000)
+}

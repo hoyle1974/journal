@@ -1,0 +1,61 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "entries",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "embedding",
+          "vectorConfig": {
+            "dimension": 768,
+            "flat": {}
+          }
+        }
+      ]
+    },
+    {
+      "collectionGroup": "knowledge_nodes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "significance_weight", "order": "ASCENDING" },
+        { "fieldPath": "last_recalled_at", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "knowledge_nodes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "domain", "order": "ASCENDING" },
+        { "fieldPath": "node_type", "order": "ASCENDING" },
+        { "fieldPath": "timestamp", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "knowledge_nodes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "node_type", "order": "ASCENDING" },
+        { "fieldPath": "last_recalled_at", "order": "ASCENDING" },
+        { "fieldPath": "significance_weight", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "knowledge_nodes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "node_type", "order": "ASCENDING" },
+        { "fieldPath": "significance_weight", "order": "ASCENDING" },
+        { "fieldPath": "last_recalled_at", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "queries",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "is_gap", "order": "ASCENDING" },
+        { "fieldPath": "timestamp", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

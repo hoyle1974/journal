@@ -1,0 +1,3 @@
+# Dependencies for setup_drive_watch.py (Drive API watch for Google Doc sync)
+google-api-python-client>=2.0.0
+google-auth>=2.0.0
