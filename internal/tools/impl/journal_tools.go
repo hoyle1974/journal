@@ -196,28 +196,4 @@ func registerJournalTools() {
 			return tools.OK("Found %d entries from '%s':\n%s", len(entries), source, result)
 		},
 	})
-
-	tools.Register(&tools.Tool{
-		Name:        "log_entry",
-		Description: "Log a new journal entry. Use the user's EXACT words. Call ONCE per input.",
-		Category:    "journal",
-		Params: []tools.Param{
-			tools.RequiredStringParam("content", "The exact text to log (use user's original words)"),
-			tools.OptionalStringParam("source", "Source of the entry (default: 'llm')"),
-		},
-		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
-			content, ok := args.RequiredString("content")
-			if !ok {
-				return tools.MissingParam("content")
-			}
-			source := args.String("source", "llm")
-			id, err := jot.AddEntry(ctx, content, source, nil)
-			if err != nil {
-				jot.LoggerFrom(ctx).Error("log_entry failed", "error", err)
-				return tools.Fail("Error logging entry: %v", err)
-			}
-			jot.LoggerFrom(ctx).Info("log_entry", "source", source, "content", jot.SafeTruncate(content, 50))
-			return tools.OK("Entry logged (ID: %s)", id)
-		},
-	})
 }

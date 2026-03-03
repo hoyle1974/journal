@@ -68,9 +68,9 @@ Flow: `handleLog` or `processEntrySMS` → `AddEntry` → Firestore `entries`
 
 - **POST /query** – API
 - **SMS** with `?` prefix – question
-- **Google Doc Sync** – plain lines (agent decides; typically logs via `log_entry`)
+- **Google Doc Sync** – plain lines (agent responds after input is logged)
 
-Flow: `handleQuery` / `processQuerySMS` / `handleSync` → `RunQuery` → agent calls `log_entry` → `AddEntry`
+Flow: `handleQuery` / `processQuerySMS` / `handleSync` → `RunQuery` → `AddEntry` (save input) → Gemini agent loop
 
 ### AddEntry Side Effects (async)
 
@@ -170,7 +170,7 @@ User question
 3. Processes unbolded lines above it:
    - `?question` → RunQuery, insert answer, bold question
    - `!action` → RunQuery with action, insert confirmation, bold action
-   - Plain text → RunQuery (agent logs via `log_entry` and responds)
+   - Plain text → RunQuery (input saved at start; agent responds)
 4. Marks `done.` as bold and appends `[processed]`
 5. Optionally enqueues Cloud Task for Drive Watch debounce
 

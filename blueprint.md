@@ -22,13 +22,12 @@ JOT is a single-user "Agentic Second Brain." It creates a high-fidelity bridge b
 
 ### A. The Front of House (FOH) - `query_agent.go`
 
-The main entry point for user interaction. Loop:
+The main entry point for user interaction. The system saves the user's input to the journal at the start of each request (before the LLM runs). Loop:
 
-1. **Log:** Call `log_entry` exactly once.
-2. **Decompose:** Decide which domains (Relationship, Work, etc.) are relevant.
-3. **Execute:** Run tools (Search, Utility, Specialists) in parallel via worker pools.
-4. **Reflect:** Check the draft answer against semantic memory to prevent hallucinations.
-5. **Answer:** Return a concise, CLI-friendly response.
+1. **Decompose:** Decide which domains (Relationship, Work, etc.) are relevant.
+2. **Execute:** Run tools (search, utility, specialists) in parallel via worker pools.
+3. **Reflect:** Check the draft answer against semantic memory to prevent hallucinations.
+4. **Answer:** Return a concise, CLI-friendly response.
 
 ### B. The Dreamer (Nightly) - `cron.go`
 

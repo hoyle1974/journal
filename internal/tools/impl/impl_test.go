@@ -29,7 +29,6 @@ func TestToolDefinitionsComplete(t *testing.T) {
 		"get_entity_network",
 		"generate_plan",
 		"check_proactive_signals",
-		"log_entry",
 		"list_contexts",
 		"create_context",
 		"touch_context",

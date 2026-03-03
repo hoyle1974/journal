@@ -62,6 +62,20 @@ func RunQueryWithDebug(ctx context.Context, question, source string, debug bool)
 		}
 	}
 
+	// Save user input to the journal immediately (deterministic system task; no LLM tool call).
+	EntriesTotal.Inc()
+	if _, err := AddEntry(ctx, question, source, nil); err != nil {
+		LoggerFrom(ctx).Error("failed to log user input", "error", err)
+		ErrorsTotal.Inc()
+		span.RecordError(err)
+		return &QueryResult{
+			Answer:     fmt.Sprintf("Error saving input: %v", err),
+			Iterations: 0,
+			Error:      true,
+			DebugLogs:  debugLogs,
+		}
+	}
+
 	logDebug("[start] Question: %s", question)
 
 	// Build system prompt with current date context
@@ -90,7 +104,6 @@ func RunQueryWithDebug(ctx context.Context, question, source string, debug bool)
 	toolCallCounts := make(map[string]int) // "toolName:normArgs" -> count for back-off
 	var repeatedToolName string            // set when back-off triggers (for prompt)
 	var knowledgeGapDetected bool          // set when a search tool returns no results
-	var searchToolEverCalled bool         // if true, do not short-circuit so LLM can answer from prior search results
 
 	// Start the conversation with the user's question
 	resp, err := session.SendMessage(ctx, genai.Text(question))
@@ -193,8 +206,8 @@ func RunQueryWithDebug(ctx context.Context, question, source string, debug bool)
 				}
 				resp = resp2
 			}
-			// Graceful fallback: if we've already executed a tool (e.g. log_entry) and the LLM
-			// returns empty (e.g. trapped by conflicting instructions), treat the turn as complete.
+			// Graceful fallback: if we've already executed a tool and the LLM returns empty
+			// (e.g. trapped by conflicting instructions), treat the turn as complete.
 			if iteration > 1 {
 				logDebug("[done] LLM returned empty content after tool execution, defaulting to Logged.")
 				return &QueryResult{
@@ -322,7 +335,6 @@ func RunQueryWithDebug(ctx context.Context, question, source string, debug bool)
 
 		// Collect responses in original order; detect knowledge gap when search tools return no results
 		var functionResponses []genai.Part
-		logEntrySuccess := false
 		searchToolCalled := false
 		searchTools := map[string]bool{
 			"semantic_search":           true,
@@ -350,15 +362,9 @@ func RunQueryWithDebug(ctx context.Context, question, source string, debug bool)
 				Response: map[string]any{"result": SanitizePrompt(r.result.Result)},
 			})
 
-			if r.fcName == "log_entry" && r.result.Success {
-				logEntrySuccess = true
-			}
 			if searchTools[r.fcName] {
 				searchToolCalled = true
 			}
-		}
-		if searchToolCalled {
-			searchToolEverCalled = true
 		}
 
 		// Knowledge gap: if a search tool returned a no-results message, flag for SaveQuery
@@ -375,22 +381,6 @@ func RunQueryWithDebug(ctx context.Context, question, source string, debug bool)
 					knowledgeGapDetected = true
 					break
 				}
-			}
-		}
-
-		// Short-circuit when we only logged and never searched this query: return "Logged." so the LLM
-		// isn't forced to produce text (avoids agentic trap when it has no tool to answer the question).
-		// If a search tool was called in any prior iteration, do not short-circuit: the LLM still needs
-		// a turn to synthesize the search results into a final answer (e.g. "tell me something fascinating"
-		// -> iter 1 wikipedia, iter 2 log_entry -> we must continue so the model can respond with the fact).
-		if logEntrySuccess && !searchToolCalled && !searchToolEverCalled && iteration >= 1 {
-			logDebug("[done] Statement logged successfully, LLM opted not to search, short-circuiting")
-			return &QueryResult{
-				Answer:     "Logged.",
-				Iterations: iteration,
-				ToolCalls:  toolCalls,
-				Error:      false,
-				DebugLogs:  debugLogs,
 			}
 		}
 
