@@ -1,11 +1,21 @@
 #!/usr/bin/env bash
 # dump-for-gemini.sh — Output all code, scripts, and embedded prompts in a Gemini-parseable format.
-# Usage: ./scripts/dump-for-gemini.sh [repo_root]
+# Usage: ./scripts/dump-for-gemini.sh [--ignore-static] [repo_root]
+#   --ignore-static  omit internal/static/ (HTML and static.go)
 # Output: Each file preceded by "## path" and wrapped in a fenced code block with language hint.
 
 set -euo pipefail
 
-ROOT="${1:-$(cd "$(dirname "$0")/.." && pwd)}"
+IGNORE_STATIC=0
+ROOT=""
+for arg in "$@"; do
+  if [[ "$arg" == --ignore-static ]]; then
+    IGNORE_STATIC=1
+  else
+    ROOT="$arg"
+  fi
+done
+ROOT="${ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 cd "$ROOT"
 
 # Directories and files to skip (aligned with .gitignore and safety)
@@ -18,6 +28,7 @@ EXTS='\.go$|\.sh$|\.md$|\.txt$|\.html$|\.mod$|\.sum$'
 echo "# JOT codebase dump for Gemini"
 echo "# Generated: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "# Root: $ROOT"
+[[ "$IGNORE_STATIC" -eq 1 ]] && echo "# Options: --ignore-static (internal/static/ omitted)"
 echo ""
 
 find . -type f \
@@ -35,6 +46,7 @@ find . -type f \
     cmd/jot/jot-go) continue ;;
   esac
   path="${f#./}"
+  [[ "$IGNORE_STATIC" -eq 1 && "$path" == internal/static/* ]] && continue
   if [[ ! -f "$path" ]]; then continue; fi
   # Detect language for code block
   lang="text"
