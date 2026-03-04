@@ -25,6 +25,14 @@
       "collectionGroup": "knowledge_nodes",
       "queryScope": "COLLECTION",
       "fields": [
+        { "fieldPath": "last_recalled_at", "order": "ASCENDING" },
+        { "fieldPath": "significance_weight", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "knowledge_nodes",
+      "queryScope": "COLLECTION",
+      "fields": [
         { "fieldPath": "domain", "order": "ASCENDING" },
         { "fieldPath": "node_type", "order": "ASCENDING" },
         { "fieldPath": "timestamp", "order": "DESCENDING" }

@@ -45,3 +45,9 @@
 ## Logic Updates
 
 - Check `blueprint.md` before changing core agentic loops.
+
+## Firestore Indexes
+
+- **Rule:** All composite indexes used by queries must be defined in `firestore.indexes.json`.
+- **Requirement:** After adding or changing an index, run `firebase deploy --only firestore:indexes` (or use `./deploy.sh`, which deploys indexes first).
+- **Janitor:** The janitor (garbage collection) requires the composite index on `knowledge_nodes` with fields `last_recalled_at`, `significance_weight` (order matters).

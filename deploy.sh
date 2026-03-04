@@ -50,7 +50,8 @@ fi
 # Set project
 gcloud config set project $PROJECT 2>/dev/null
 
-# Deploy Firestore indexes from firestore.indexes.json (ensure existing indexes are updated)
+# Deploy Firestore indexes from firestore.indexes.json (ensure existing indexes are updated).
+# Includes Janitor index: knowledge_nodes (last_recalled_at, significance_weight).
 echo -e "${YELLOW}Deploying Firestore indexes...${NC}"
 if command -v firebase &> /dev/null; then
   # Prefer Firebase CLI: syncs indexes from file (adds missing, leaves existing)
