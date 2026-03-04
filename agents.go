@@ -64,28 +64,15 @@ func RunEvaluator(ctx context.Context, content, entryUUID, timestamp string) {
 	}
 
 	text := extractTextFromResponse(resp)
-	var parsed struct {
+	type evaluatorOut struct {
 		Significance float64 `json:"significance"`
-		Domain       string `json:"domain"`
-		FactToStore  string `json:"fact_to_store"`
+		Domain       string  `json:"domain"`
+		FactToStore  string  `json:"fact_to_store"`
 	}
-	if err := json.Unmarshal([]byte(text), &parsed); err != nil {
-		if err := llmjson.RepairAndUnmarshal(text, &parsed); err != nil {
-			partial, _ := llmjson.PartialUnmarshalObject(text, []string{"significance", "domain", "fact_to_store"})
-			if len(partial) == 0 {
-				LoggerFrom(ctx).Info("evaluator skipped", "entry_uuid", entryUUID, "reason", "unparseable response")
-				return
-			}
-			if raw, ok := partial["significance"]; ok && len(raw) > 0 {
-				_ = json.Unmarshal(raw, &parsed.Significance)
-			}
-			if raw, ok := partial["domain"]; ok && len(raw) > 0 {
-				_ = json.Unmarshal(raw, &parsed.Domain)
-			}
-			if raw, ok := partial["fact_to_store"]; ok && len(raw) > 0 {
-				_ = json.Unmarshal(raw, &parsed.FactToStore)
-			}
-		}
+	parsed, _ := llmjson.ParseLLMResponse[evaluatorOut](text, []string{"significance", "domain", "fact_to_store"})
+	if parsed == nil {
+		LoggerFrom(ctx).Info("evaluator skipped", "entry_uuid", entryUUID, "reason", "unparseable response")
+		return
 	}
 
 	if parsed.Significance < 0 {
@@ -236,7 +223,7 @@ func RunUnifiedCommittee(ctx context.Context, logs string, recentQueries string)
 		LoggerFrom(ctx).Warn("unified_committee empty response", "reason", reason)
 		return nil, fmt.Errorf("unified committee returned empty response: %s (try DREAMER_UNIFIED_COMMITTEE=false to use per-domain specialists, or check model/safety settings)", reason)
 	}
-	var parsed struct {
+	type committeeParsed struct {
 		Relationship     []string `json:"relationship"`
 		Work             []string `json:"work"`
 		Task             []string `json:"task"`
@@ -246,67 +233,14 @@ func RunUnifiedCommittee(ctx context.Context, logs string, recentQueries string)
 		ImpactedContexts []string `json:"impacted_contexts"`
 		QueryAnalysis    string   `json:"query_analysis"`
 	}
-	if err := json.Unmarshal([]byte(text), &parsed); err != nil {
-		if err := llmjson.RepairAndUnmarshal(text, &parsed); err != nil {
-			// Partial parse: extract whatever keys we can
-			committeeKeys := []string{"relationship", "work", "task", "thought", "selfmodel", "identity_markers", "impacted_contexts", "query_analysis"}
-			partial, _ := llmjson.PartialUnmarshalObject(text, committeeKeys)
-			if len(partial) > 0 {
-				out := &BatchCommitteeOutput{
-					Domains: map[string][]string{
-						"relationship": nil,
-						"work":        nil,
-						"task":        nil,
-						"thought":     nil,
-						"selfmodel":   nil,
-					},
-					IdentityMarkers:  nil,
-					ImpactedContexts: nil,
-					QueryAnalysis:    "",
-				}
-				recovered := make([]string, 0, len(partial))
-				var sl []string
-				for _, k := range committeeKeys {
-					raw, ok := partial[k]
-					if !ok || len(raw) == 0 {
-						continue
-					}
-					recovered = append(recovered, k)
-					sl = nil
-					switch k {
-					case "relationship":
-						_ = json.Unmarshal(raw, &sl)
-						out.Domains["relationship"] = sl
-					case "work":
-						_ = json.Unmarshal(raw, &sl)
-						out.Domains["work"] = sl
-					case "task":
-						_ = json.Unmarshal(raw, &sl)
-						out.Domains["task"] = sl
-					case "thought":
-						_ = json.Unmarshal(raw, &sl)
-						out.Domains["thought"] = sl
-					case "selfmodel":
-						_ = json.Unmarshal(raw, &sl)
-						out.Domains["selfmodel"] = sl
-					case "identity_markers":
-						_ = json.Unmarshal(raw, &out.IdentityMarkers)
-					case "impacted_contexts":
-						_ = json.Unmarshal(raw, &out.ImpactedContexts)
-					case "query_analysis":
-						_ = json.Unmarshal(raw, &out.QueryAnalysis)
-					}
-				}
-				out.QueryAnalysis = strings.TrimSpace(out.QueryAnalysis)
-				LoggerFrom(ctx).Info("unified_committee partial parse", "recovered_keys", recovered)
-				return out, nil
-			}
-			LoggerFrom(ctx).Warn("unified_committee parse failed", "error", err, "raw", truncateString(text, 500), "text_len", len(text))
-			if strings.Contains(err.Error(), "unexpected end of JSON input") || len(text) < 20 {
-				return nil, fmt.Errorf("unified committee returned empty or truncated response (try DREAMER_UNIFIED_COMMITTEE=false to use per-domain specialists): %w", err)
-			}
-			return nil, fmt.Errorf("unified committee JSON parse failed: %w", err)
+	committeeKeys := []string{"relationship", "work", "task", "thought", "selfmodel", "identity_markers", "impacted_contexts", "query_analysis"}
+	parsed, parseErr := llmjson.ParseLLMResponse[committeeParsed](text, committeeKeys)
+	if parsed == nil {
+		LoggerFrom(ctx).Warn("unified_committee parse failed", "error", parseErr, "raw", truncateString(text, 500), "text_len", len(text))
+		if parseErr != nil && (strings.Contains(parseErr.Error(), "unexpected end of JSON input") || len(text) < 20) {
+			return nil, fmt.Errorf("unified committee returned empty or truncated response (try DREAMER_UNIFIED_COMMITTEE=false to use per-domain specialists): %w", parseErr)
 		}
+		return nil, fmt.Errorf("unified committee JSON parse failed: %w", parseErr)
 	}
 
 	out := &BatchCommitteeOutput{
@@ -372,33 +306,16 @@ func RunEvolutionAudit(ctx context.Context, queriesText, journalSummary string) 
 	}
 
 	text := extractTextFromResponse(resp)
-	var out EvolutionAuditOutput
-	if err := json.Unmarshal([]byte(text), &out); err != nil {
-		if err := llmjson.RepairAndUnmarshal(text, &out); err != nil {
-			partial, _ := llmjson.PartialUnmarshalObject(text, []string{"summary", "facts", "entities"})
-			if len(partial) > 0 {
-				recovered := make([]string, 0, len(partial))
-				if raw, ok := partial["summary"]; ok && len(raw) > 0 {
-					_ = json.Unmarshal(raw, &out.Summary)
-					recovered = append(recovered, "summary")
-				}
-				if raw, ok := partial["facts"]; ok && len(raw) > 0 {
-					_ = json.Unmarshal(raw, &out.Facts)
-					recovered = append(recovered, "facts")
-				}
-				if raw, ok := partial["entities"]; ok && len(raw) > 0 {
-					_ = json.Unmarshal(raw, &out.Entities)
-					recovered = append(recovered, "entities")
-				}
-				LoggerFrom(ctx).Info("evolution_audit partial parse", "recovered_keys", recovered)
-			} else {
-				LoggerFrom(ctx).Warn("evolution_audit parse failed", "error", err, "raw", truncateString(text, 400))
-				return nil, fmt.Errorf("evolution audit JSON parse failed: %w", err)
-			}
+	out, parseErr := llmjson.ParseLLMResponse[EvolutionAuditOutput](text, []string{"summary", "facts", "entities"})
+	if out == nil {
+		if parseErr == nil {
+			parseErr = errors.New("parse failed")
 		}
+		LoggerFrom(ctx).Warn("evolution_audit parse failed", "error", parseErr, "raw", truncateString(text, 400))
+		return nil, fmt.Errorf("evolution audit JSON parse failed: %w", parseErr)
 	}
 	LoggerFrom(ctx).Info("evolution_audit done", "summary_len", len(out.Summary), "facts", len(out.Facts), "entities", len(out.Entities))
-	return &out, nil
+	return out, nil
 }
 
 // RunSpecialist runs a single specialist agent.

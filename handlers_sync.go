@@ -2,6 +2,8 @@ package jot
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"sort"
@@ -14,6 +16,19 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
+
+// sanitizeResponseForDoc ensures the LLM response never contains a standalone "done" or "done." line.
+// Writing that into the doc would create a new sync trigger and cause an infinite sync loop.
+func sanitizeResponseForDoc(response string) string {
+	lines := strings.Split(response, "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(strings.ToLower(line))
+		if trimmed == "done." || trimmed == "done" {
+			lines[i] = "[logged]."
+		}
+	}
+	return strings.Join(lines, "\n")
+}
 
 // syncLine represents one unbolded line (used when collecting the block).
 type syncLine struct {
@@ -53,8 +68,8 @@ func findSyncDoneTrigger(doc *docs.Document) (elem *docs.TextRun, startIndex, en
 			if e.TextRun == nil {
 				continue
 			}
-			text := strings.TrimSpace(e.TextRun.Content)
-			if strings.HasPrefix(strings.ToLower(text), "done") && (e.TextRun.TextStyle == nil || !e.TextRun.TextStyle.Bold) {
+			text := strings.TrimSpace(strings.ToLower(e.TextRun.Content))
+			if (text == "done." || text == "done") && (e.TextRun.TextStyle == nil || !e.TextRun.TextStyle.Bold) {
 				return e.TextRun, e.StartIndex, e.EndIndex
 			}
 		}
@@ -119,6 +134,8 @@ func collectSyncBlock(doc *docs.Document, beforeEndIndex int64) *syncBlock {
 func buildSyncRequests(ctx context.Context, doneStartIndex, doneEndIndex int64, block *syncBlock) ([]*docs.Request, int, int, int) {
 	source := "gdoc"
 	var requests []*docs.Request
+	// Apply "done." updates first (original indices); then block updates. Block is before "done." so
+	// inserting at block.endIndex does not shift the "done." range we already used.
 	requests = append(requests,
 		&docs.Request{
 			InsertText: &docs.InsertTextRequest{
@@ -150,7 +167,7 @@ func buildSyncRequests(ctx context.Context, doneStartIndex, doneEndIndex int64, 
 			queryStart := time.Now()
 			answer := GetAnswer(ctx, question, source)
 			LoggerFrom(ctx).Info("question answered", "duration_ms", time.Since(queryStart).Milliseconds())
-			inserted := "\n" + answer
+			inserted := "\n" + sanitizeResponseForDoc(answer)
 			requests = append(requests,
 				&docs.Request{UpdateTextStyle: &docs.UpdateTextStyleRequest{Range: &docs.Range{StartIndex: block.startIndex, EndIndex: block.endIndex}, TextStyle: &docs.TextStyle{Bold: true}, Fields: "bold"}},
 				&docs.Request{InsertText: &docs.InsertTextRequest{Location: &docs.Location{Index: block.endIndex}, Text: inserted}},
@@ -166,7 +183,7 @@ func buildSyncRequests(ctx context.Context, doneStartIndex, doneEndIndex int64, 
 			actionStart := time.Now()
 			result := GetAnswer(ctx, "Execute this action and confirm what you did: "+action, source)
 			LoggerFrom(ctx).Info("action executed", "duration_ms", time.Since(actionStart).Milliseconds())
-			inserted := "\n✓ " + result
+			inserted := "\n✓ " + sanitizeResponseForDoc(result)
 			requests = append(requests,
 				&docs.Request{UpdateTextStyle: &docs.UpdateTextStyleRequest{Range: &docs.Range{StartIndex: block.startIndex, EndIndex: block.endIndex}, TextStyle: &docs.TextStyle{Bold: true}, Fields: "bold"}},
 				&docs.Request{InsertText: &docs.InsertTextRequest{Location: &docs.Location{Index: block.endIndex}, Text: inserted}},
@@ -179,7 +196,7 @@ func buildSyncRequests(ctx context.Context, doneStartIndex, doneEndIndex int64, 
 		processStart := time.Now()
 		response := GetAnswer(ctx, text, source)
 		LoggerFrom(ctx).Info("input processed", "duration_ms", time.Since(processStart).Milliseconds())
-		inserted := "\n→ " + response
+		inserted := "\n→ " + sanitizeResponseForDoc(response)
 		requests = append(requests,
 			&docs.Request{UpdateTextStyle: &docs.UpdateTextStyleRequest{Range: &docs.Range{StartIndex: block.startIndex, EndIndex: block.endIndex}, TextStyle: &docs.TextStyle{Bold: true}, Fields: "bold"}},
 			&docs.Request{InsertText: &docs.InsertTextRequest{Location: &docs.Location{Index: block.endIndex}, Text: inserted}},
@@ -200,6 +217,7 @@ func syncApplyBatchUpdate(docsService *docs.Service, documentID string, requests
 func handleSync(w http.ResponseWriter, r *http.Request) {
 	startTime := time.Now()
 	ctx := r.Context()
+	ctx = WithSyncInProgress(ctx) // don't forward logs to doc during sync; appends would shift indices
 
 	ctx, span := StartSpan(ctx, "sync.gdoc")
 	defer span.End()
@@ -272,7 +290,23 @@ func handleSync(w http.ResponseWriter, r *http.Request) {
 	LoggerFrom(ctx).Info("found 'done.' trigger, processing document")
 
 	block := collectSyncBlock(doc, doneEndIndex)
-	requests, entriesAdded, questionsAnswered, actionsExecuted := buildSyncRequests(ctx, doneStartIndex, doneEndIndex, block)
+	blockToProcess := block
+	if block != nil && strings.TrimSpace(block.text) != "" {
+		h := sha256.Sum256([]byte(block.text))
+		blockHash := hex.EncodeToString(h[:])
+		fsClient, err := GetFirestoreClient(ctx)
+		if err == nil && fsClient != nil {
+			stateRef := fsClient.Collection(SystemCollection).Doc(syncStateDocument)
+			stateDoc, err := stateRef.Get(ctx)
+			if err == nil && stateDoc.Exists() {
+				if lastHash, ok := stateDoc.Data()["last_block_hash"].(string); ok && lastHash == blockHash {
+					LoggerFrom(ctx).Info("sync skipped", "reason", "duplicate block (already processed)")
+					blockToProcess = nil
+				}
+			}
+		}
+	}
+	requests, entriesAdded, questionsAnswered, actionsExecuted := buildSyncRequests(ctx, doneStartIndex, doneEndIndex, blockToProcess)
 
 	if len(requests) > 0 {
 		updateStart := time.Now()
@@ -284,6 +318,20 @@ func handleSync(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		LoggerFrom(ctx).Debug("doc updated", "duration_ms", time.Since(updateStart).Milliseconds())
+		if blockToProcess != nil && strings.TrimSpace(blockToProcess.text) != "" {
+			h := sha256.Sum256([]byte(blockToProcess.text))
+			blockHash := hex.EncodeToString(h[:])
+			fsClient, err := GetFirestoreClient(ctx)
+			if err == nil && fsClient != nil {
+				_, err = fsClient.Collection(SystemCollection).Doc(syncStateDocument).Set(ctx, map[string]interface{}{
+					"last_block_hash":   blockHash,
+					"last_processed_at": time.Now(),
+				})
+				if err != nil {
+					LoggerFrom(ctx).Warn("failed to store sync_state", "error", err)
+				}
+			}
+		}
 	}
 
 	totalTime := time.Since(startTime)
@@ -307,6 +355,7 @@ func handleSync(w http.ResponseWriter, r *http.Request) {
 const (
 	syncLockCollection = "system"
 	syncLockDocument   = "sync_lock"
+	syncStateDocument  = "sync_state"
 	syncLockTimeout    = 15 * time.Minute
 )
 

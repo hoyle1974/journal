@@ -6,6 +6,18 @@ import (
 	"unicode/utf8"
 )
 
+// Display length for timestamps: date-only (YYYY-MM-DD) vs datetime (YYYY-MM-DDTHH:MM:SS).
+const (
+	DateDisplayLen     = 10
+	DateTimeDisplayLen = 19
+)
+
+// TruncateTimestamp truncates ts for display so it fits date (10) or datetime (19) format.
+// Use with DateDisplayLen or DateTimeDisplayLen. Safe for multi-byte runes.
+func TruncateTimestamp(ts string, maxLen int) string {
+	return SafeTruncate(ts, maxLen)
+}
+
 // FormatEntriesForContext formats entries into a readable string for the LLM context.
 func FormatEntriesForContext(entries []Entry, maxChars int) string {
 	if len(entries) == 0 {

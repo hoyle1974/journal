@@ -2,10 +2,10 @@ package jot
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
-	"sync/atomic"
 
 	"cloud.google.com/go/firestore"
 	"github.com/google/generative-ai-go/genai"
@@ -30,7 +30,7 @@ func GetApp(ctx context.Context) *App {
 }
 
 // App holds runtime dependencies (Firestore, Gemini, Logger, worker pools).
-// It is created once (lazy on first request) and attached to the request context.
+// It is created once by InitDefaultApp at startup and attached to the request context.
 type App struct {
 	Logger *slog.Logger
 
@@ -141,42 +141,35 @@ func (a *App) WaitForBackgroundTasks() {
 }
 
 var (
-	defaultApp   *App
+	defaultApp     *App
 	defaultAppOnce sync.Once
-	defaultAppErr error
+	defaultAppErr  error
 )
 
-// getOrCreateApp returns the process-wide App, creating it on first call (lazy init).
+// errAppNotInitialized is returned by getOrCreateApp when the app was never initialized via InitDefaultApp.
+var errAppNotInitialized = errors.New("app not initialized: call InitDefaultApp at startup")
+
+// getOrCreateApp returns the process-wide App. It does not create the app; call InitDefaultApp at startup.
 func getOrCreateApp(ctx context.Context) (*App, error) {
-	defaultAppOnce.Do(func() {
-		defaultApp, defaultAppErr = NewApp(ctx)
-	})
-	return defaultApp, defaultAppErr
-}
-
-// defaultAppReady is 1 once the app has been created by a request (JotAPI). Used so the gdoc appender
-// never calls GetDefaultApp() during init (e.g. when initTracing() logs), which would trigger
-// Firestore/Gemini setup before the server listens and cause Cloud Run startup timeout.
-var defaultAppReady uint32
-
-// MarkDefaultAppReady is called after the first successful getOrCreateApp from an HTTP request.
-// After this, SubmitGDocLog may use GetDefaultApp() when ctx has no App (e.g. regular .Info() calls).
-func MarkDefaultAppReady() {
-	atomic.StoreUint32(&defaultAppReady, 1)
+	if defaultApp != nil {
+		return defaultApp, defaultAppErr
+	}
+	return nil, errAppNotInitialized
 }
 
 // GetDefaultApp returns the process-wide App (e.g. for the gdoc log appender when ctx has no App).
-// Call only after MarkDefaultAppReady() has been called (i.e. after first request), to avoid
-// triggering heavy init during package init.
+// Returns errAppNotInitialized if InitDefaultApp was never called or failed.
 func GetDefaultApp() (*App, error) {
 	return getOrCreateApp(context.Background())
 }
 
-// InitDefaultApp initializes the process-wide App (e.g. for pre-warming in local server).
-// Safe to call from a goroutine; subsequent JotAPI requests will use the same App.
+// InitDefaultApp initializes the process-wide App. Must be called at startup before serving (e.g. in main or init).
+// Subsequent calls are no-ops; returns the error from the first run if initialization failed.
 func InitDefaultApp(ctx context.Context) error {
-	_, err := getOrCreateApp(ctx)
-	return err
+	defaultAppOnce.Do(func() {
+		defaultApp, defaultAppErr = NewApp(ctx)
+	})
+	return defaultAppErr
 }
 
 // NewApp creates a new App with Firestore client, Gemini client, and worker pools.

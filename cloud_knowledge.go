@@ -118,26 +118,50 @@ func UpsertKnowledge(ctx context.Context, content, nodeType, metadata string) (s
 
 	var nodeUUID string
 	if err == nil && doc != nil {
-		// Found a very similar existing node - update it
-		nodeUUID = doc.Ref.ID
-		LoggerFrom(ctx).Info("updating existing knowledge node", "uuid", nodeUUID)
-
-		_, err = client.Collection(KnowledgeCollection).Doc(nodeUUID).Set(ctx, map[string]interface{}{
-			"content":             content,
-			"node_type":           nodeType,
-			"metadata":            metaToStore,
-			"embedding":           firestore.Vector32(vector),
-			"timestamp":           timestamp,
-			"significance_weight": 0.5,
-			"domain":              "thought",
-			"last_recalled_at":    timestamp,
-		})
-		if err != nil {
-			LoggerFrom(ctx).Error("failed to update knowledge node", "error", err)
-			span.RecordError(err)
-			return "", err
+		existingContent := getStringField(doc.Data(), "content")
+		action, collErr := EvaluateFactCollision(ctx, content, existingContent)
+		if collErr != nil {
+			LoggerFrom(ctx).Warn("fact collision check failed, inserting new node", "error", collErr)
+			action = "insert"
 		}
-		LoggerFrom(ctx).Info("knowledge node updated", "uuid", nodeUUID)
+		if action == "update" {
+			nodeUUID = doc.Ref.ID
+			LoggerFrom(ctx).Info("updating existing knowledge node", "uuid", nodeUUID)
+			_, err = client.Collection(KnowledgeCollection).Doc(nodeUUID).Set(ctx, map[string]interface{}{
+				"content":             content,
+				"node_type":           nodeType,
+				"metadata":            metaToStore,
+				"embedding":           firestore.Vector32(vector),
+				"timestamp":           timestamp,
+				"significance_weight": 0.5,
+				"domain":              "thought",
+				"last_recalled_at":    timestamp,
+			})
+			if err != nil {
+				LoggerFrom(ctx).Error("failed to update knowledge node", "error", err)
+				span.RecordError(err)
+				return "", err
+			}
+			LoggerFrom(ctx).Info("knowledge node updated", "uuid", nodeUUID)
+		} else {
+			nodeUUID = GenerateUUID()
+			_, err = client.Collection(KnowledgeCollection).Doc(nodeUUID).Set(ctx, map[string]interface{}{
+				"content":             content,
+				"node_type":           nodeType,
+				"metadata":            metaToStore,
+				"embedding":           firestore.Vector32(vector),
+				"timestamp":           timestamp,
+				"significance_weight": 0.5,
+				"domain":              "thought",
+				"last_recalled_at":    timestamp,
+			})
+			if err != nil {
+				LoggerFrom(ctx).Error("failed to save knowledge node", "error", err)
+				span.RecordError(err)
+				return "", err
+			}
+			LoggerFrom(ctx).Info("knowledge node created", "uuid", nodeUUID)
+		}
 	} else {
 		// No similar node found - create new
 		nodeUUID = GenerateUUID()
@@ -215,8 +239,19 @@ func UpsertSemanticMemory(ctx context.Context, content, nodeType, domain string,
 
 	var nodeUUID string
 	if err == nil && doc != nil {
-		nodeUUID = doc.Ref.ID
-		_, err = client.Collection(KnowledgeCollection).Doc(nodeUUID).Set(ctx, data)
+		existingContent := getStringField(doc.Data(), "content")
+		action, collErr := EvaluateFactCollision(ctx, content, existingContent)
+		if collErr != nil {
+			LoggerFrom(ctx).Warn("fact collision check failed, inserting new node", "error", collErr)
+			action = "insert"
+		}
+		if action == "update" {
+			nodeUUID = doc.Ref.ID
+			_, err = client.Collection(KnowledgeCollection).Doc(nodeUUID).Set(ctx, data)
+		} else {
+			nodeUUID = GenerateUUID()
+			_, err = client.Collection(KnowledgeCollection).Doc(nodeUUID).Set(ctx, data)
+		}
 	} else {
 		nodeUUID = GenerateUUID()
 		_, err = client.Collection(KnowledgeCollection).Doc(nodeUUID).Set(ctx, data)
@@ -303,51 +338,34 @@ func SearchKnowledgeNodes(ctx context.Context, keywords string, limit int) ([]Kn
 		return nil, nil
 	}
 
-	iter := client.Collection(KnowledgeCollection).
+	query := client.Collection(KnowledgeCollection).
 		OrderBy("timestamp", firestore.Desc).
-		Limit(500).
-		Documents(ctx)
-	defer iter.Stop()
-
-	var nodes []KnowledgeNode
-
-	for {
-		doc, err := iter.Next()
-		if err == iterator.Done {
-			break
-		}
-		if err != nil {
-			return nil, err
-		}
-
+		Limit(500)
+	nodes, err := QueryDocuments(ctx, query, func(doc *firestore.DocumentSnapshot) (KnowledgeNode, error) {
 		data := doc.Data()
 		content := getStringField(data, "content")
 		metadata := getStringField(data, "metadata")
 		contentLower := strings.ToLower(content)
 		metadataLower := strings.ToLower(metadata)
-
-		allMatch := true
 		for _, kw := range keywordsLower {
 			if !strings.Contains(contentLower, kw) && !strings.Contains(metadataLower, kw) {
-				allMatch = false
-				break
+				return KnowledgeNode{}, fmt.Errorf("skip")
 			}
 		}
-
-		if allMatch {
-			n := KnowledgeNode{
-				UUID:            doc.Ref.ID,
-				Content:         content,
-				NodeType:        getStringField(data, "node_type"),
-				Metadata:        metadata,
-				Timestamp:       getStringField(data, "timestamp"),
-				JournalEntryIDs: getStringSliceField(data, "journal_entry_ids"),
-			}
-			nodes = append(nodes, n)
-			if len(nodes) >= limit {
-				break
-			}
-		}
+		return KnowledgeNode{
+			UUID:            doc.Ref.ID,
+			Content:         content,
+			NodeType:        getStringField(data, "node_type"),
+			Metadata:        metadata,
+			Timestamp:       getStringField(data, "timestamp"),
+			JournalEntryIDs: getStringSliceField(data, "journal_entry_ids"),
+		}, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(nodes) > limit {
+		nodes = nodes[:limit]
 	}
 	return nodes, nil
 }
@@ -542,35 +560,25 @@ func GetActiveSignals(ctx context.Context, limit int) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	iter := client.Collection(KnowledgeCollection).
+	query := client.Collection(KnowledgeCollection).
 		Where("domain", "==", "selfmodel").
 		Where("node_type", "==", "thought").
 		OrderBy("timestamp", firestore.Desc).
-		Limit(limit).
-		Documents(ctx)
-	defer iter.Stop()
-
-	var signals []string
-	for {
-		doc, err := iter.Next()
-		if err == iterator.Done {
-			break
-		}
-		if err != nil {
-			return "", WrapFirestoreIndexError(err)
-		}
+		Limit(limit)
+	signals, err := QueryDocuments(ctx, query, func(doc *firestore.DocumentSnapshot) (string, error) {
 		data := doc.Data()
 		content := getStringField(data, "content")
-		if content != "" {
-			ts := getStringField(data, "timestamp")
-			if len(ts) > 19 {
-				ts = ts[:19]
-			}
-			if ts == "" {
-				ts = "(no date)"
-			}
-			signals = append(signals, fmt.Sprintf("- [%s] %s", ts, content))
+		if content == "" {
+			return "", fmt.Errorf("skip")
 		}
+		ts := TruncateTimestamp(getStringField(data, "timestamp"), DateTimeDisplayLen)
+		if ts == "" {
+			ts = "(no date)"
+		}
+		return fmt.Sprintf("- [%s] %s", ts, content), nil
+	})
+	if err != nil {
+		return "", WrapFirestoreIndexError(err)
 	}
 	if len(signals) == 0 {
 		return "", nil

@@ -62,10 +62,7 @@ func AnalyzeJournalEntry(ctx context.Context, entryContent, entryUUID, entryTime
 		return nil, err
 	}
 
-	entryDate := entryTimestamp
-	if len(entryDate) > 10 {
-		entryDate = entryDate[:10]
-	}
+	entryDate := TruncateTimestamp(entryTimestamp, DateDisplayLen)
 	if entryDate == "" {
 		entryDate = "unknown"
 	}
@@ -113,32 +110,13 @@ func AnalyzeJournalEntry(ctx context.Context, entryContent, entryUUID, entryTime
 	}
 
 	jsonText := extractTextFromResponse(resp)
-	var analysis JournalAnalysis
-	if err := json.Unmarshal([]byte(jsonText), &analysis); err != nil {
-		if err := llmjson.RepairAndUnmarshal(jsonText, &analysis); err != nil {
-			partial, _ := llmjson.PartialUnmarshalObject(jsonText, []string{"summary", "mood", "tags", "entities", "open_loops"})
-			if len(partial) > 0 {
-				if raw, ok := partial["summary"]; ok && len(raw) > 0 {
-					_ = json.Unmarshal(raw, &analysis.Summary)
-				}
-				if raw, ok := partial["mood"]; ok && len(raw) > 0 {
-					_ = json.Unmarshal(raw, &analysis.Mood)
-				}
-				if raw, ok := partial["tags"]; ok && len(raw) > 0 {
-					_ = json.Unmarshal(raw, &analysis.Tags)
-				}
-				if raw, ok := partial["open_loops"]; ok && len(raw) > 0 {
-					_ = parseOpenLoops(raw, &analysis.OpenLoops)
-				}
-				if raw, ok := partial["entities"]; ok && len(raw) > 0 {
-					_ = json.Unmarshal(raw, &analysis.Entities)
-				}
-			}
-			if analysis.Summary == "" && analysis.Mood == "" && len(analysis.Tags) == 0 && len(analysis.Entities) == 0 && len(analysis.OpenLoops) == 0 {
-				LoggerFrom(ctx).Warn("failed to parse journal analysis response", "error", err)
-				return nil, fmt.Errorf("journal analysis parse: %w", err)
-			}
+	analysis, parseErr := llmjson.ParseLLMResponse[JournalAnalysis](jsonText, []string{"summary", "mood", "tags", "entities", "open_loops"})
+	if analysis == nil {
+		if parseErr == nil {
+			parseErr = fmt.Errorf("parse failed")
 		}
+		LoggerFrom(ctx).Warn("failed to parse journal analysis response", "error", parseErr)
+		return nil, fmt.Errorf("journal analysis parse: %w", parseErr)
 	}
 	// Consistency guardrail: ensure every entity and open_loop has source_id; normalize entity status
 	for i := range analysis.Entities {
@@ -153,7 +131,7 @@ func AnalyzeJournalEntry(ctx context.Context, entryContent, entryUUID, entryTime
 		}
 	}
 	analysis.SourceID = entryUUID
-	return &analysis, nil
+	return analysis, nil
 }
 
 // NormalizeEntityStatus maps LLM output to canonical status (Planned, In-Progress, Stalled, Completed).

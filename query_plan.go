@@ -107,17 +107,12 @@ func CreateAndSavePlan(ctx context.Context, goal string) (string, error) {
 
 // parsePlanJSON parses JSON text into a GeneratedPlan. Exported for testing.
 func parsePlanJSON(jsonText string) (*GeneratedPlan, error) {
-	var plan GeneratedPlan
-	if err := json.Unmarshal([]byte(jsonText), &plan); err != nil {
-		if err := llmjson.RepairAndUnmarshal(jsonText, &plan); err != nil {
-			partial, _ := llmjson.PartialUnmarshalObject(jsonText, []string{"phases"})
-			if raw, ok := partial["phases"]; ok && len(raw) > 0 {
-				_ = json.Unmarshal(raw, &plan.Phases)
-			}
-			if len(plan.Phases) == 0 {
-				return nil, fmt.Errorf("failed to parse plan JSON: %w", err)
-			}
+	plan, parseErr := llmjson.ParseLLMResponse[GeneratedPlan](jsonText, []string{"phases"})
+	if plan == nil {
+		if parseErr == nil {
+			parseErr = fmt.Errorf("parse failed")
 		}
+		return nil, fmt.Errorf("failed to parse plan JSON: %w", parseErr)
 	}
-	return &plan, nil
+	return plan, nil
 }

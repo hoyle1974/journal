@@ -271,6 +271,35 @@ type GenConfig struct {
 	ResponseMIMEType string
 }
 
+const factCollisionSystemPrompt = `You are a logic engine. Compare New Fact to Existing Fact. If they mean the exact same thing or New Fact is a direct update to Existing Fact, return 'update'. If they contradict each other or refer to different specific details, return 'insert'. If Existing Fact is empty, return 'update'. Reply with ONLY 'update' or 'insert'.`
+
+// EvaluateFactCollision decides whether the new fact should overwrite the existing one (update) or be stored as a new node (insert).
+// Used to avoid semantic collisions when vector similarity is high but meanings differ (e.g. "Jack likes X" vs "Jack hates X").
+// On LLM error, callers should default to "insert" to avoid data loss.
+func EvaluateFactCollision(ctx context.Context, newFact, existingFact string) (action string, err error) {
+	ctx, span := StartSpan(ctx, "gemini.evaluate_fact_collision")
+	defer span.End()
+
+	userPrompt := fmt.Sprintf("New Fact:\n%s\n\nExisting Fact:\n%s",
+		WrapAsUserData(newFact), WrapAsUserData(existingFact))
+
+	text, err := GenerateContentSimple(ctx, factCollisionSystemPrompt, userPrompt, &GenConfig{
+		MaxOutputTokens: 16,
+		ModelOverride:   GeminiModel,
+	})
+	if err != nil {
+		span.RecordError(err)
+		return "", err
+	}
+
+	span.SetAttributes(map[string]string{"response": strings.TrimSpace(text)})
+	trimmed := strings.ToLower(strings.TrimSpace(text))
+	if strings.Contains(trimmed, "update") {
+		return "update", nil
+	}
+	return "insert", nil
+}
+
 // llmQuotaBillingKeywords match Gemini/Google API error messages for rate limit, quota, or billing.
 var llmQuotaBillingKeywords = []string{
 	"429", "resource_exhausted", "RESOURCE_EXHAUSTED", "quota", "rate limit", "rate_limit",

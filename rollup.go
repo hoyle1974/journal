@@ -11,7 +11,6 @@ import (
 	"github.com/google/generative-ai-go/genai"
 	"github.com/jackstrohm/jot/internal/prompts"
 	"github.com/jackstrohm/jot/llmjson"
-	"google.golang.org/api/iterator"
 )
 
 const (
@@ -164,32 +163,25 @@ func GetWeeklySummaryNodesInRange(ctx context.Context, startDate, endDate string
 	if len(endDate) == 10 {
 		endDate = endDate + "T23:59:59"
 	}
-	iter := client.Collection(KnowledgeCollection).
+	query := client.Collection(KnowledgeCollection).
 		Where("node_type", "==", nodeTypeWeeklySummary).
 		Where("timestamp", ">=", startDate).
 		Where("timestamp", "<=", endDate).
 		OrderBy("timestamp", firestore.Asc).
-		Limit(limit).
-		Documents(ctx)
-	defer iter.Stop()
-	var nodes []KnowledgeNode
-	for {
-		doc, err := iter.Next()
-		if err == iterator.Done {
-			break
-		}
-		if err != nil {
-			return nil, WrapFirestoreIndexError(err)
-		}
+		Limit(limit)
+	nodes, err := QueryDocuments(ctx, query, func(doc *firestore.DocumentSnapshot) (KnowledgeNode, error) {
 		data := doc.Data()
-		nodes = append(nodes, KnowledgeNode{
+		return KnowledgeNode{
 			UUID:            doc.Ref.ID,
 			Content:         getStringField(data, "content"),
 			NodeType:        getStringField(data, "node_type"),
 			Metadata:        getStringField(data, "metadata"),
 			Timestamp:       getStringField(data, "timestamp"),
 			JournalEntryIDs: getStringSliceField(data, "journal_entry_ids"),
-		})
+		}, nil
+	})
+	if err != nil {
+		return nil, WrapFirestoreIndexError(err)
 	}
 	return nodes, nil
 }

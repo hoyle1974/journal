@@ -4,6 +4,8 @@ package llmjson
 
 import (
 	"encoding/json"
+	"errors"
+	"reflect"
 	"regexp"
 	"strings"
 )
@@ -73,6 +75,54 @@ func RepairAndUnmarshal(text string, v interface{}) error {
 	repaired := Repair(text)
 	if err := json.Unmarshal([]byte(repaired), v); err != nil {
 		return err
+	}
+	return nil
+}
+
+// ParseLLMResponse tries json.Unmarshal, then RepairAndUnmarshal, then PartialUnmarshalObject
+// with reflection-based field mapping. requiredKeys are the top-level JSON keys to extract
+// when doing partial parse. Returns (*T, nil) on first successful path, or (nil, err) if all fail.
+func ParseLLMResponse[T any](text string, requiredKeys []string) (*T, error) {
+	var out T
+	if err := json.Unmarshal([]byte(text), &out); err == nil {
+		return &out, nil
+	}
+	if err := RepairAndUnmarshal(text, &out); err == nil {
+		return &out, nil
+	}
+	partial, _ := PartialUnmarshalObject(text, requiredKeys)
+	if len(partial) == 0 {
+		return nil, errors.New("llmjson: partial parse produced no keys")
+	}
+	if err := applyPartialToStruct(&out, partial); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// applyPartialToStruct sets fields on v (must be *struct) from partial by matching json tags.
+func applyPartialToStruct(v interface{}, partial map[string]json.RawMessage) error {
+	val := reflect.ValueOf(v)
+	if val.Kind() != reflect.Ptr || val.Elem().Kind() != reflect.Struct {
+		return nil
+	}
+	val = val.Elem()
+	typ := val.Type()
+	for i := 0; i < val.NumField(); i++ {
+		field := val.Field(i)
+		if !field.CanSet() {
+			continue
+		}
+		tag := typ.Field(i).Tag.Get("json")
+		if tag == "" || tag == "-" {
+			continue
+		}
+		key := strings.Split(tag, ",")[0]
+		raw, ok := partial[key]
+		if !ok || len(raw) == 0 {
+			continue
+		}
+		_ = json.Unmarshal(raw, field.Addr().Interface())
 	}
 	return nil
 }

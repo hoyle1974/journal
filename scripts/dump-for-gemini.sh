@@ -1,19 +1,21 @@
 #!/usr/bin/env bash
 # dump-for-gemini.sh — Output all code, scripts, and embedded prompts in a Gemini-parseable format.
-# Usage: ./scripts/dump-for-gemini.sh [--ignore-static] [repo_root]
-#   --ignore-static  omit internal/static/ (HTML and static.go)
-# Output: Each file preceded by "## path" and wrapped in a fenced code block with language hint.
+# Usage: ./scripts/dump-for-gemini.sh [--ignore-static] [--compact] [repo_root]
+#   --ignore-static  omit all embedded assets: .txt, .html, .json, .css, .svg, .yml, .yaml (and internal/static/)
+#   --compact        shorter delimiters (--- path ---) and collapse blank lines / trim trailing space (fewer tokens)
+# Output: Default = "## path" + fenced code block. With --compact = "--- path ---" + compacted content.
 
 set -euo pipefail
 
 IGNORE_STATIC=0
+COMPACT=0
 ROOT=""
 for arg in "$@"; do
-  if [[ "$arg" == --ignore-static ]]; then
-    IGNORE_STATIC=1
-  else
-    ROOT="$arg"
-  fi
+  case "$arg" in
+    --ignore-static) IGNORE_STATIC=1 ;;
+    --compact)       COMPACT=1 ;;
+    *)               ROOT="$arg" ;;
+  esac
 done
 ROOT="${ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 cd "$ROOT"
@@ -28,7 +30,8 @@ EXTS='\.go$|\.sh$|\.md$|\.txt$|\.html$|\.mod$|\.sum$'
 echo "# JOT codebase dump for Gemini"
 echo "# Generated: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "# Root: $ROOT"
-[[ "$IGNORE_STATIC" -eq 1 ]] && echo "# Options: --ignore-static (internal/static/ omitted)"
+[[ "$IGNORE_STATIC" -eq 1 ]] && echo "# Options: --ignore-static (embedded assets omitted: txt, html, json, css, svg, yml, yaml, internal/static/)"
+[[ "$COMPACT" -eq 1 ]] && echo "# Options: --compact (short delimiters, collapsed blanks, trimmed trailing space)"
 echo ""
 
 find . -type f \
@@ -46,21 +49,31 @@ find . -type f \
     cmd/jot/jot-go) continue ;;
   esac
   path="${f#./}"
-  [[ "$IGNORE_STATIC" -eq 1 && "$path" == internal/static/* ]] && continue
+  if [[ "$IGNORE_STATIC" -eq 1 ]]; then
+    [[ "$path" == internal/static/* ]] && continue
+    case "$path" in
+      *.txt|*.html|*.json|*.css|*.svg|*.yml|*.yaml) continue ;;
+    esac
+  fi
   if [[ ! -f "$path" ]]; then continue; fi
-  # Detect language for code block
-  lang="text"
-  case "$path" in
-    *.go)   lang="go" ;;
-    *.sh)   lang="shell" ;;
-    *.md)   lang="markdown" ;;
-    *.html) lang="html" ;;
-    *.mod|*.sum) lang="plaintext" ;;
-    *.txt)  lang="text" ;;
-  esac
-  echo ""
-  echo "## $path"
-  echo '```'"$lang"
-  cat "$path"
-  echo '```'
+  if [[ "$COMPACT" -eq 1 ]]; then
+    echo "--- $path ---"
+    sed 's/[[:space:]]*$//' "$path" | cat -s
+    echo ""
+  else
+    lang="text"
+    case "$path" in
+      *.go)   lang="go" ;;
+      *.sh)   lang="shell" ;;
+      *.md)   lang="markdown" ;;
+      *.html) lang="html" ;;
+      *.mod|*.sum) lang="plaintext" ;;
+      *.txt)  lang="text" ;;
+    esac
+    echo ""
+    echo "## $path"
+    echo '```'"$lang"
+    cat "$path"
+    echo '```'
+  fi
 done

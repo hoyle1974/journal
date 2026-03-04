@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"sync/atomic"
 	"time"
 	"unicode/utf16"
 
@@ -36,7 +35,7 @@ func SubmitSummaryGen(ctx context.Context, task func()) {
 // SubmitGDocLog submits a message to the Google Doc log pool.
 func SubmitGDocLog(ctx context.Context, msg string) {
 	app := GetApp(ctx)
-	if app == nil && atomic.LoadUint32(&defaultAppReady) != 0 {
+	if app == nil {
 		app, _ = GetDefaultApp()
 	}
 	if app != nil {

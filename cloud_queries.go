@@ -2,11 +2,11 @@ package jot
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
 	"cloud.google.com/go/firestore"
-	"google.golang.org/api/iterator"
 )
 
 // =============================================================================
@@ -62,31 +62,17 @@ func GetRecentQueries(ctx context.Context, limit int) ([]QueryLog, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	iter := client.Collection(QueriesCollection).
+	query := client.Collection(QueriesCollection).
 		OrderBy("timestamp", firestore.Desc).
-		Limit(limit).
-		Documents(ctx)
-	defer iter.Stop()
-
-	var queries []QueryLog
-	for {
-		doc, err := iter.Next()
-		if err == iterator.Done {
-			break
-		}
-		if err != nil {
-			return nil, err
-		}
-
+		Limit(limit)
+	return QueryDocuments(ctx, query, func(doc *firestore.DocumentSnapshot) (QueryLog, error) {
 		var q QueryLog
 		if err := doc.DataTo(&q); err != nil {
-			continue
+			return QueryLog{}, err
 		}
 		q.UUID = doc.Ref.ID
-		queries = append(queries, q)
-	}
-	return queries, nil
+		return q, nil
+	})
 }
 
 // SearchQueries searches past queries by keywords.
@@ -95,46 +81,29 @@ func SearchQueries(ctx context.Context, keywords string, limit int) ([]QueryLog,
 	if err != nil {
 		return nil, err
 	}
-
-	iter := client.Collection(QueriesCollection).
-		OrderBy("timestamp", firestore.Desc).
-		Limit(200).
-		Documents(ctx)
-	defer iter.Stop()
-
 	keywordsLower := strings.Fields(strings.ToLower(keywords))
-	var queries []QueryLog
-
-	for {
-		doc, err := iter.Next()
-		if err == iterator.Done {
-			break
-		}
-		if err != nil {
-			return nil, err
-		}
-
+	query := client.Collection(QueriesCollection).
+		OrderBy("timestamp", firestore.Desc).
+		Limit(200)
+	queries, err := QueryDocuments(ctx, query, func(doc *firestore.DocumentSnapshot) (QueryLog, error) {
 		var q QueryLog
 		if err := doc.DataTo(&q); err != nil {
-			continue
+			return QueryLog{}, err
 		}
-
 		questionLower := strings.ToLower(q.Question)
-		allMatch := true
 		for _, kw := range keywordsLower {
 			if !strings.Contains(questionLower, kw) {
-				allMatch = false
-				break
+				return QueryLog{}, fmt.Errorf("skip")
 			}
 		}
-
-		if allMatch {
-			q.UUID = doc.Ref.ID
-			queries = append(queries, q)
-			if len(queries) >= limit {
-				break
-			}
-		}
+		q.UUID = doc.Ref.ID
+		return q, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(queries) > limit {
+		queries = queries[:limit]
 	}
 	return queries, nil
 }
@@ -145,30 +114,20 @@ func GetRecentGapQueries(ctx context.Context, limit int) ([]QueryLog, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	iter := client.Collection(QueriesCollection).
+	query := client.Collection(QueriesCollection).
 		Where("is_gap", "==", true).
 		OrderBy("timestamp", firestore.Desc).
-		Limit(limit).
-		Documents(ctx)
-	defer iter.Stop()
-
-	var queries []QueryLog
-	for {
-		doc, err := iter.Next()
-		if err == iterator.Done {
-			break
-		}
-		if err != nil {
-			return nil, WrapFirestoreIndexError(err)
-		}
-
+		Limit(limit)
+	queries, err := QueryDocuments(ctx, query, func(doc *firestore.DocumentSnapshot) (QueryLog, error) {
 		var q QueryLog
 		if err := doc.DataTo(&q); err != nil {
-			continue
+			return QueryLog{}, err
 		}
 		q.UUID = doc.Ref.ID
-		queries = append(queries, q)
+		return q, nil
+	})
+	if err != nil {
+		return nil, WrapFirestoreIndexError(err)
 	}
 	return queries, nil
 }
@@ -187,30 +146,21 @@ func GetQueriesByDateRange(ctx context.Context, startDate, endDate string, limit
 		endDate = endDate + "T23:59:59"
 	}
 
-	iter := client.Collection(QueriesCollection).
+	query := client.Collection(QueriesCollection).
 		Where("timestamp", ">=", startDate).
 		Where("timestamp", "<=", endDate).
 		OrderBy("timestamp", firestore.Desc).
-		Limit(limit).
-		Documents(ctx)
-	defer iter.Stop()
-
-	var queries []QueryLog
-	for {
-		doc, err := iter.Next()
-		if err == iterator.Done {
-			break
-		}
-		if err != nil {
-			return nil, WrapFirestoreIndexError(err)
-		}
-
+		Limit(limit)
+	queries, err := QueryDocuments(ctx, query, func(doc *firestore.DocumentSnapshot) (QueryLog, error) {
 		var q QueryLog
 		if err := doc.DataTo(&q); err != nil {
-			continue
+			return QueryLog{}, err
 		}
 		q.UUID = doc.Ref.ID
-		queries = append(queries, q)
+		return q, nil
+	})
+	if err != nil {
+		return nil, WrapFirestoreIndexError(err)
 	}
 	return queries, nil
 }

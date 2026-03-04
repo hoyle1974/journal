@@ -205,10 +205,7 @@ func registerKnowledgeTools() {
 				return tools.Fail("Error loading entity: %v", err)
 			}
 			var parts []string
-			entityTs := full.Timestamp
-			if len(entityTs) > 19 {
-				entityTs = entityTs[:19]
-			}
+			entityTs := jot.TruncateTimestamp(full.Timestamp, jot.DateTimeDisplayLen)
 			if entityTs == "" {
 				entityTs = "(no date)"
 			}
@@ -239,10 +236,7 @@ func registerKnowledgeTools() {
 					if len(content) > 120 {
 						content = content[:117] + "..."
 					}
-					entryTs := e.Timestamp
-					if len(entryTs) > 19 {
-						entryTs = entryTs[:19]
-					}
+					entryTs := jot.TruncateTimestamp(e.Timestamp, jot.DateTimeDisplayLen)
 					if entryTs == "" {
 						entryTs = "(no date)"
 					}

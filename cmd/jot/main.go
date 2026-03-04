@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackstrohm/jot"
 	"github.com/jackstrohm/jot/internal/timeout"
 	"github.com/joho/godotenv"
 )
@@ -175,51 +176,50 @@ func parseTraceFlag(args []string) ([]string, bool) {
 // traceFlag is set when the user passes --trace or -t (parsed in main).
 var traceFlag bool
 
+// api wraps the API client; Do uses traceFlag and returns (result, headers, err). DoOrExit exits on error and prints trace when requested.
+type apiClient struct{}
+
+func (c *apiClient) Do(method, endpoint string, payload interface{}, timeout time.Duration) (map[string]interface{}, http.Header, error) {
+	if traceFlag {
+		return apiRequestWithHeaders(method, endpoint, payload, timeout, true)
+	}
+	result, err := apiRequest(method, endpoint, payload, timeout)
+	return result, nil, err
+}
+
+func (c *apiClient) DoOrExit(method, endpoint string, payload interface{}, timeout time.Duration) (map[string]interface{}, http.Header) {
+	result, headers, err := c.Do(method, endpoint, payload, timeout)
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		os.Exit(1)
+	}
+	if result == nil {
+		fmt.Println("Error: No response from API")
+		os.Exit(1)
+	}
+	if traceFlag && headers != nil {
+		printTraceInfo(headers)
+	}
+	return result, headers
+}
+
+var api = &apiClient{}
+
 // =============================================================================
 // COMMANDS
 // =============================================================================
 
 func cmdLog(content string) {
 	source := fmt.Sprintf("cli:%s", MachineName)
-
-	var err error
-	var headers http.Header
-	if traceFlag {
-		_, headers, err = apiRequestWithHeaders("POST", "/log", map[string]string{
-			"content": content,
-			"source":  source,
-		}, RequestTimeout, true)
-	} else {
-		_, err = apiRequest("POST", "/log", map[string]string{
-			"content": content,
-			"source":  source,
-		}, RequestTimeout)
-	}
-	if err != nil {
-		fmt.Printf("Error: %v\n", err)
-		os.Exit(1)
-	}
-	if traceFlag && headers != nil {
-		printTraceInfo(headers)
-	}
+	api.DoOrExit("POST", "/log", map[string]string{"content": content, "source": source}, RequestTimeout)
 	fmt.Println("Logged.")
 }
 
 func cmdQuery(question string) {
-	var result map[string]interface{}
-	var err error
-	var headers http.Header
-	if traceFlag {
-		result, headers, err = apiRequestWithHeaders("POST", "/query", map[string]string{
-			"question": question,
-			"source":   fmt.Sprintf("cli:%s", MachineName),
-		}, time.Duration(timeout.QuerySeconds)*time.Second, true)
-	} else {
-		result, err = apiRequest("POST", "/query", map[string]string{
-			"question": question,
-			"source":   fmt.Sprintf("cli:%s", MachineName),
-		}, time.Duration(timeout.QuerySeconds)*time.Second)
-	}
+	result, headers, err := api.Do("POST", "/query", map[string]string{
+		"question": question,
+		"source":   fmt.Sprintf("cli:%s", MachineName),
+	}, time.Duration(timeout.QuerySeconds)*time.Second)
 	if err != nil {
 		if err.Error() == "offline" {
 			fmt.Println("Error: Cannot query while offline. Queries require cloud connection.")
@@ -228,7 +228,6 @@ func cmdQuery(question string) {
 		}
 		os.Exit(1)
 	}
-
 	if result == nil {
 		fmt.Println("Error: No response from API")
 		os.Exit(1)
@@ -279,22 +278,7 @@ func cmdQuery(question string) {
 
 func cmdSync() {
 	fmt.Println("Syncing Google Doc...")
-	var result map[string]interface{}
-	var err error
-	var headers http.Header
-	if traceFlag {
-		result, headers, err = apiRequestWithHeaders("POST", "/sync", nil, 300*time.Second, true)
-	} else {
-		result, err = apiRequest("POST", "/sync", nil, 300*time.Second)
-	}
-	if err != nil {
-		fmt.Printf("  Error: %v\n", err)
-		return
-	}
-	if result == nil {
-		fmt.Printf("  Error: No response from API\n")
-		return
-	}
+	result, headers := api.DoOrExit("POST", "/sync", nil, 300*time.Second)
 	if traceFlag && headers != nil {
 		printTraceInfo(headers)
 	}
@@ -319,25 +303,7 @@ func cmdSync() {
 }
 
 func cmdEntries(limit int) {
-	var result map[string]interface{}
-	var err error
-	var headers http.Header
-	if traceFlag {
-		result, headers, err = apiRequestWithHeaders("GET", fmt.Sprintf("/entries?limit=%d", limit), nil, RequestTimeout, true)
-	} else {
-		result, err = apiRequest("GET", fmt.Sprintf("/entries?limit=%d", limit), nil, RequestTimeout)
-	}
-	if err != nil {
-		fmt.Printf("Error: %v\n", err)
-		os.Exit(1)
-	}
-	if result == nil {
-		fmt.Println("Error: No response from API")
-		os.Exit(1)
-	}
-	if traceFlag && headers != nil {
-		printTraceInfo(headers)
-	}
+	result, _ := api.DoOrExit("GET", fmt.Sprintf("/entries?limit=%d", limit), nil, RequestTimeout)
 	entriesRaw, ok := result["entries"].([]interface{})
 	if !ok || len(entriesRaw) == 0 {
 		fmt.Println("No entries found.")
@@ -349,10 +315,7 @@ func cmdEntries(limit int) {
 		if !ok {
 			continue
 		}
-		ts := jsonStr(entry, "timestamp")
-		if len(ts) > 19 {
-			ts = ts[:19]
-		}
+		ts := jot.TruncateTimestamp(jsonStr(entry, "timestamp"), jot.DateTimeDisplayLen)
 		source := jsonStr(entry, "source")
 		content := jsonStr(entry, "content")
 
@@ -368,14 +331,7 @@ func cmdEntries(limit int) {
 func cmdEdit(limit int) {
 	firstFetch := true
 	for {
-		var result map[string]interface{}
-		var err error
-		var headers http.Header
-		if traceFlag {
-			result, headers, err = apiRequestWithHeaders("GET", fmt.Sprintf("/entries?limit=%d", limit), nil, RequestTimeout, true)
-		} else {
-			result, err = apiRequest("GET", fmt.Sprintf("/entries?limit=%d", limit), nil, RequestTimeout)
-		}
+		result, headers, err := api.Do("GET", fmt.Sprintf("/entries?limit=%d", limit), nil, RequestTimeout)
 		if err != nil {
 			fmt.Printf("Error: %v\n", err)
 			return
@@ -406,10 +362,7 @@ func cmdEdit(limit int) {
 			}
 			entries = append(entries, entry)
 
-			ts := jsonStr(entry, "timestamp")
-			if len(ts) > 19 {
-				ts = ts[:19]
-			}
+			ts := jot.TruncateTimestamp(jsonStr(entry, "timestamp"), jot.DateTimeDisplayLen)
 			content := jsonStr(entry, "content")
 			if len(content) > 60 {
 				content = content[:57] + "..."
@@ -444,7 +397,7 @@ func cmdEdit(limit int) {
 				fmt.Println("Invalid entry")
 				continue
 			}
-			_, err = apiRequest("DELETE", "/entries", map[string]interface{}{
+			_, _, err = api.Do("DELETE", "/entries", map[string]interface{}{
 				"uuids": []string{entryUUID},
 			}, RequestTimeout)
 			if err != nil {
@@ -475,14 +428,7 @@ func cmdEdit(limit int) {
 
 func cmdDream() {
 	fmt.Println("Running Dreamer (consolidating last 24h into semantic memory)...")
-	var result map[string]interface{}
-	var err error
-	var headers http.Header
-	if traceFlag {
-		result, headers, err = apiRequestWithHeaders("POST", "/dream", nil, time.Duration(timeout.QuerySeconds)*time.Second, true)
-	} else {
-		result, err = apiRequest("POST", "/dream", nil, time.Duration(timeout.QuerySeconds)*time.Second)
-	}
+	result, headers, err := api.Do("POST", "/dream", nil, time.Duration(timeout.QuerySeconds)*time.Second)
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
 		if strings.Contains(err.Error(), "429") || strings.Contains(err.Error(), "Rate limit") || strings.Contains(err.Error(), "quota") {
@@ -505,15 +451,7 @@ func cmdDream() {
 
 func cmdRollup() {
 	fmt.Println("Running roll-up (weekly + monthly summaries)...")
-	result, err := apiRequest("POST", "/rollup", nil, time.Duration(timeout.QuerySeconds)*time.Second)
-	if err != nil {
-		fmt.Printf("Error: %v\n", err)
-		os.Exit(1)
-	}
-	if result == nil {
-		fmt.Println("Error: No response from API")
-		os.Exit(1)
-	}
+	result, _ := api.DoOrExit("POST", "/rollup", nil, time.Duration(timeout.QuerySeconds)*time.Second)
 	weekly := int(jsonFloat(result, "weekly_entries_rolled"))
 	monthly := int(jsonFloat(result, "monthly_weekly_nodes"))
 	fmt.Printf("Weekly entries rolled: %d | Monthly (weekly nodes): %d\n", weekly, monthly)
@@ -521,14 +459,7 @@ func cmdRollup() {
 
 func cmdJanitor() {
 	fmt.Println("Running Janitor (garbage collection)...")
-	var result map[string]interface{}
-	var err error
-	var headers http.Header
-	if traceFlag {
-		result, headers, err = apiRequestWithHeaders("POST", "/janitor", nil, time.Duration(timeout.QuerySeconds)*time.Second, true)
-	} else {
-		result, err = apiRequest("POST", "/janitor", nil, time.Duration(timeout.QuerySeconds)*time.Second)
-	}
+	result, headers, err := api.Do("POST", "/janitor", nil, time.Duration(timeout.QuerySeconds)*time.Second)
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
 		if strings.Contains(err.Error(), "429") || strings.Contains(err.Error(), "Rate limit") || strings.Contains(err.Error(), "quota") {
@@ -560,18 +491,7 @@ func cmdJanitor() {
 
 func cmdPlan(goal string) {
 	fmt.Println("Generating plan (this takes a few seconds)...")
-	var result map[string]interface{}
-	var err error
-	var headers http.Header
-	if traceFlag {
-		result, headers, err = apiRequestWithHeaders("POST", "/plan", map[string]string{
-			"goal": goal,
-		}, time.Duration(timeout.QuerySeconds)*time.Second, true)
-	} else {
-		result, err = apiRequest("POST", "/plan", map[string]string{
-			"goal": goal,
-		}, time.Duration(timeout.QuerySeconds)*time.Second)
-	}
+	result, headers, err := api.Do("POST", "/plan", map[string]string{"goal": goal}, time.Duration(timeout.QuerySeconds)*time.Second)
 	if err != nil {
 		if err.Error() == "offline" {
 			fmt.Println("Error: Cannot generate plans while offline. Requires cloud connection.")

@@ -90,31 +90,17 @@ func GetEntries(ctx context.Context, limit int) ([]Entry, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	iter := client.Collection(EntriesCollection).
+	query := client.Collection(EntriesCollection).
 		OrderBy("timestamp", firestore.Desc).
-		Limit(limit).
-		Documents(ctx)
-	defer iter.Stop()
-
-	var entries []Entry
-	for {
-		doc, err := iter.Next()
-		if err == iterator.Done {
-			break
-		}
-		if err != nil {
-			return nil, err
-		}
-
+		Limit(limit)
+	return QueryDocuments(ctx, query, func(doc *firestore.DocumentSnapshot) (Entry, error) {
 		var e Entry
 		if err := doc.DataTo(&e); err != nil {
-			continue
+			return Entry{}, err
 		}
 		e.UUID = doc.Ref.ID
-		entries = append(entries, e)
-	}
-	return entries, nil
+		return e, nil
+	})
 }
 
 // GetEntriesAsc fetches entries from Firestore, ordered by timestamp ascending (oldest first).
@@ -124,31 +110,17 @@ func GetEntriesAsc(ctx context.Context, limit int) ([]Entry, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	iter := client.Collection(EntriesCollection).
+	query := client.Collection(EntriesCollection).
 		OrderBy("timestamp", firestore.Asc).
-		Limit(limit).
-		Documents(ctx)
-	defer iter.Stop()
-
-	var entries []Entry
-	for {
-		doc, err := iter.Next()
-		if err == iterator.Done {
-			break
-		}
-		if err != nil {
-			return nil, err
-		}
-
+		Limit(limit)
+	return QueryDocuments(ctx, query, func(doc *firestore.DocumentSnapshot) (Entry, error) {
 		var e Entry
 		if err := doc.DataTo(&e); err != nil {
-			continue
+			return Entry{}, err
 		}
 		e.UUID = doc.Ref.ID
-		entries = append(entries, e)
-	}
-	return entries, nil
+		return e, nil
+	})
 }
 
 // GetEntriesByDateRange fetches entries within a date range.
@@ -166,30 +138,21 @@ func GetEntriesByDateRange(ctx context.Context, startDate, endDate string, limit
 		endDate = endDate + "T23:59:59"
 	}
 
-	iter := client.Collection(EntriesCollection).
+	query := client.Collection(EntriesCollection).
 		Where("timestamp", ">=", startDate).
 		Where("timestamp", "<=", endDate).
 		OrderBy("timestamp", firestore.Desc).
-		Limit(limit).
-		Documents(ctx)
-	defer iter.Stop()
-
-	var entries []Entry
-	for {
-		doc, err := iter.Next()
-		if err == iterator.Done {
-			break
-		}
-		if err != nil {
-			return nil, WrapFirestoreIndexError(err)
-		}
-
+		Limit(limit)
+	entries, err := QueryDocuments(ctx, query, func(doc *firestore.DocumentSnapshot) (Entry, error) {
 		var e Entry
 		if err := doc.DataTo(&e); err != nil {
-			continue
+			return Entry{}, err
 		}
 		e.UUID = doc.Ref.ID
-		entries = append(entries, e)
+		return e, nil
+	})
+	if err != nil {
+		return nil, WrapFirestoreIndexError(err)
 	}
 	return entries, nil
 }
@@ -210,23 +173,12 @@ func GetEntriesWithAnalysisByDateRange(ctx context.Context, startDate, endDate s
 	if len(endDate) == 10 {
 		endDate = endDate + "T23:59:59"
 	}
-	iter := client.Collection(EntriesCollection).
+	query := client.Collection(EntriesCollection).
 		Where("timestamp", ">=", startDate).
 		Where("timestamp", "<=", endDate).
 		OrderBy("timestamp", firestore.Desc).
-		Limit(limit).
-		Documents(ctx)
-	defer iter.Stop()
-
-	var result []EntryWithAnalysis
-	for {
-		doc, err := iter.Next()
-		if err == iterator.Done {
-			break
-		}
-		if err != nil {
-			return nil, WrapFirestoreIndexError(err)
-		}
+		Limit(limit)
+	result, err := QueryDocuments(ctx, query, func(doc *firestore.DocumentSnapshot) (EntryWithAnalysis, error) {
 		data := doc.Data()
 		e := Entry{
 			UUID:      doc.Ref.ID,
@@ -248,7 +200,10 @@ func GetEntriesWithAnalysisByDateRange(ctx context.Context, startDate, endDate s
 				analysis = &a
 			}
 		}
-		result = append(result, EntryWithAnalysis{Entry: e, Analysis: analysis})
+		return EntryWithAnalysis{Entry: e, Analysis: analysis}, nil
+	})
+	if err != nil {
+		return nil, WrapFirestoreIndexError(err)
 	}
 	return result, nil
 }
@@ -259,46 +214,29 @@ func SearchEntries(ctx context.Context, keywords string, limit int) ([]Entry, er
 	if err != nil {
 		return nil, err
 	}
-
-	iter := client.Collection(EntriesCollection).
-		OrderBy("timestamp", firestore.Desc).
-		Limit(500).
-		Documents(ctx)
-	defer iter.Stop()
-
 	keywordsLower := strings.Fields(strings.ToLower(keywords))
-	var entries []Entry
-
-	for {
-		doc, err := iter.Next()
-		if err == iterator.Done {
-			break
-		}
-		if err != nil {
-			return nil, err
-		}
-
+	query := client.Collection(EntriesCollection).
+		OrderBy("timestamp", firestore.Desc).
+		Limit(500)
+	entries, err := QueryDocuments(ctx, query, func(doc *firestore.DocumentSnapshot) (Entry, error) {
 		var e Entry
 		if err := doc.DataTo(&e); err != nil {
-			continue
+			return Entry{}, err
 		}
-
 		contentLower := strings.ToLower(e.Content)
-		allMatch := true
 		for _, kw := range keywordsLower {
 			if !strings.Contains(contentLower, kw) {
-				allMatch = false
-				break
+				return Entry{}, fmt.Errorf("skip")
 			}
 		}
-
-		if allMatch {
-			e.UUID = doc.Ref.ID
-			entries = append(entries, e)
-			if len(entries) >= limit {
-				break
-			}
-		}
+		e.UUID = doc.Ref.ID
+		return e, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(entries) > limit {
+		entries = entries[:limit]
 	}
 	return entries, nil
 }
@@ -385,36 +323,26 @@ func GetEntriesBySource(ctx context.Context, sourceFilter string, limit int) ([]
 		return nil, err
 	}
 
-	iter := client.Collection(EntriesCollection).
-		OrderBy("timestamp", firestore.Desc).
-		Limit(500).
-		Documents(ctx)
-	defer iter.Stop()
-
 	sourceFilterLower := strings.ToLower(sourceFilter)
-	var entries []Entry
-
-	for {
-		doc, err := iter.Next()
-		if err == iterator.Done {
-			break
-		}
-		if err != nil {
-			return nil, err
-		}
-
+	query := client.Collection(EntriesCollection).
+		OrderBy("timestamp", firestore.Desc).
+		Limit(500)
+	entries, err := QueryDocuments(ctx, query, func(doc *firestore.DocumentSnapshot) (Entry, error) {
 		var e Entry
 		if err := doc.DataTo(&e); err != nil {
-			continue
+			return Entry{}, err
 		}
-
-		if strings.Contains(strings.ToLower(e.Source), sourceFilterLower) {
-			e.UUID = doc.Ref.ID
-			entries = append(entries, e)
-			if len(entries) >= limit {
-				break
-			}
+		if !strings.Contains(strings.ToLower(e.Source), sourceFilterLower) {
+			return Entry{}, fmt.Errorf("skip")
 		}
+		e.UUID = doc.Ref.ID
+		return e, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(entries) > limit {
+		entries = entries[:limit]
 	}
 	return entries, nil
 }
@@ -459,10 +387,7 @@ func GetEntryDates(ctx context.Context, entryIDs []string) (map[string]string, e
 		if err != nil || e == nil || e.Timestamp == "" {
 			continue
 		}
-		date := e.Timestamp
-		if len(date) > 10 {
-			date = date[:10]
-		}
+		date := TruncateTimestamp(e.Timestamp, DateDisplayLen)
 		result[id] = date
 	}
 	return result, nil
@@ -578,13 +503,12 @@ func QuerySimilarEntries(ctx context.Context, queryVector []float32, limit int) 
 		}
 
 		data := doc.Data()
-		e := Entry{
+		entries = append(entries, Entry{
 			UUID:      doc.Ref.ID,
 			Content:   getStringField(data, "content"),
 			Source:    getStringField(data, "source"),
 			Timestamp: getStringField(data, "timestamp"),
-		}
-		entries = append(entries, e)
+		})
 	}
 
 	span.SetAttributes(map[string]string{

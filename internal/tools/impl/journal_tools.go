@@ -232,9 +232,7 @@ func registerJournalTools() {
 					continue
 				}
 				entryDate := ew.Entry.Timestamp
-				if len(entryDate) > 10 {
-					entryDate = entryDate[:10]
-				}
+				entryDate = jot.TruncateTimestamp(entryDate, jot.DateDisplayLen)
 				for _, ent := range ew.Analysis.Entities {
 					if entityType != "" && strings.ToLower(ent.Type) != entityType {
 						continue

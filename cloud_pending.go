@@ -2,10 +2,10 @@ package jot
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"cloud.google.com/go/firestore"
-	"google.golang.org/api/iterator"
 )
 
 // PendingQuestion is a gap or contradiction detected during Dreamer synthesis, to be clarified by the user.
@@ -64,23 +64,13 @@ func GetUnresolvedPendingQuestions(ctx context.Context, limit int) ([]PendingQue
 		limit = 20
 	}
 	// Fetch by created_at desc and filter unresolved in memory to avoid composite index
-	iter := client.Collection(PendingQuestionsCollection).
+	query := client.Collection(PendingQuestionsCollection).
 		OrderBy("created_at", firestore.Desc).
-		Limit(100).
-		Documents(ctx)
-	defer iter.Stop()
-	var out []PendingQuestion
-	for {
-		doc, err := iter.Next()
-		if err == iterator.Done {
-			break
-		}
-		if err != nil {
-			return nil, WrapFirestoreIndexError(err)
-		}
+		Limit(100)
+	out, err := QueryDocuments(ctx, query, func(doc *firestore.DocumentSnapshot) (PendingQuestion, error) {
 		data := doc.Data()
 		if getStringField(data, "resolved_at") != "" {
-			continue
+			return PendingQuestion{}, fmt.Errorf("skip")
 		}
 		q := PendingQuestion{
 			UUID:       doc.Ref.ID,
@@ -92,10 +82,13 @@ func GetUnresolvedPendingQuestions(ctx context.Context, limit int) ([]PendingQue
 			Answer:     getStringField(data, "answer"),
 		}
 		q.SourceEntryIDs = getStringSliceField(data, "source_entry_ids")
-		out = append(out, q)
-		if len(out) >= limit {
-			break
-		}
+		return q, nil
+	})
+	if err != nil {
+		return nil, WrapFirestoreIndexError(err)
+	}
+	if len(out) > limit {
+		out = out[:limit]
 	}
 	return out, nil
 }

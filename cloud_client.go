@@ -7,6 +7,7 @@ import (
 
 	"cloud.google.com/go/firestore"
 	"github.com/google/uuid"
+	"google.golang.org/api/iterator"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -24,6 +25,28 @@ func WrapFirestoreIndexError(err error) error {
 		return err
 	}
 	return fmt.Errorf("Firestore query requires a composite index. Add the needed index to firestore.indexes.json and run: firebase deploy --only firestore:indexes — %w", err)
+}
+
+// QueryDocuments runs a Firestore query and maps each document with mapDoc. Skips documents for which mapDoc returns an error.
+func QueryDocuments[T any](ctx context.Context, query firestore.Query, mapDoc func(*firestore.DocumentSnapshot) (T, error)) ([]T, error) {
+	iter := query.Documents(ctx)
+	defer iter.Stop()
+	var results []T
+	for {
+		doc, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		t, err := mapDoc(doc)
+		if err != nil {
+			continue
+		}
+		results = append(results, t)
+	}
+	return results, nil
 }
 
 // GetFirestoreClient returns the Firestore client from the App in context.

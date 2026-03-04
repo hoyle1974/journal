@@ -1,8 +1,10 @@
 package jot
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -15,6 +17,10 @@ import (
 func init() {
 	functions.HTTP("JotAPI", JotAPI)
 	startRateLimitCleanup()
+	// Initialize app at cold start so JotAPI can use it; if this fails, first request will get 500.
+	if err := InitDefaultApp(context.Background()); err != nil {
+		log.Printf("init default app failed: %v", err)
+	}
 }
 
 // Public routes that don't require API key auth
@@ -56,11 +62,10 @@ func JotAPI(w http.ResponseWriter, r *http.Request) {
 
 	app, err := getOrCreateApp(ctx)
 	if err != nil {
-		Logger.Error("failed to create app", "error", err)
+		Logger.Error("app not available", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 		return
 	}
-	MarkDefaultAppReady() // allow gdoc appender to use GetDefaultApp() for logs that don't have ctx
 	ctx = WithApp(ctx, app)
 
 	// Ensure all background work completes before function returns

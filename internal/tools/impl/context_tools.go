@@ -150,10 +150,7 @@ func registerSystemEvolutionTools() {
 			if content == "" {
 				return tools.OK("System evolution audit exists but is empty. The next nightly run will populate it.")
 			}
-			auditTs := node.Timestamp
-			if len(auditTs) > 19 {
-				auditTs = auditTs[:19]
-			}
+			auditTs := jot.TruncateTimestamp(node.Timestamp, jot.DateTimeDisplayLen)
 			if auditTs == "" {
 				auditTs = "(no date)"
 			}

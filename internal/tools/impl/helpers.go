@@ -38,10 +38,7 @@ func formatKnowledgeNodes(ctx context.Context, nodes []jot.KnowledgeNode) string
 		if len(content) > 200 {
 			content = content[:197] + "..."
 		}
-		ts := n.Timestamp
-		if len(ts) > 19 {
-			ts = ts[:19]
-		}
+		ts := jot.TruncateTimestamp(n.Timestamp, jot.DateTimeDisplayLen)
 		if ts == "" {
 			ts = "(no date)"
 		}
@@ -78,10 +75,7 @@ func formatEntries(entries []jot.Entry) string {
 		if len(content) > 200 {
 			content = content[:197] + "..."
 		}
-		ts := e.Timestamp
-		if len(ts) > 19 {
-			ts = ts[:19]
-		}
+		ts := jot.TruncateTimestamp(e.Timestamp, jot.DateTimeDisplayLen)
 		if ts == "" {
 			ts = "(no date)"
 		}
@@ -103,17 +97,11 @@ func formatContexts(nodes []jot.KnowledgeNode, metas []jot.ContextMetadata) stri
 		if len(content) > 150 {
 			content = content[:147] + "..."
 		}
-		lastTouched := meta.LastTouched
-		if len(lastTouched) > 19 {
-			lastTouched = lastTouched[:19]
-		}
+		lastTouched := jot.TruncateTimestamp(meta.LastTouched, jot.DateTimeDisplayLen)
 		if lastTouched == "" {
 			lastTouched = "(no date)"
 		}
-		updated := n.Timestamp
-		if len(updated) > 19 {
-			updated = updated[:19]
-		}
+		updated := jot.TruncateTimestamp(n.Timestamp, jot.DateTimeDisplayLen)
 		if updated == "" {
 			updated = "(no date)"
 		}

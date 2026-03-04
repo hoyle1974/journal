@@ -688,33 +688,16 @@ func analyzeForNewContext(ctx context.Context, entryContent string) (bool, strin
 
 	jsonText := extractTextFromResponse(resp)
 
-	var result struct {
+	type contextResult struct {
 		IsProjectOrPlan bool     `json:"is_project_or_plan"`
 		ContextName     string   `json:"context_name"`
 		Entities        []string `json:"entities"`
 	}
-
-	if err := json.Unmarshal([]byte(jsonText), &result); err != nil {
-		if err := llmjson.RepairAndUnmarshal(jsonText, &result); err != nil {
-			partial, _ := llmjson.PartialUnmarshalObject(jsonText, []string{"is_project_or_plan", "context_name", "entities"})
-			if len(partial) > 0 {
-				if raw, ok := partial["is_project_or_plan"]; ok && len(raw) > 0 {
-					_ = json.Unmarshal(raw, &result.IsProjectOrPlan)
-				}
-				if raw, ok := partial["context_name"]; ok && len(raw) > 0 {
-					_ = json.Unmarshal(raw, &result.ContextName)
-				}
-				if raw, ok := partial["entities"]; ok && len(raw) > 0 {
-					_ = json.Unmarshal(raw, &result.Entities)
-				}
-			}
-			if !result.IsProjectOrPlan && result.ContextName == "" && len(result.Entities) == 0 {
-				LoggerFrom(ctx).Warn("failed to parse context analysis response", "error", err)
-				return false, "", nil
-			}
-		}
+	result, _ := llmjson.ParseLLMResponse[contextResult](jsonText, []string{"is_project_or_plan", "context_name", "entities"})
+	if result == nil {
+		LoggerFrom(ctx).Warn("failed to parse context analysis response")
+		return false, "", nil
 	}
-
 	return result.IsProjectOrPlan, result.ContextName, result.Entities
 }
 

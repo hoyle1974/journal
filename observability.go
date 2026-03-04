@@ -37,6 +37,22 @@ func isGDocLogging(ctx context.Context) bool {
 	return ctx.Value(gdocLoggingKey) != nil
 }
 
+// syncInProgressKey marks context as inside sync so we don't forward logs to the doc during sync.
+// Appending logs during sync would shift document indices and cause bolding/inserts to land in the wrong place.
+type syncInProgressKeyType struct{}
+
+var syncInProgressKey = &syncInProgressKeyType{}
+
+// WithSyncInProgress returns a context that marks the caller as running gdoc sync.
+// While set, log lines are not forwarded to the doc so the document does not change between fetch and batch update.
+func WithSyncInProgress(ctx context.Context) context.Context {
+	return context.WithValue(ctx, syncInProgressKey, true)
+}
+
+func isSyncInProgress(ctx context.Context) bool {
+	return ctx.Value(syncInProgressKey) != nil
+}
+
 // Logger is the global structured logger for the application (used during init and when no App in context).
 var Logger *slog.Logger
 
@@ -154,8 +170,8 @@ func (h *gdocForwardingHandler) Handle(ctx context.Context, r slog.Record) error
 	if err != nil {
 		return err
 	}
-	// Only forward Info and above; skip when we're inside gdoc write (avoid feedback). Use App from ctx or default so regular .Info() works.
-	if r.Level < slog.LevelInfo || isGDocLogging(ctx) {
+	// Only forward Info and above; skip when we're inside gdoc write (avoid feedback) or during sync (avoid shifting indices).
+	if r.Level < slog.LevelInfo || isGDocLogging(ctx) || isSyncInProgress(ctx) {
 		return nil
 	}
 	// Skip generic request-completed lines to keep the doc focused on flow/triage

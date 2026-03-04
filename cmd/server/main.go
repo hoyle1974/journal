@@ -3,11 +3,12 @@
 package main
 
 import (
+	"context"
 	"log"
 	"os"
 
 	"github.com/GoogleCloudPlatform/functions-framework-go/funcframework"
-	_ "github.com/jackstrohm/jot" // Import to register the function
+	jot "github.com/jackstrohm/jot"
 	_ "github.com/jackstrohm/jot/internal/tools/impl"
 )
 
@@ -17,6 +18,9 @@ func main() {
 		port = "8080"
 	}
 
+	if err := jot.InitDefaultApp(context.Background()); err != nil {
+		log.Fatalf("init app: %v", err)
+	}
 	if err := funcframework.Start(port); err != nil {
 		log.Fatalf("funcframework.Start: %v", err)
 	}
