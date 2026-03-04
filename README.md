@@ -9,7 +9,6 @@ It continuously ingests raw, chronological daily logs (Episodic Memory) and uses
 * **Multi-Channel Ingestion:** Log entries via CLI, Twilio SMS, or by typing into a synced Google Doc.
 * **Agentic Query System:** Ask questions about your life, projects, or the world. JOT uses an agentic loop with tools for semantic search, Wikipedia, web search, and mathematical/date calculations.
 * **The Dreamer (Nightly Consolidation):** A background chron job that reviews the last 24 hours of logs using a "Committee of Minds" (Anthropologist, Architect, Executive, Philosopher, Self-Modeler) to extract facts and update your permanent persona profile.
-* **Goal Planning:** Ask JOT to plan a project, and it will break it down into structured phases and track them in the knowledge graph.
 * **Automated Janitor & Pulse Audits:** Background processes that garbage-collect low-significance, stale memories and proactively flag forgotten goals or relationships.
 
 ## Architecture & Tech Stack
@@ -38,16 +37,13 @@ JOT uses natural language processing, so you don't always need strict commands.
 $ jot Had coffee with Sarah today, she prefers oat milk.
 
 # Query your semantic memory
-$ jot query What does Sarah put in her coffee?
-
-# Generate a structured plan
-$ jot plan Rebuild my home network
+$ jot What does Sarah put in her coffee
 
 # Run the nightly distillation manually
 $ jot dream
 
-# Open interactive entry editor
-$ jot edit 10
+# Sync with a google doc
+$ jot sync
 
 ```
 
