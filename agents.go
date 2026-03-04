@@ -14,38 +14,36 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// RunEvaluator assigns significance to a new entry and optionally upserts high-value facts.
-func RunEvaluator(ctx context.Context, content, entryUUID, timestamp string) {
-	ctx, span := StartSpan(ctx, "evaluator.run")
-	defer span.End()
+// EvaluatorExtract holds the result of running the evaluator LLM on an entry (no storage).
+type EvaluatorExtract struct {
+	Significance float64
+	Domain       string
+	FactToStore  string
+}
 
+// RunEvaluatorExtract runs the evaluator LLM on content and returns significance, domain, and fact_to_store.
+// Does not store anything. Used by backfill to decide whether and how to link an entry to knowledge nodes.
+func RunEvaluatorExtract(ctx context.Context, content string) (*EvaluatorExtract, error) {
 	if len(strings.TrimSpace(content)) < 10 {
-		LoggerFrom(ctx).Info("evaluator skipped", "entry_uuid", entryUUID, "reason", "content too short")
-		return
+		return nil, nil
 	}
-
 	client, err := GetGeminiClient(ctx)
 	if err != nil {
-		LoggerFrom(ctx).Warn("evaluator skipped", "entry_uuid", entryUUID, "reason", "no gemini client", "error", err)
-		return
+		return nil, err
 	}
-
 	model := client.GenerativeModel(GetEffectiveModel(ctx, GeminiModel))
 	model.ResponseMIMEType = "application/json"
 	model.SetMaxOutputTokens(256)
 	model.ResponseSchema = &genai.Schema{
 		Type: genai.TypeObject,
 		Properties: map[string]*genai.Schema{
-			"significance": {Type: genai.TypeNumber, Description: "0.0-1.0. High: emotional, milestones, new people. Low: routine logistics."},
-			"domain":       {Type: genai.TypeString, Enum: []string{"relationship", "work", "task", "thought"}},
+			"significance":  {Type: genai.TypeNumber, Description: "0.0-1.0. High: emotional, milestones, new people. Low: routine logistics."},
+			"domain":        {Type: genai.TypeString, Enum: []string{"relationship", "work", "task", "thought"}},
 			"fact_to_store": {Type: genai.TypeString, Description: "Single distilled fact to store, or empty if nothing worth keeping"},
 		},
 	}
-
 	systemPrompt := prompts.Evaluator() + prompts.DataSafety()
 	model.SystemInstruction = &genai.Content{Parts: []genai.Part{genai.Text(systemPrompt)}}
-
-	// Include user_profile context so the evaluator sees prior preferences (e.g. "Jot is a hobby not work")
 	prompt := ""
 	if node, _, err := FindContextByName(ctx, "user_profile"); err == nil && node != nil && node.Content != "" {
 		prompt = fmt.Sprintf("Relevant user preferences/facts (use when assigning domain and significance):\n%s\n\n",
@@ -59,10 +57,8 @@ func RunEvaluator(ctx context.Context, content, entryUUID, timestamp string) {
 	GeminiCallsTotal.Inc()
 	resp, err := model.GenerateContent(bgCtx, genai.Text(prompt))
 	if err != nil {
-		LoggerFrom(ctx).Warn("evaluator skipped", "entry_uuid", entryUUID, "reason", "api failed", "error", err)
-		return
+		return nil, err
 	}
-
 	text := extractTextFromResponse(resp)
 	type evaluatorOut struct {
 		Significance float64 `json:"significance"`
@@ -71,21 +67,40 @@ func RunEvaluator(ctx context.Context, content, entryUUID, timestamp string) {
 	}
 	parsed, _ := llmjson.ParseLLMResponse[evaluatorOut](text, []string{"significance", "domain", "fact_to_store"})
 	if parsed == nil {
-		LoggerFrom(ctx).Info("evaluator skipped", "entry_uuid", entryUUID, "reason", "unparseable response")
+		return nil, nil
+	}
+	out := &EvaluatorExtract{
+		Significance: parsed.Significance,
+		Domain:       parsed.Domain,
+		FactToStore:  strings.TrimSpace(parsed.FactToStore),
+	}
+	if out.Significance < 0 {
+		out.Significance = 0
+	}
+	if out.Significance > 1 {
+		out.Significance = 1
+	}
+	if out.Domain == "" {
+		out.Domain = "thought"
+	}
+	return out, nil
+}
+
+// RunEvaluator assigns significance to a new entry and optionally upserts high-value facts.
+func RunEvaluator(ctx context.Context, content, entryUUID, timestamp string) {
+	ctx, span := StartSpan(ctx, "evaluator.run")
+	defer span.End()
+
+	parsed, err := RunEvaluatorExtract(ctx, content)
+	if err != nil {
+		LoggerFrom(ctx).Warn("evaluator skipped", "entry_uuid", entryUUID, "reason", "extract failed", "error", err)
+		return
+	}
+	if parsed == nil {
+		LoggerFrom(ctx).Info("evaluator skipped", "entry_uuid", entryUUID, "reason", "content too short or unparseable")
 		return
 	}
 
-	if parsed.Significance < 0 {
-		parsed.Significance = 0
-	}
-	if parsed.Significance > 1 {
-		parsed.Significance = 1
-	}
-	if parsed.Domain == "" {
-		parsed.Domain = "thought"
-	}
-
-	// Store high-significance facts immediately
 	factStored := false
 	if parsed.FactToStore != "" && parsed.Significance >= 0.5 {
 		nodeType := "fact"
@@ -94,6 +109,8 @@ func RunEvaluator(ctx context.Context, content, entryUUID, timestamp string) {
 		} else if parsed.Domain == "work" {
 			nodeType = "project"
 		}
+		bgCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
 		if _, err := UpsertSemanticMemory(bgCtx, parsed.FactToStore, nodeType, parsed.Domain, parsed.Significance, nil, []string{entryUUID}); err != nil {
 			LoggerFrom(ctx).Warn("evaluator upsert failed", "error", err)
 		} else {
@@ -101,9 +118,6 @@ func RunEvaluator(ctx context.Context, content, entryUUID, timestamp string) {
 		}
 	}
 	LoggerFrom(ctx).Info("evaluator", "entry_uuid", entryUUID, "significance", parsed.Significance, "domain", parsed.Domain, "fact_stored", factStored)
-
-	// Optionally store significance on the entry for future janitor/dreamer use
-	// For now we rely on semantic memory; entries stay as raw episodic log
 	_ = timestamp
 }
 

@@ -64,7 +64,11 @@ func registerContextTools() {
 				return tools.Fail("Context '%s' already exists.", name)
 			}
 
-			uuid, err := jot.CreateContext(ctx, name, description, contextType, nil, nil)
+			var sourceEntries []string
+			if cur := jot.CurrentEntryUUIDFrom(ctx); cur != "" {
+				sourceEntries = []string{cur}
+			}
+			uuid, err := jot.CreateContext(ctx, name, description, contextType, nil, sourceEntries)
 			if err != nil {
 				return tools.Fail("Error creating context: %v", err)
 			}
@@ -98,7 +102,11 @@ func registerContextTools() {
 				return tools.Fail("Context '%s' not found.", name)
 			}
 
-			err = jot.TouchContext(ctx, node.UUID, nil, boost)
+			var newSourceEntry *string
+			if cur := jot.CurrentEntryUUIDFrom(ctx); cur != "" {
+				newSourceEntry = &cur
+			}
+			err = jot.TouchContext(ctx, node.UUID, newSourceEntry, boost)
 			if err != nil {
 				return tools.Fail("Error touching context: %v", err)
 			}

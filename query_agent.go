@@ -64,7 +64,8 @@ func RunQueryWithDebug(ctx context.Context, question, source string, debug bool)
 
 	// Save user input to the journal immediately (deterministic system task; no LLM tool call).
 	EntriesTotal.Inc()
-	if _, err := AddEntry(ctx, question, source, nil); err != nil {
+	entryUUID, err := AddEntry(ctx, question, source, nil)
+	if err != nil {
 		LoggerFrom(ctx).Error("failed to log user input", "error", err)
 		ErrorsTotal.Inc()
 		span.RecordError(err)
@@ -75,6 +76,7 @@ func RunQueryWithDebug(ctx context.Context, question, source string, debug bool)
 			DebugLogs:  debugLogs,
 		}
 	}
+	ctx = WithCurrentEntryUUID(ctx, entryUUID)
 
 	logDebug("[start] Question: %s", question)
 

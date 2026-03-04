@@ -35,7 +35,11 @@ func registerKnowledgeTools() {
 				return tools.MissingParam("node_type")
 			}
 			metadata := args.String("metadata", "{}")
-			id, err := jot.UpsertKnowledge(ctx, content, nodeType, metadata)
+			var entryIDs []string
+			if cur := jot.CurrentEntryUUIDFrom(ctx); cur != "" {
+				entryIDs = []string{cur}
+			}
+			id, err := jot.UpsertKnowledge(ctx, content, nodeType, metadata, entryIDs)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}

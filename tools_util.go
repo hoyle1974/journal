@@ -66,7 +66,7 @@ func HandleCountdown(ctx context.Context, action, name, dateStr string) (string,
 			return "", fmt.Errorf("invalid date format (use YYYY-MM-DD): %v", err)
 		}
 		metadata := fmt.Sprintf(`{"target_date": "%s"}`, dateStr)
-		id, err := UpsertKnowledge(ctx, fmt.Sprintf("Countdown: %s", name), "countdown", metadata)
+		id, err := UpsertKnowledge(ctx, fmt.Sprintf("Countdown: %s", name), "countdown", metadata, nil)
 		if err != nil {
 			return "", err
 		}
@@ -278,7 +278,7 @@ func HandleBookmark(ctx context.Context, action, bookmarkURL, title, tags, query
 			"tags": strings.Split(tags, ","),
 		}
 		metaJSON, _ := json.Marshal(metadata)
-		id, err := UpsertKnowledge(ctx, fmt.Sprintf("Bookmark: %s", title), "bookmark", string(metaJSON))
+		id, err := UpsertKnowledge(ctx, fmt.Sprintf("Bookmark: %s", title), "bookmark", string(metaJSON), nil)
 		if err != nil {
 			return "", err
 		}

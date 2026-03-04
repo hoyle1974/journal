@@ -67,7 +67,7 @@ func CreateContext(ctx context.Context, name, content, contextType string, entit
 	}
 
 	// Use UpsertKnowledge which handles embedding generation
-	nodeUUID, err := UpsertKnowledge(ctx, content, ContextNodeType, string(metadataJSON))
+	nodeUUID, err := UpsertKnowledge(ctx, content, ContextNodeType, string(metadataJSON), nil)
 	if err != nil {
 		span.RecordError(err)
 		return "", err

@@ -69,7 +69,7 @@ func CreateAndSavePlan(ctx context.Context, goal string) (string, error) {
 		return "", err
 	}
 
-	parentID, err := UpsertKnowledge(ctx, goal, "goal", `{"status": "planning"}`)
+	parentID, err := UpsertKnowledge(ctx, goal, "goal", `{"status": "planning"}`, nil)
 	if err != nil {
 		span.RecordError(err)
 		return "", err
@@ -87,7 +87,7 @@ func CreateAndSavePlan(ctx context.Context, goal string) (string, error) {
 		}
 		metaBytes, _ := json.Marshal(metadataMeta)
 
-		phaseID, _ := UpsertKnowledge(ctx, fmt.Sprintf("%s: %s", phase.Title, phase.Description), "task", string(metaBytes))
+		phaseID, _ := UpsertKnowledge(ctx, fmt.Sprintf("%s: %s", phase.Title, phase.Description), "task", string(metaBytes), nil)
 
 		resultLines = append(resultLines, fmt.Sprintf("%d. %s (Task ID: %s)", i+1, phase.Title, phaseID))
 	}

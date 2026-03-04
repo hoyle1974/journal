@@ -54,7 +54,8 @@ func truncateForLog(s string, maxLen int) string {
 // UpsertKnowledge saves a fact/list item and computes its vector embedding automatically.
 // For registered node types (person, project, goal, etc.), metadata is validated and normalized
 // before storage. Use node_type "generic" when the LLM cannot confidently categorize a fact.
-func UpsertKnowledge(ctx context.Context, content, nodeType, metadata string) (string, error) {
+// journalEntryIDs optionally links this node to source journal entry UUIDs for receipt display.
+func UpsertKnowledge(ctx context.Context, content, nodeType, metadata string, journalEntryIDs []string) (string, error) {
 	ctx, span := StartSpan(ctx, "knowledge.upsert")
 	defer span.End()
 
@@ -104,6 +105,19 @@ func UpsertKnowledge(ctx context.Context, content, nodeType, metadata string) (s
 	LoggerFrom(ctx).Debug("embedding generated", "dimensions", len(vector))
 
 	timestamp := time.Now().Format(time.RFC3339)
+	data := map[string]interface{}{
+		"content":             content,
+		"node_type":           nodeType,
+		"metadata":            metaToStore,
+		"embedding":           firestore.Vector32(vector),
+		"timestamp":           timestamp,
+		"significance_weight": 0.5,
+		"domain":              "thought",
+		"last_recalled_at":    timestamp,
+	}
+	if len(journalEntryIDs) > 0 {
+		data["journal_entry_ids"] = journalEntryIDs
+	}
 
 	// 2. Check if very similar knowledge already exists (true upsert)
 	// Use FindNearest with DistanceThreshold to find only very close matches
@@ -127,16 +141,7 @@ func UpsertKnowledge(ctx context.Context, content, nodeType, metadata string) (s
 		if action == "update" {
 			nodeUUID = doc.Ref.ID
 			LoggerFrom(ctx).Info("updating existing knowledge node", "uuid", nodeUUID)
-			_, err = client.Collection(KnowledgeCollection).Doc(nodeUUID).Set(ctx, map[string]interface{}{
-				"content":             content,
-				"node_type":           nodeType,
-				"metadata":            metaToStore,
-				"embedding":           firestore.Vector32(vector),
-				"timestamp":           timestamp,
-				"significance_weight": 0.5,
-				"domain":              "thought",
-				"last_recalled_at":    timestamp,
-			})
+			_, err = client.Collection(KnowledgeCollection).Doc(nodeUUID).Set(ctx, data)
 			if err != nil {
 				LoggerFrom(ctx).Error("failed to update knowledge node", "error", err)
 				span.RecordError(err)
@@ -145,16 +150,7 @@ func UpsertKnowledge(ctx context.Context, content, nodeType, metadata string) (s
 			LoggerFrom(ctx).Info("knowledge node updated", "uuid", nodeUUID)
 		} else {
 			nodeUUID = GenerateUUID()
-			_, err = client.Collection(KnowledgeCollection).Doc(nodeUUID).Set(ctx, map[string]interface{}{
-				"content":             content,
-				"node_type":           nodeType,
-				"metadata":            metaToStore,
-				"embedding":           firestore.Vector32(vector),
-				"timestamp":           timestamp,
-				"significance_weight": 0.5,
-				"domain":              "thought",
-				"last_recalled_at":    timestamp,
-			})
+			_, err = client.Collection(KnowledgeCollection).Doc(nodeUUID).Set(ctx, data)
 			if err != nil {
 				LoggerFrom(ctx).Error("failed to save knowledge node", "error", err)
 				span.RecordError(err)
@@ -165,16 +161,7 @@ func UpsertKnowledge(ctx context.Context, content, nodeType, metadata string) (s
 	} else {
 		// No similar node found - create new
 		nodeUUID = GenerateUUID()
-		_, err = client.Collection(KnowledgeCollection).Doc(nodeUUID).Set(ctx, map[string]interface{}{
-			"content":             content,
-			"node_type":           nodeType,
-			"metadata":            metaToStore,
-			"embedding":           firestore.Vector32(vector),
-			"timestamp":           timestamp,
-			"significance_weight": 0.5,
-			"domain":              "thought",
-			"last_recalled_at":    timestamp,
-		})
+		_, err = client.Collection(KnowledgeCollection).Doc(nodeUUID).Set(ctx, data)
 		if err != nil {
 			LoggerFrom(ctx).Error("failed to save knowledge node", "error", err)
 			span.RecordError(err)
@@ -262,6 +249,65 @@ func UpsertSemanticMemory(ctx context.Context, content, nodeType, domain string,
 	}
 
 	return nodeUUID, nil
+}
+
+// FindNearestWithThreshold returns the single nearest knowledge node if within distanceThreshold (cosine), else nil.
+// Used by backfill to decide whether to append an entry ID to an existing node or create a new one.
+func FindNearestWithThreshold(ctx context.Context, queryVector []float32, distanceThreshold float64) (*KnowledgeNode, error) {
+	client, err := GetFirestoreClient(ctx)
+	if err != nil {
+		return nil, err
+	}
+	vectorQuery := client.Collection(KnowledgeCollection).
+		FindNearest("embedding", firestore.Vector32(queryVector), 1, firestore.DistanceMeasureCosine,
+			&firestore.FindNearestOptions{DistanceThreshold: &distanceThreshold})
+	iter := vectorQuery.Documents(ctx)
+	doc, err := iter.Next()
+	iter.Stop()
+	if err != nil || doc == nil {
+		return nil, nil
+	}
+	data := doc.Data()
+	n := &KnowledgeNode{
+		UUID:            doc.Ref.ID,
+		Content:         getStringField(data, "content"),
+		NodeType:        getStringField(data, "node_type"),
+		Metadata:        getStringField(data, "metadata"),
+		Timestamp:       getStringField(data, "timestamp"),
+		JournalEntryIDs: getStringSliceField(data, "journal_entry_ids"),
+	}
+	return n, nil
+}
+
+// AppendJournalEntryIDsToNode merges entryIDs into the node's journal_entry_ids (deduped) and updates the document.
+// Used by backfill to link existing nodes to source entries without overwriting existing links.
+func AppendJournalEntryIDsToNode(ctx context.Context, nodeUUID string, entryIDs []string) error {
+	if len(entryIDs) == 0 {
+		return nil
+	}
+	client, err := GetFirestoreClient(ctx)
+	if err != nil {
+		return err
+	}
+	doc, err := client.Collection(KnowledgeCollection).Doc(nodeUUID).Get(ctx)
+	if err != nil {
+		return err
+	}
+	existing := getStringSliceField(doc.Data(), "journal_entry_ids")
+	seen := make(map[string]bool)
+	for _, id := range existing {
+		seen[id] = true
+	}
+	for _, id := range entryIDs {
+		if id != "" && !seen[id] {
+			seen[id] = true
+			existing = append(existing, id)
+		}
+	}
+	_, err = client.Collection(KnowledgeCollection).Doc(nodeUUID).Update(ctx, []firestore.Update{
+		{Path: "journal_entry_ids", Value: existing},
+	})
+	return err
 }
 
 // QuerySimilarNodes performs a KNN vector search in Firestore.
@@ -421,11 +467,12 @@ func GetKnowledgeNodesByIDs(ctx context.Context, ids []string) ([]KnowledgeNode,
 		}
 		data := doc.Data()
 		n := KnowledgeNode{
-			UUID:      doc.Ref.ID,
-			Content:   getStringField(data, "content"),
-			NodeType:  getStringField(data, "node_type"),
-			Metadata:  getStringField(data, "metadata"),
-			Timestamp: getStringField(data, "timestamp"),
+			UUID:            doc.Ref.ID,
+			Content:         getStringField(data, "content"),
+			NodeType:        getStringField(data, "node_type"),
+			Metadata:        getStringField(data, "metadata"),
+			Timestamp:       getStringField(data, "timestamp"),
+			JournalEntryIDs: getStringSliceField(data, "journal_entry_ids"),
 		}
 		nodes = append(nodes, n)
 	}
