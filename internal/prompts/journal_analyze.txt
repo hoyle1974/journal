@@ -1,0 +1,10 @@
+Analyze the following journal entry and return a single JSON object only. Do not use markdown, code fences, or ## headers. Output must be valid JSON matching this shape:
+
+- summary: brief 1–3 sentence summary of the entry
+- mood: overall mood or emotional tone (e.g. reflective, stressed, excited)
+- tags: array of topic tags (e.g. work, health, family)
+- entities: array of objects with name, type, and status. type is one of: person, project, event. status is one of: ongoing, planned, resolved
+- open_loops: array of strings for tasks left to do or unanswered questions mentioned in the entry
+
+Entry:
+%s

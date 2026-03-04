@@ -42,7 +42,7 @@ func handleProcessEntry(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-// ProcessEntry runs evaluator, context detection, and embedding for an entry.
+// ProcessEntry runs evaluator, context detection, journal analysis, and embedding for an entry.
 func ProcessEntry(ctx context.Context, entryUUID, content, timestamp, source string) error {
 	LoggerFrom(ctx).Info("process-entry start", "entry_uuid", entryUUID, "content", truncateString(content, 50), "source", source)
 	RunEvaluator(ctx, content, entryUUID, timestamp)
@@ -52,6 +52,17 @@ func ProcessEntry(ctx context.Context, entryUUID, content, timestamp, source str
 		LoggerFrom(ctx).Warn("context detection failed", "error", err)
 	}
 	contextCount := len(contextUUIDs)
+
+	analysis, err := AnalyzeJournalEntry(ctx, content, entryUUID)
+	if err != nil {
+		LoggerFrom(ctx).Warn("journal analysis failed", "entry_uuid", entryUUID, "error", err)
+	}
+	var analysisJSON string
+	if analysis != nil {
+		if b, err := json.Marshal(analysis); err == nil {
+			analysisJSON = string(b)
+		}
+	}
 
 	vector, err := GenerateEmbedding(ctx, content, EmbedTaskRetrievalDocument)
 	if err != nil {
@@ -65,14 +76,16 @@ func ProcessEntry(ctx context.Context, entryUUID, content, timestamp, source str
 		LoggerFrom(ctx).Warn("failed to get firestore for entry embedding", "error", err)
 		return err
 	}
-	_, err = client.Collection(EntriesCollection).Doc(entryUUID).Update(ctx, []firestore.Update{
-		{Path: "embedding", Value: firestore.Vector32(vector)},
-	})
+	updates := []firestore.Update{{Path: "embedding", Value: firestore.Vector32(vector)}}
+	if analysisJSON != "" {
+		updates = append(updates, firestore.Update{Path: "journal_analysis", Value: analysisJSON})
+	}
+	_, err = client.Collection(EntriesCollection).Doc(entryUUID).Update(ctx, updates)
 	if err != nil {
 		LoggerFrom(ctx).Warn("failed to store entry embedding", "entry_uuid", entryUUID, "error", err)
 		return err
 	}
-	LoggerFrom(ctx).Info("process-entry done", "entry_uuid", entryUUID, "contexts_linked", contextCount, "embedding_dims", len(vector))
+	LoggerFrom(ctx).Info("process-entry done", "entry_uuid", entryUUID, "contexts_linked", contextCount, "embedding_dims", len(vector), "has_analysis", analysisJSON != "")
 	return nil
 }
 

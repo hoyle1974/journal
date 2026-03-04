@@ -32,6 +32,9 @@ var planSystemTxt string
 //go:embed context_analyze.txt
 var contextAnalyzeTxt string
 
+//go:embed journal_analyze.txt
+var journalAnalyzeTxt string
+
 //go:embed reflection_check.txt
 var reflectionCheckTxt string
 
@@ -102,6 +105,9 @@ func PlanSystem() string { return planSystemTxt }
 // ContextAnalyzeTemplate returns the context-analysis prompt template with one %s (entry content).
 func ContextAnalyzeTemplate() string { return contextAnalyzeTxt }
 
+// JournalAnalyzeTemplate returns the journal-analysis prompt template with one %s (entry content).
+func JournalAnalyzeTemplate() string { return journalAnalyzeTxt }
+
 // ReflectionCheckTemplate returns the reflection-check prompt template with two %s (answer, semanticMemory).
 func ReflectionCheckTemplate() string { return reflectionCheckTxt }
 
@@ -126,6 +132,11 @@ func Specialist(domain string) string {
 // FormatContextAnalyze formats the context-analyze template with the given entry content.
 func FormatContextAnalyze(entryContent string) string {
 	return fmt.Sprintf(ContextAnalyzeTemplate(), entryContent)
+}
+
+// FormatJournalAnalyze formats the journal-analyze template with the given entry content.
+func FormatJournalAnalyze(entryContent string) string {
+	return fmt.Sprintf(JournalAnalyzeTemplate(), entryContent)
 }
 
 // FormatReflectionCheck formats the reflection-check template with answer and semantic memory.
