@@ -105,7 +105,7 @@ func PlanSystem() string { return planSystemTxt }
 // ContextAnalyzeTemplate returns the context-analysis prompt template with one %s (entry content).
 func ContextAnalyzeTemplate() string { return contextAnalyzeTxt }
 
-// JournalAnalyzeTemplate returns the journal-analysis prompt template with one %s (entry content).
+// JournalAnalyzeTemplate returns the journal-analysis prompt template with three %s: entryID, date, entryText.
 func JournalAnalyzeTemplate() string { return journalAnalyzeTxt }
 
 // ReflectionCheckTemplate returns the reflection-check prompt template with two %s (answer, semanticMemory).
@@ -134,9 +134,9 @@ func FormatContextAnalyze(entryContent string) string {
 	return fmt.Sprintf(ContextAnalyzeTemplate(), entryContent)
 }
 
-// FormatJournalAnalyze formats the journal-analyze template with the given entry content.
-func FormatJournalAnalyze(entryContent string) string {
-	return fmt.Sprintf(JournalAnalyzeTemplate(), entryContent)
+// FormatJournalAnalyze formats the journal-analyze template with entry ID, date, and entry text (content).
+func FormatJournalAnalyze(entryID, date, entryText string) string {
+	return fmt.Sprintf(JournalAnalyzeTemplate(), entryID, date, entryText)
 }
 
 // FormatReflectionCheck formats the reflection-check template with answer and semantic memory.

@@ -1,14 +1,37 @@
 package impl
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
 	"github.com/jackstrohm/jot"
 )
 
-// formatKnowledgeNodes formats knowledge nodes for LLM context.
-func formatKnowledgeNodes(nodes []jot.KnowledgeNode) string {
+const maxSourceDatesPerNode = 5
+const maxEntryIDsToResolve = 25
+
+// formatKnowledgeNodes formats knowledge nodes for LLM context, appending source dates when JournalEntryIDs are present.
+func formatKnowledgeNodes(ctx context.Context, nodes []jot.KnowledgeNode) string {
+	// Collect unique entry IDs for batch date resolution
+	seenIDs := make(map[string]bool)
+	var allIDs []string
+	for _, n := range nodes {
+		for _, id := range n.JournalEntryIDs {
+			if id != "" && !seenIDs[id] {
+				seenIDs[id] = true
+				allIDs = append(allIDs, id)
+				if len(allIDs) >= maxEntryIDsToResolve {
+					break
+				}
+			}
+		}
+		if len(allIDs) >= maxEntryIDsToResolve {
+			break
+		}
+	}
+	dateMap, _ := jot.GetEntryDates(ctx, allIDs)
+
 	var lines []string
 	for i, n := range nodes {
 		content := n.Content
@@ -22,7 +45,24 @@ func formatKnowledgeNodes(nodes []jot.KnowledgeNode) string {
 		if ts == "" {
 			ts = "(no date)"
 		}
-		lines = append(lines, fmt.Sprintf("%d. [%s] [%s] %s", i+1, n.NodeType, ts, content))
+		line := fmt.Sprintf("%d. [%s] [%s] %s", i+1, n.NodeType, ts, content)
+		if len(n.JournalEntryIDs) > 0 && len(dateMap) > 0 {
+			seenDate := make(map[string]bool)
+			var dates []string
+			for _, eid := range n.JournalEntryIDs {
+				if d, ok := dateMap[eid]; ok && d != "" && !seenDate[d] {
+					seenDate[d] = true
+					dates = append(dates, d)
+					if len(dates) >= maxSourceDatesPerNode {
+						break
+					}
+				}
+			}
+			if len(dates) > 0 {
+				line += fmt.Sprintf(" [Source: %s]", strings.Join(dates, ", "))
+			}
+		}
+		lines = append(lines, line)
 		if n.Metadata != "" && n.Metadata != "{}" {
 			lines = append(lines, fmt.Sprintf("   Metadata: %s", n.Metadata))
 		}

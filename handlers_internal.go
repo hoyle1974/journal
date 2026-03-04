@@ -53,7 +53,7 @@ func ProcessEntry(ctx context.Context, entryUUID, content, timestamp, source str
 	}
 	contextCount := len(contextUUIDs)
 
-	analysis, err := AnalyzeJournalEntry(ctx, content, entryUUID)
+	analysis, err := AnalyzeJournalEntry(ctx, content, entryUUID, timestamp)
 	if err != nil {
 		LoggerFrom(ctx).Warn("journal analysis failed", "entry_uuid", entryUUID, "error", err)
 	}

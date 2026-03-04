@@ -45,7 +45,7 @@ func registerKnowledgeTools() {
 
 	tools.Register(&tools.Tool{
 		Name:        "semantic_search",
-		Description: "Search the knowledge graph and journal entries using semantic similarity. Use this FIRST for questions about people, facts, preferences, or past journal content (who is X, where is X, what did I write about Y).",
+		Description: "Search the knowledge graph and journal entries using semantic similarity. Use this FIRST for questions about people, facts, preferences, or past journal content (who is X, where is X, what did I write about Y). When answering, include the source date when results show one (e.g. 'Buy ice [Source: 2026-02-15]').",
 		Category:    "knowledge",
 		Params: []tools.Param{
 			tools.RequiredStringParam("query", "The natural language query to search for"),
@@ -121,7 +121,7 @@ func registerKnowledgeTools() {
 			}
 			var parts []string
 			if len(nodes) > 0 {
-				parts = append(parts, "Knowledge:\n"+formatKnowledgeNodes(nodes))
+				parts = append(parts, "Knowledge:\n"+formatKnowledgeNodes(ctx, nodes))
 			}
 			if len(entries) > 0 {
 				parts = append(parts, "Journal entries:\n"+formatEntries(entries))
@@ -169,7 +169,7 @@ func registerKnowledgeTools() {
 				}
 				return tools.OK("No knowledge nodes found.")
 			}
-			result := formatKnowledgeNodes(nodes)
+			result := formatKnowledgeNodes(ctx, nodes)
 			if nodeType != "" {
 				return tools.OK("Found %d knowledge nodes of type '%s':\n%s", len(nodes), nodeType, result)
 			}
@@ -221,7 +221,7 @@ func registerKnowledgeTools() {
 				if err != nil {
 					parts = append(parts, fmt.Sprintf("Related (fetch error: %v)", err))
 				} else if len(related) > 0 {
-					parts = append(parts, "Related (first-degree):\n"+formatKnowledgeNodes(related))
+					parts = append(parts, "Related (first-degree):\n"+formatKnowledgeNodes(ctx, related))
 				}
 			}
 			if len(full.JournalEntryIDs) > 0 {

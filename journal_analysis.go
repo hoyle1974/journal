@@ -12,24 +12,33 @@ import (
 
 // Entity represents a person, project, or event mentioned in a journal entry.
 type Entity struct {
-	Name   string `json:"name"`
-	Type   string `json:"type"`   // e.g. "person", "project", "event"
-	Status string `json:"status"` // e.g. "ongoing", "planned", "resolved"
+	Name     string `json:"name"`
+	Type     string `json:"type"`     // e.g. "person", "project", "event"
+	Status   string `json:"status"`   // e.g. "ongoing", "planned", "resolved"
+	SourceID string `json:"source_id"` // entry UUID; required for traceability
+}
+
+// OpenLoop represents a task or unanswered question from a journal entry.
+type OpenLoop struct {
+	Task     string `json:"task"`
+	Priority string `json:"priority"` // e.g. "low", "med", "high"
+	SourceID string `json:"source_id"` // entry UUID; required for traceability
 }
 
 // JournalAnalysis is the structured output from analyzing a journal entry.
 type JournalAnalysis struct {
-	Summary   string   `json:"summary"`
-	Mood      string   `json:"mood"`
-	Tags      []string `json:"tags"`
-	Entities  []Entity `json:"entities"`
-	OpenLoops []string `json:"open_loops"` // tasks or unanswered questions
-	SourceID  string   `json:"source_id"`  // entry UUID; set by caller after unmarshal
+	Summary   string     `json:"summary"`
+	Mood      string     `json:"mood"`
+	Tags      []string   `json:"tags"`
+	Entities  []Entity   `json:"entities"`
+	OpenLoops []OpenLoop `json:"open_loops"` // tasks or unanswered questions
+	SourceID  string     `json:"source_id"`  // entry UUID; set by caller after unmarshal
 }
 
 // AnalyzeJournalEntry uses Gemini with JSON schema to analyze a journal entry.
-// Returns a JournalAnalysis with SourceID set to entryUUID. Caller may persist it on the entry doc.
-func AnalyzeJournalEntry(ctx context.Context, entryContent, entryUUID string) (*JournalAnalysis, error) {
+// entryTimestamp is optional (e.g. RFC3339); if empty, date context may be omitted.
+// Returns a JournalAnalysis with SourceID set on the analysis and every entity/open_loop (guardrail fills if LLM omits).
+func AnalyzeJournalEntry(ctx context.Context, entryContent, entryUUID, entryTimestamp string) (*JournalAnalysis, error) {
 	ctx, span := StartSpan(ctx, "journal.analyze")
 	defer span.End()
 
@@ -43,31 +52,50 @@ func AnalyzeJournalEntry(ctx context.Context, entryContent, entryUUID string) (*
 		return nil, err
 	}
 
+	entryDate := entryTimestamp
+	if len(entryDate) > 10 {
+		entryDate = entryDate[:10]
+	}
+	if entryDate == "" {
+		entryDate = "unknown"
+	}
+
 	model := client.GenerativeModel(GetEffectiveModel(ctx, GeminiModel))
 	model.ResponseMIMEType = "application/json"
 	model.SetMaxOutputTokens(1024)
 	model.ResponseSchema = &genai.Schema{
 		Type: genai.TypeObject,
 		Properties: map[string]*genai.Schema{
-			"summary":   {Type: genai.TypeString},
-			"mood":      {Type: genai.TypeString},
-			"tags":      {Type: genai.TypeArray, Items: &genai.Schema{Type: genai.TypeString}},
-			"open_loops": {Type: genai.TypeArray, Items: &genai.Schema{Type: genai.TypeString}},
+			"summary": {Type: genai.TypeString},
+			"mood":    {Type: genai.TypeString},
+			"tags":    {Type: genai.TypeArray, Items: &genai.Schema{Type: genai.TypeString}},
+			"open_loops": {
+				Type: genai.TypeArray,
+				Items: &genai.Schema{
+					Type: genai.TypeObject,
+					Properties: map[string]*genai.Schema{
+						"task":      {Type: genai.TypeString},
+						"priority":  {Type: genai.TypeString},
+						"source_id": {Type: genai.TypeString},
+					},
+				},
+			},
 			"entities": {
 				Type: genai.TypeArray,
 				Items: &genai.Schema{
 					Type: genai.TypeObject,
 					Properties: map[string]*genai.Schema{
-						"name":   {Type: genai.TypeString},
-						"type":   {Type: genai.TypeString},
-						"status": {Type: genai.TypeString},
+						"name":      {Type: genai.TypeString},
+						"type":      {Type: genai.TypeString},
+						"status":    {Type: genai.TypeString},
+						"source_id": {Type: genai.TypeString},
 					},
 				},
 			},
 		},
 	}
 
-	prompt := prompts.FormatJournalAnalyze(WrapAsUserData(SanitizePrompt(entryContent)))
+	prompt := prompts.FormatJournalAnalyze(entryUUID, entryDate, WrapAsUserData(SanitizePrompt(entryContent)))
 	resp, err := model.GenerateContent(ctx, genai.Text(prompt))
 	if err != nil {
 		LoggerFrom(ctx).Warn("journal analysis failed", "error", err)
@@ -90,7 +118,7 @@ func AnalyzeJournalEntry(ctx context.Context, entryContent, entryUUID string) (*
 					_ = json.Unmarshal(raw, &analysis.Tags)
 				}
 				if raw, ok := partial["open_loops"]; ok && len(raw) > 0 {
-					_ = json.Unmarshal(raw, &analysis.OpenLoops)
+					_ = parseOpenLoops(raw, &analysis.OpenLoops)
 				}
 				if raw, ok := partial["entities"]; ok && len(raw) > 0 {
 					_ = json.Unmarshal(raw, &analysis.Entities)
@@ -102,6 +130,35 @@ func AnalyzeJournalEntry(ctx context.Context, entryContent, entryUUID string) (*
 			}
 		}
 	}
+	// Consistency guardrail: ensure every entity and open_loop has source_id
+	for i := range analysis.Entities {
+		if analysis.Entities[i].SourceID == "" {
+			analysis.Entities[i].SourceID = entryUUID
+		}
+	}
+	for j := range analysis.OpenLoops {
+		if analysis.OpenLoops[j].SourceID == "" {
+			analysis.OpenLoops[j].SourceID = entryUUID
+		}
+	}
 	analysis.SourceID = entryUUID
 	return &analysis, nil
+}
+
+// parseOpenLoops unmarshals open_loops from raw JSON, supporting either []OpenLoop or legacy []string.
+func parseOpenLoops(raw []byte, out *[]OpenLoop) error {
+	var asStructs []OpenLoop
+	if err := json.Unmarshal(raw, &asStructs); err == nil {
+		*out = asStructs
+		return nil
+	}
+	var asStrings []string
+	if err := json.Unmarshal(raw, &asStrings); err != nil {
+		return err
+	}
+	*out = make([]OpenLoop, len(asStrings))
+	for i, s := range asStrings {
+		(*out)[i] = OpenLoop{Task: s, Priority: "", SourceID: ""}
+	}
+	return nil
 }

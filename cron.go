@@ -240,10 +240,10 @@ func dreamerLoadInputs(ctx context.Context) (*dreamerInputs, error) {
 	}, nil
 }
 
-// dreamerWriteMergedFacts upserts merged facts to semantic memory and returns the number written.
-func dreamerWriteMergedFacts(ctx context.Context, merged []mergedFact) (written int, err error) {
+// dreamerWriteMergedFacts upserts merged facts to semantic memory with source receipt linkage (entryUUIDs from this run).
+func dreamerWriteMergedFacts(ctx context.Context, merged []mergedFact, entryUUIDs []string) (written int, err error) {
 	for _, m := range merged {
-		if _, err = UpsertSemanticMemory(ctx, m.Content, m.NodeType, m.Domain, m.Weight, nil, nil); err != nil {
+		if _, err = UpsertSemanticMemory(ctx, m.Content, m.NodeType, m.Domain, m.Weight, nil, entryUUIDs); err != nil {
 			LoggerFrom(ctx).Warn("dreamer upsert failed", "domain", m.Domain, "fact", truncateString(m.Content, 50), "error", err)
 			continue
 		}
@@ -456,7 +456,7 @@ func RunDreamer(ctx context.Context) (*DreamerResult, error) {
 	merged := mergeDreamerFacts(ctx, domains, outputs)
 	LoggerFrom(ctx).Info("dreamer merge complete", "before", totalFacts, "after", len(merged), "msg", fmt.Sprintf("dreamer merged %d facts into %d", totalFacts, len(merged)))
 
-	written, _ := dreamerWriteMergedFacts(ctx, merged)
+	written, _ := dreamerWriteMergedFacts(ctx, merged, inputs.entryUUIDs)
 
 	synthesized, skippedLazy, _ := dreamerSynthesizeContexts(ctx, contextUUIDs)
 	if skippedLazy > 0 {

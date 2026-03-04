@@ -373,6 +373,35 @@ func GetEntry(ctx context.Context, entryUUID string) (*Entry, error) {
 	return &e, nil
 }
 
+// GetEntryDates fetches timestamps for the given entry UUIDs and returns a map from UUID to date string (YYYY-MM-DD).
+// Missing or failed entries are omitted. Used for source receipt display (e.g. "Source: 2026-02-15").
+func GetEntryDates(ctx context.Context, entryIDs []string) (map[string]string, error) {
+	if len(entryIDs) == 0 {
+		return nil, nil
+	}
+	seen := make(map[string]bool)
+	deduped := make([]string, 0, len(entryIDs))
+	for _, id := range entryIDs {
+		if id != "" && !seen[id] {
+			seen[id] = true
+			deduped = append(deduped, id)
+		}
+	}
+	result := make(map[string]string, len(deduped))
+	for _, id := range deduped {
+		e, err := GetEntry(ctx, id)
+		if err != nil || e == nil || e.Timestamp == "" {
+			continue
+		}
+		date := e.Timestamp
+		if len(date) > 10 {
+			date = date[:10]
+		}
+		result[id] = date
+	}
+	return result, nil
+}
+
 // UpdateEntry updates an entry's content.
 func UpdateEntry(ctx context.Context, entryUUID, newContent string) error {
 	client, err := GetFirestoreClient(ctx)

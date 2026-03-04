@@ -21,12 +21,14 @@ import (
 const KnowledgeCollection = "knowledge_nodes"
 
 // KnowledgeNode represents an arbitrary piece of structured data (Person, Task, Goal, Fact).
+// JournalEntryIDs is populated when reading from Firestore (e.g. QuerySimilarNodes, SearchKnowledgeNodes) for source receipt linkage.
 type KnowledgeNode struct {
-	UUID      string `firestore:"-" json:"uuid"`
-	Content   string `firestore:"content" json:"content"`
-	NodeType  string `firestore:"node_type" json:"node_type"` // e.g., "list", "person", "fact"
-	Metadata  string `firestore:"metadata" json:"metadata"`   // JSON string of relationships/attributes
-	Timestamp string `firestore:"timestamp" json:"timestamp"`
+	UUID            string   `firestore:"-" json:"uuid"`
+	Content         string   `firestore:"content" json:"content"`
+	NodeType        string   `firestore:"node_type" json:"node_type"` // e.g., "list", "person", "fact"
+	Metadata        string   `firestore:"metadata" json:"metadata"`   // JSON string of relationships/attributes
+	Timestamp       string   `firestore:"timestamp" json:"timestamp"`
+	JournalEntryIDs []string `firestore:"-" json:"journal_entry_ids,omitempty"` // source entry UUIDs; set when loading from DB
 	// Note: embedding field is excluded from struct as it causes decoding issues with Firestore's vector type
 }
 
@@ -268,11 +270,12 @@ func QuerySimilarNodes(ctx context.Context, queryVector []float32, limit int) ([
 		// Extract fields manually to avoid issues with vector field decoding
 		data := doc.Data()
 		n := KnowledgeNode{
-			UUID:      doc.Ref.ID,
-			Content:   getStringField(data, "content"),
-			NodeType:  getStringField(data, "node_type"),
-			Metadata:  getStringField(data, "metadata"),
-			Timestamp: getStringField(data, "timestamp"),
+			UUID:            doc.Ref.ID,
+			Content:         getStringField(data, "content"),
+			NodeType:        getStringField(data, "node_type"),
+			Metadata:        getStringField(data, "metadata"),
+			Timestamp:       getStringField(data, "timestamp"),
+			JournalEntryIDs: getStringSliceField(data, "journal_entry_ids"),
 		}
 		nodes = append(nodes, n)
 		LoggerFrom(ctx).Debug("found node", "uuid", n.UUID, "content", truncateForLog(n.Content, 50))
@@ -333,11 +336,12 @@ func SearchKnowledgeNodes(ctx context.Context, keywords string, limit int) ([]Kn
 
 		if allMatch {
 			n := KnowledgeNode{
-				UUID:      doc.Ref.ID,
-				Content:   content,
-				NodeType:  getStringField(data, "node_type"),
-				Metadata:  metadata,
-				Timestamp: getStringField(data, "timestamp"),
+				UUID:            doc.Ref.ID,
+				Content:         content,
+				NodeType:        getStringField(data, "node_type"),
+				Metadata:        metadata,
+				Timestamp:       getStringField(data, "timestamp"),
+				JournalEntryIDs: getStringSliceField(data, "journal_entry_ids"),
 			}
 			nodes = append(nodes, n)
 			if len(nodes) >= limit {

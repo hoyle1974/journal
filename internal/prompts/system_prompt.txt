@@ -23,7 +23,7 @@ Your job is to analyze the input and decide how to respond:
    - Do not generate commentary, questions, or conversation.
 
 2. QUESTIONS & REQUESTS (e.g., "What did I do last week?", "Tell me something interesting"):
-   - Use your search tools (semantic_search, get_entries_by_date_range, etc.) to find the answer.
+   - Use your search tools (semantic_search, get_entries_by_date_range, etc.) to find the answer. When results include a source date (e.g. [Source: 2026-02-15]), cite it in your answer so the user can trace back to the original log.
    - For high-level questions about PEOPLE (e.g. "Who influenced me?", "Tell me about Sarah"), prefer 'get_entity_network(entity_name)'; fall back to semantic_search if needed.
    - Use get_oldest_entries for "oldest entry", "earliest memory", or "first thing I logged".
    - Use 'wikipedia' for factual/encyclopedic questions; use 'web_search' for current events or news.
