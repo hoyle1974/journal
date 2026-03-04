@@ -2,6 +2,7 @@ package jot
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -21,6 +22,12 @@ type Entry struct {
 	Content   string `firestore:"content" json:"content"`
 	Source    string `firestore:"source" json:"source"`
 	Timestamp string `firestore:"timestamp" json:"timestamp"`
+}
+
+// EntryWithAnalysis pairs an entry with its parsed journal_analysis (when present).
+type EntryWithAnalysis struct {
+	Entry    Entry
+	Analysis *JournalAnalysis
 }
 
 // =============================================================================
@@ -185,6 +192,65 @@ func GetEntriesByDateRange(ctx context.Context, startDate, endDate string, limit
 		entries = append(entries, e)
 	}
 	return entries, nil
+}
+
+// GetEntriesWithAnalysisByDateRange fetches entries in the date range and parses journal_analysis from each doc.
+// Entries without journal_analysis are included with Analysis == nil. Used by query_entities and roll-up.
+func GetEntriesWithAnalysisByDateRange(ctx context.Context, startDate, endDate string, limit int) ([]EntryWithAnalysis, error) {
+	client, err := GetFirestoreClient(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if limit <= 0 || limit > 500 {
+		limit = 200
+	}
+	if len(startDate) == 10 {
+		startDate = startDate + "T00:00:00"
+	}
+	if len(endDate) == 10 {
+		endDate = endDate + "T23:59:59"
+	}
+	iter := client.Collection(EntriesCollection).
+		Where("timestamp", ">=", startDate).
+		Where("timestamp", "<=", endDate).
+		OrderBy("timestamp", firestore.Desc).
+		Limit(limit).
+		Documents(ctx)
+	defer iter.Stop()
+
+	var result []EntryWithAnalysis
+	for {
+		doc, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return nil, WrapFirestoreIndexError(err)
+		}
+		data := doc.Data()
+		e := Entry{
+			UUID:      doc.Ref.ID,
+			Content:   getStringField(data, "content"),
+			Source:    getStringField(data, "source"),
+			Timestamp: getStringField(data, "timestamp"),
+		}
+		var analysis *JournalAnalysis
+		if raw := getStringField(data, "journal_analysis"); raw != "" {
+			var a JournalAnalysis
+			if jsonErr := json.Unmarshal([]byte(raw), &a); jsonErr == nil {
+				a.SourceID = e.UUID
+				for i := range a.Entities {
+					if a.Entities[i].SourceID == "" {
+						a.Entities[i].SourceID = e.UUID
+					}
+					a.Entities[i].Status = NormalizeEntityStatus(a.Entities[i].Status)
+				}
+				analysis = &a
+			}
+		}
+		result = append(result, EntryWithAnalysis{Entry: e, Analysis: analysis})
+	}
+	return result, nil
 }
 
 // SearchEntries searches entries containing keywords (case-insensitive).

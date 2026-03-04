@@ -2,13 +2,16 @@ package jot
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"strings"
 	"time"
 
 	"cloud.google.com/go/firestore"
+	"github.com/google/generative-ai-go/genai"
 	"github.com/jackstrohm/jot/internal/prompts"
+	"github.com/jackstrohm/jot/llmjson"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/api/iterator"
 )
@@ -278,6 +281,93 @@ func dreamerSynthesizeContexts(ctx context.Context, contextUUIDs map[string]stru
 	return synthesized, skippedLazy, nil
 }
 
+// gapDetectItem is one item from the gap-detection LLM response (array of objects).
+type gapDetectItem struct {
+	Kind     string `json:"kind"`
+	Question string `json:"question"`
+	Context  string `json:"context"`
+}
+
+// RunGapDetection compares the last 24h journal to relevant knowledge and appends any gaps/contradictions to PendingQuestions.
+func RunGapDetection(ctx context.Context, journalContext string, entryUUIDs []string) error {
+	ctx, span := StartSpan(ctx, "cron.gap_detection")
+	defer span.End()
+
+	if len(journalContext) < 100 {
+		return nil
+	}
+	vec, err := GenerateEmbedding(ctx, journalContext, EmbedTaskRetrievalDocument)
+	if err != nil {
+		return fmt.Errorf("gap detection embedding: %w", err)
+	}
+	nodes, err := QuerySimilarNodes(ctx, vec, 15)
+	if err != nil {
+		return fmt.Errorf("gap detection query nodes: %w", err)
+	}
+	var knowledgeLines []string
+	for _, n := range nodes {
+		knowledgeLines = append(knowledgeLines, fmt.Sprintf("[%s] %s", n.NodeType, truncateString(n.Content, 200)))
+	}
+	relevantKnowledge := strings.Join(knowledgeLines, "\n")
+	if len(relevantKnowledge) > 4000 {
+		relevantKnowledge = truncateToMaxBytes(relevantKnowledge, 4000) + "\n... (truncated)"
+	}
+
+	client, err := GetGeminiClient(ctx)
+	if err != nil {
+		return err
+	}
+	model := client.GenerativeModel(GetEffectiveModel(ctx, DreamerModel))
+	model.ResponseMIMEType = "application/json"
+	model.SetMaxOutputTokens(1024)
+	model.ResponseSchema = &genai.Schema{
+		Type: genai.TypeArray,
+		Items: &genai.Schema{
+			Type: genai.TypeObject,
+			Properties: map[string]*genai.Schema{
+				"kind":     {Type: genai.TypeString},
+				"question": {Type: genai.TypeString},
+				"context":  {Type: genai.TypeString},
+			},
+		},
+	}
+	userPrompt := prompts.FormatGapDetector(WrapAsUserData(SanitizePrompt(journalContext)), WrapAsUserData(relevantKnowledge))
+
+	apiCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	defer cancel()
+	GeminiCallsTotal.Inc()
+	resp, err := model.GenerateContent(apiCtx, genai.Text(userPrompt))
+	if err != nil {
+		span.RecordError(err)
+		return WrapLLMError(err)
+	}
+	text := extractTextFromResponse(resp)
+	var items []gapDetectItem
+	if err := json.Unmarshal([]byte(text), &items); err != nil {
+		if err := llmjson.RepairAndUnmarshal(text, &items); err != nil {
+			LoggerFrom(ctx).Debug("gap detection parse failed", "error", err, "raw", truncateString(text, 300))
+			return nil
+		}
+	}
+	if len(items) == 0 {
+		return nil
+	}
+	questions := make([]PendingQuestion, 0, len(items))
+	for _, it := range items {
+		kind := strings.TrimSpace(strings.ToLower(it.Kind))
+		if kind != "gap" && kind != "contradiction" {
+			kind = "gap"
+		}
+		questions = append(questions, PendingQuestion{
+			Question:       strings.TrimSpace(it.Question),
+			Kind:           kind,
+			Context:        strings.TrimSpace(it.Context),
+			SourceEntryIDs: entryUUIDs,
+		})
+	}
+	return InsertPendingQuestions(ctx, questions)
+}
+
 // extractDreamerPersonaFacts returns PERSONA-prefixed facts from the SelfModel specialist output.
 func extractDreamerPersonaFacts(outputs []*SpecialistOutput, domains []Domain) []string {
 	const personaPrefix = "PERSONA: "
@@ -457,6 +547,12 @@ func RunDreamer(ctx context.Context) (*DreamerResult, error) {
 	LoggerFrom(ctx).Info("dreamer merge complete", "before", totalFacts, "after", len(merged), "msg", fmt.Sprintf("dreamer merged %d facts into %d", totalFacts, len(merged)))
 
 	written, _ := dreamerWriteMergedFacts(ctx, merged, inputs.entryUUIDs)
+
+	if err = RunGapDetection(ctx, inputs.journalContext, inputs.entryUUIDs); err != nil {
+		LoggerFrom(ctx).Warn("dreamer gap detection failed", "error", err)
+	} else {
+		LoggerFrom(ctx).Info("dreamer gap detection completed")
+	}
 
 	synthesized, skippedLazy, _ := dreamerSynthesizeContexts(ctx, contextUUIDs)
 	if skippedLazy > 0 {

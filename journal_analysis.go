@@ -4,17 +4,27 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/google/generative-ai-go/genai"
 	"github.com/jackstrohm/jot/internal/prompts"
 	"github.com/jackstrohm/jot/llmjson"
 )
 
+// Canonical entity status values for queryability (e.g. filter Event "Party" where Status != Completed).
+const (
+	EntityStatusPlanned    = "Planned"
+	EntityStatusInProgress = "In-Progress"
+	EntityStatusStalled    = "Stalled"
+	EntityStatusCompleted  = "Completed"
+)
+
 // Entity represents a person, project, or event mentioned in a journal entry.
+// Status must be one of: Planned, In-Progress, Stalled, Completed (normalized after parse if needed).
 type Entity struct {
 	Name     string `json:"name"`
-	Type     string `json:"type"`     // e.g. "person", "project", "event"
-	Status   string `json:"status"`   // e.g. "ongoing", "planned", "resolved"
+	Type     string `json:"type"`     // "person", "project", "event", "place"
+	Status   string `json:"status"`   // canonical: Planned, In-Progress, Stalled, Completed
 	SourceID string `json:"source_id"` // entry UUID; required for traceability
 }
 
@@ -130,11 +140,12 @@ func AnalyzeJournalEntry(ctx context.Context, entryContent, entryUUID, entryTime
 			}
 		}
 	}
-	// Consistency guardrail: ensure every entity and open_loop has source_id
+	// Consistency guardrail: ensure every entity and open_loop has source_id; normalize entity status
 	for i := range analysis.Entities {
 		if analysis.Entities[i].SourceID == "" {
 			analysis.Entities[i].SourceID = entryUUID
 		}
+		analysis.Entities[i].Status = NormalizeEntityStatus(analysis.Entities[i].Status)
 	}
 	for j := range analysis.OpenLoops {
 		if analysis.OpenLoops[j].SourceID == "" {
@@ -143,6 +154,25 @@ func AnalyzeJournalEntry(ctx context.Context, entryContent, entryUUID, entryTime
 	}
 	analysis.SourceID = entryUUID
 	return &analysis, nil
+}
+
+// NormalizeEntityStatus maps LLM output to canonical status (Planned, In-Progress, Stalled, Completed).
+func NormalizeEntityStatus(s string) string {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "planned", "planning", "pending", "scheduled":
+		return EntityStatusPlanned
+	case "in-progress", "in progress", "ongoing", "active", "started":
+		return EntityStatusInProgress
+	case "stalled", "blocked", "on hold", "paused":
+		return EntityStatusStalled
+	case "completed", "done", "finished", "resolved":
+		return EntityStatusCompleted
+	default:
+		if s == "" {
+			return EntityStatusInProgress // default for unspecified
+		}
+		return s // preserve if already canonical or unknown
+	}
 }
 
 // parseOpenLoops unmarshals open_loops from raw JSON, supporting either []OpenLoop or legacy []string.

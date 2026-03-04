@@ -196,4 +196,67 @@ func registerJournalTools() {
 			return tools.OK("Found %d entries from '%s':\n%s", len(entries), source, result)
 		},
 	})
+
+	tools.Register(&tools.Tool{
+		Name:        "query_entities",
+		Description: "Query extracted entities (person, project, event, place) by type, name, and status. Use when the user asks 'what do I have left for X', 'status of the party', or tasks for a specific project/event. Status values: Planned, In-Progress, Stalled, Completed. Filter by status to find incomplete work (e.g. exclude Completed).",
+		Category:    "journal",
+		Params: []tools.Param{
+			tools.OptionalStringParam("start_date", "Start date (YYYY-MM-DD or natural: last week, yesterday). Default: 30 days ago."),
+			tools.OptionalStringParam("end_date", "End date (YYYY-MM-DD or natural: today). Default: today."),
+			tools.OptionalStringParam("entity_type", "Filter by type: person, project, event, place"),
+			tools.OptionalStringParam("name", "Filter by entity name (substring match, case-insensitive)"),
+			tools.OptionalStringParam("status", "Filter by status: Planned, In-Progress, Stalled, Completed. Omit to include all."),
+			tools.LimitParam(50, 200),
+		},
+		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
+			startDate := args.String("start_date", "30 days ago")
+			endDate := args.String("end_date", "today")
+			startStr, endStr, err := jot.ResolveDateRange(startDate, endDate)
+			if err != nil {
+				return tools.Fail("Date range error: %v", err)
+			}
+			limit := args.IntBounded("limit", 50, 1, 200)
+			withAnalyses, err := jot.GetEntriesWithAnalysisByDateRange(ctx, startStr, endStr, limit)
+			if err != nil {
+				return tools.Fail("Error: %v", err)
+			}
+			entityType := strings.ToLower(strings.TrimSpace(args.String("entity_type", "")))
+			nameSubstr := strings.ToLower(strings.TrimSpace(args.String("name", "")))
+			statusFilter := strings.TrimSpace(args.String("status", ""))
+
+			var lines []string
+			seen := make(map[string]bool) // dedupe by "name|type|status|sourceID"
+			for _, ew := range withAnalyses {
+				if ew.Analysis == nil {
+					continue
+				}
+				entryDate := ew.Entry.Timestamp
+				if len(entryDate) > 10 {
+					entryDate = entryDate[:10]
+				}
+				for _, ent := range ew.Analysis.Entities {
+					if entityType != "" && strings.ToLower(ent.Type) != entityType {
+						continue
+					}
+					if nameSubstr != "" && !strings.Contains(strings.ToLower(ent.Name), nameSubstr) {
+						continue
+					}
+					if statusFilter != "" && ent.Status != statusFilter {
+						continue
+					}
+					key := fmt.Sprintf("%s|%s|%s|%s", ent.Name, ent.Type, ent.Status, ent.SourceID)
+					if seen[key] {
+						continue
+					}
+					seen[key] = true
+					lines = append(lines, fmt.Sprintf("- %s (%s) Status: %s [Source: %s]", ent.Name, ent.Type, ent.Status, entryDate))
+				}
+			}
+			if len(lines) == 0 {
+				return tools.OK("No matching entities found between %s and %s.", startStr, endStr)
+			}
+			return tools.OK("Entities between %s and %s:\n%s", startStr, endStr, strings.Join(lines, "\n"))
+		},
+	})
 }

@@ -129,6 +129,16 @@ func JotAPI(w http.ResponseWriter, r *http.Request) {
 		handleDream(rw, r.WithContext(ctx))
 	case path == "/janitor":
 		handleJanitor(rw, r.WithContext(ctx))
+	case path == "/rollup":
+		handleRollup(rw, r.WithContext(ctx))
+	case path == "/pending-questions":
+		handlePendingQuestions(rw, r.WithContext(ctx))
+	case strings.HasPrefix(path, "/pending-questions/"):
+		if id, suffix, ok := parsePendingQuestionPath(path); ok && suffix == "resolve" {
+			handlePendingQuestionResolve(rw, r.WithContext(ctx), id)
+		} else {
+			writeJSON(rw, http.StatusNotFound, map[string]string{"error": "Not found"})
+		}
 	case path == "/webhook":
 		handleWebhook(rw, r.WithContext(ctx))
 	case path == "/sms":
@@ -159,10 +169,13 @@ func JotAPI(w http.ResponseWriter, r *http.Request) {
 				"POST /sync",
 				"POST /dream",
 				"POST /janitor",
+				"POST /rollup",
 				"POST /webhook",
 				"POST /sms",
 				"POST /decay-contexts",
 				"POST /backfill-embeddings",
+				"GET  /pending-questions",
+				"POST /pending-questions/:id/resolve",
 			},
 		})
 	}
@@ -173,6 +186,24 @@ func JotAPI(w http.ResponseWriter, r *http.Request) {
 	span.SetAttributes(map[string]string{
 		"http.status_code": fmt.Sprintf("%d", rw.statusCode),
 	})
+}
+
+// parsePendingQuestionPath parses "/pending-questions/{id}/resolve" into (id, "resolve", true). Otherwise returns ("", "", false).
+func parsePendingQuestionPath(path string) (id, suffix string, ok bool) {
+	const prefix = "/pending-questions/"
+	if !strings.HasPrefix(path, prefix) {
+		return "", "", false
+	}
+	rest := strings.TrimPrefix(path, prefix)
+	parts := strings.SplitN(rest, "/", 2)
+	if len(parts) < 1 || parts[0] == "" {
+		return "", "", false
+	}
+	id = parts[0]
+	if len(parts) == 2 {
+		suffix = strings.TrimSuffix(parts[1], "/")
+	}
+	return id, suffix, true
 }
 
 // responseWriter wraps http.ResponseWriter to capture the status code.

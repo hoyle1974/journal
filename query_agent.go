@@ -341,6 +341,7 @@ func RunQueryWithDebug(ctx context.Context, question, source string, debug bool)
 			"get_entity_network":        true,
 			"search_entries":            true,
 			"get_entries_by_date_range": true,
+			"query_entities":            true,
 			"wikipedia":                 true,
 			"web_search":                true,
 			"list_knowledge":            true,
@@ -611,7 +612,7 @@ func buildToolRepeatBackOffPrompt(toolName string) string {
 	switch toolName {
 	case "wikipedia":
 		return "You have already called wikipedia several times with similar queries. Try a different approach: use web_search for current or general information, or summarize what you have found so far and give your best answer."
-	case "semantic_search", "search_entries", "get_entries_by_date_range", "get_oldest_entries", "get_entity_network":
+	case "semantic_search", "search_entries", "get_entries_by_date_range", "query_entities", "get_oldest_entries", "get_entity_network":
 		return "You have already called " + toolName + " several times with similar arguments. Either use a different tool (e.g. web_search for external facts), or synthesize what you have and provide your best answer based on the information gathered."
 	case "web_search":
 		return "You have already called web_search several times. Summarize the results you have and provide your best answer; avoid repeating the same search."

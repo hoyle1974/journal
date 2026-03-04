@@ -2,6 +2,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -502,6 +503,22 @@ func cmdDream() {
 	fmt.Printf("Entries: %d | Extracted: %d | Written: %d\n", entries, extracted, written)
 }
 
+func cmdRollup() {
+	fmt.Println("Running roll-up (weekly + monthly summaries)...")
+	result, err := apiRequest("POST", "/rollup", nil, time.Duration(timeout.QuerySeconds)*time.Second)
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		os.Exit(1)
+	}
+	if result == nil {
+		fmt.Println("Error: No response from API")
+		os.Exit(1)
+	}
+	weekly := int(jsonFloat(result, "weekly_entries_rolled"))
+	monthly := int(jsonFloat(result, "monthly_weekly_nodes"))
+	fmt.Printf("Weekly entries rolled: %d | Monthly (weekly nodes): %d\n", weekly, monthly)
+}
+
 func cmdJanitor() {
 	fmt.Println("Running Janitor (garbage collection)...")
 	var result map[string]interface{}
@@ -702,6 +719,11 @@ func main() {
 
 	cmd := strings.ToLower(args[0])
 
+	// Before starting a journal/query session, check for pending clarification questions
+	if cmd == "log" || cmd == "l" || cmd == "query" || cmd == "q" {
+		maybePromptPendingQuestions()
+	}
+
 	switch cmd {
 	case "log", "l":
 		if len(args) < 2 {
@@ -753,6 +775,8 @@ func main() {
 		cmdDream()
 	case "janitor":
 		cmdJanitor()
+	case "rollup":
+		cmdRollup()
 
 	case "plan", "p":
 		if len(args) < 2 {
@@ -770,7 +794,48 @@ func main() {
 		cmdHelp(topic)
 
 	default:
+		maybePromptPendingQuestions()
 		input := strings.Join(args, " ")
 		cmdQuery(input)
 	}
+}
+
+// maybePromptPendingQuestions fetches unresolved pending questions and prompts the user to answer or skip.
+func maybePromptPendingQuestions() {
+	if APIBaseURL == "" {
+		return
+	}
+	result, err := apiRequest("GET", "/pending-questions", nil, RequestTimeout)
+	if err != nil || result == nil {
+		return
+	}
+	questionsRaw, ok := result["questions"].([]interface{})
+	if !ok || len(questionsRaw) == 0 {
+		return
+	}
+	fmt.Println("\n--- Pending clarifications (from your last dream run) ---")
+	for i, qRaw := range questionsRaw {
+		q, _ := qRaw.(map[string]interface{})
+		if q == nil {
+			continue
+		}
+		kind := jsonStr(q, "kind")
+		question := jsonStr(q, "question")
+		context := jsonStr(q, "context")
+		fmt.Printf("\n%d. [%s] %s\n", i+1, kind, question)
+		if context != "" {
+			fmt.Printf("   Context: %s\n", context)
+		}
+		fmt.Print("   Answer (or Enter to skip): ")
+		reader := bufio.NewReader(os.Stdin)
+		answer, _ := reader.ReadString('\n')
+		answer = strings.TrimSpace(answer)
+		if answer != "" {
+			uuid := jsonStr(q, "uuid")
+			if uuid != "" {
+				_, _ = apiRequest("POST", "/pending-questions/"+uuid+"/resolve", map[string]interface{}{"answer": answer}, RequestTimeout)
+			}
+		}
+	}
+	fmt.Println("---")
 }

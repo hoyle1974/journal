@@ -12,6 +12,7 @@ func TestToolDefinitionsComplete(t *testing.T) {
 		"get_recent_entries",
 		"get_oldest_entries",
 		"get_entries_by_date_range",
+		"query_entities",
 		"search_entries",
 		"count_entries",
 		"list_sources",

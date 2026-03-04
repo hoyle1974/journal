@@ -16,12 +16,14 @@ var rateLimitConfig = map[string]int{
 	"/sync":        5,
 	"/dream":       2,
 	"/janitor":     1,
+	"/rollup":      2,
 	"/log":         60,
 	"/entries":     60,
 	"/webhook":     20,
 	"/sms":         30,
 	"/decay-contexts":    5,
 	"/backfill-embeddings": 2,
+	"/pending-questions": 60,
 }
 
 // defaultRate is used for unlisted paths (health, metrics, etc.)
@@ -79,6 +81,9 @@ func rateLimitPath(path string) string {
 	}
 	if strings.HasPrefix(path, "/entries") {
 		return "/entries"
+	}
+	if strings.HasPrefix(path, "/pending-questions") {
+		return "/pending-questions"
 	}
 	return path
 }

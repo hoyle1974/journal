@@ -65,6 +65,12 @@ var specialistSelfmodelTxt string
 //go:embed specialist_evolution.txt
 var specialistEvolutionTxt string
 
+//go:embed gap_detector.txt
+var gapDetectorTxt string
+
+//go:embed roll_up.txt
+var rollUpTxt string
+
 var (
 	specialistMap   map[string]string
 	specialistMapOnce sync.Once
@@ -147,4 +153,20 @@ func FormatReflectionCheck(answer, semanticMemory string) string {
 // FormatKnowledgeGap formats the knowledge-gap block with the given gap list content.
 func FormatKnowledgeGap(gapListContent string) string {
 	return fmt.Sprintf(KnowledgeGapTemplate(), gapListContent)
+}
+
+// GapDetectorTemplate returns the gap-detector prompt template with two %s placeholders: recent journal, relevant knowledge.
+func GapDetectorTemplate() string { return gapDetectorTxt }
+
+// FormatGapDetector formats the gap-detector template with journal and knowledge text.
+func FormatGapDetector(recentJournal, relevantKnowledge string) string {
+	return fmt.Sprintf(GapDetectorTemplate(), recentJournal, relevantKnowledge)
+}
+
+// RollUpTemplate returns the roll-up prompt template with two %s: period label, journal analyses text.
+func RollUpTemplate() string { return rollUpTxt }
+
+// FormatRollUp formats the roll-up template with period and analyses text.
+func FormatRollUp(periodLabel, analysesText string) string {
+	return fmt.Sprintf(RollUpTemplate(), periodLabel, analysesText)
 }
