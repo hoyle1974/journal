@@ -62,24 +62,24 @@ func TestParsePlanJSON(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			plan, err := parsePlanJSON(tt.jsonText)
+			plan, err := ParsePlanJSON(tt.jsonText)
 			if tt.wantErr {
 				if err == nil {
-					t.Errorf("parsePlanJSON() expected error, got nil")
+					t.Errorf("ParsePlanJSON() expected error, got nil")
 				}
 				return
 			}
 			if err != nil {
-				t.Errorf("parsePlanJSON() unexpected error: %v", err)
+				t.Errorf("ParsePlanJSON() unexpected error: %v", err)
 				return
 			}
 			if plan == nil {
-				t.Errorf("parsePlanJSON() returned nil plan")
+				t.Errorf("ParsePlanJSON() returned nil plan")
 				return
 			}
 			phaseCount := len(plan.Phases)
 			if phaseCount != tt.wantPhases {
-				t.Errorf("parsePlanJSON() phases count = %d, want %d", phaseCount, tt.wantPhases)
+				t.Errorf("ParsePlanJSON() phases count = %d, want %d", phaseCount, tt.wantPhases)
 			}
 		})
 	}
@@ -93,9 +93,9 @@ func TestParsePlanJSON_PhaseStructure(t *testing.T) {
 		]
 	}`
 
-	plan, err := parsePlanJSON(jsonText)
+	plan, err := ParsePlanJSON(jsonText)
 	if err != nil {
-		t.Fatalf("parsePlanJSON() error: %v", err)
+		t.Fatalf("ParsePlanJSON() error: %v", err)
 	}
 
 	if len(plan.Phases) != 2 {

@@ -41,6 +41,11 @@ func (jotFOHEnv) GetEntry(ctx context.Context, entryUUID string) (*journal.Entry
 	return GetEntry(ctx, entryUUID)
 }
 
+// PlannerEnv: UpsertKnowledge delegates to jot.UpsertKnowledge.
+func (jotFOHEnv) UpsertKnowledge(ctx context.Context, content, nodeType, metadata string, journalEntryIDs []string) (string, error) {
+	return UpsertKnowledge(ctx, content, nodeType, metadata, journalEntryIDs)
+}
+
 // RunQuery runs a query against the journal using the agentic loop.
 func RunQuery(ctx context.Context, question, source string) *QueryResult {
 	return RunQueryWithDebug(ctx, question, source, true)

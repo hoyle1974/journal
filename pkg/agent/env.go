@@ -18,3 +18,9 @@ type FOHEnv interface {
 	// GetEntry returns the entry by UUID, or nil if not found.
 	GetEntry(ctx context.Context, entryUUID string) (*journal.Entry, error)
 }
+
+// PlannerEnv provides plan creation dependencies (knowledge graph writes).
+type PlannerEnv interface {
+	// UpsertKnowledge creates or updates a knowledge node. journalEntryIDs can be nil. Returns node UUID.
+	UpsertKnowledge(ctx context.Context, content, nodeType, metadata string, journalEntryIDs []string) (string, error)
+}
