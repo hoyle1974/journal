@@ -113,7 +113,7 @@ Complete the remaining file moves from the architecture refactor. After **each s
 
 ## Step 5: pkg/agent – foh, specialists, planner, prompter, dreamer, rollup
 
-**Note:** Full move is blocked until either (1) GetActiveContexts, GetActiveSignals, UpsertKnowledge, and related APIs live in `pkg/memory`, or (2) a large Env interface is implemented in jot. Prep done: `pkg/infra` has App.QueryModel(), DreamerModel(), EnqueueTask; llm.go (WrapLLMError); chat.go (ChatSession, NewChatSession, ExtractTextFromResponse, HasFunctionCalls, ExtractFunctionCalls, EmptyResponseReason). `pkg/utils` has prompt.go (SanitizePrompt, WrapAsUserData, TruncateString, FirstSentence).
+**Done (partial):** FOH (query agent) moved to `pkg/agent`: `RunQuery`/`RunQueryWithDebug` take `FOHEnv`; jot implements `jotFOHEnv` and delegates. Specialists, planner, prompter, dreamer, rollup remain in jot until further Env or memory move.
 
 **Goal:** Create `pkg/agent` and move FOH, specialists, planner, prompter, dreamer, and rollup.
 
