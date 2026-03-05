@@ -46,6 +46,45 @@ func (jotFOHEnv) UpsertKnowledge(ctx context.Context, content, nodeType, metadat
 	return UpsertKnowledge(ctx, content, nodeType, metadata, journalEntryIDs)
 }
 
+// PrompterEnv: GetActiveContexts converts jot results to agent.ActiveContextItem.
+func (jotFOHEnv) GetActiveContexts(ctx context.Context, limit int) ([]agent.ActiveContextItem, error) {
+	nodes, metas, err := GetActiveContexts(ctx, limit)
+	if err != nil || len(nodes) == 0 {
+		return nil, err
+	}
+	out := make([]agent.ActiveContextItem, 0, len(nodes))
+	for i, n := range nodes {
+		if i >= len(metas) {
+			break
+		}
+		out = append(out, agent.ActiveContextItem{
+			ContextName: metas[i].ContextName,
+			Relevance:   metas[i].Relevance,
+			Content:     n.Content,
+		})
+	}
+	return out, nil
+}
+
+// PrompterEnv: GetActiveSignals delegates to jot.GetActiveSignals.
+func (jotFOHEnv) GetActiveSignals(ctx context.Context, limit int) (string, error) {
+	return GetActiveSignals(ctx, limit)
+}
+
+// SpecialistsEnv: FindContextContent returns content of the named context.
+func (jotFOHEnv) FindContextContent(ctx context.Context, name string) (string, error) {
+	node, _, err := FindContextByName(ctx, name)
+	if err != nil || node == nil {
+		return "", err
+	}
+	return node.Content, nil
+}
+
+// SpecialistsEnv: UpsertSemanticMemory delegates to jot.UpsertSemanticMemory.
+func (jotFOHEnv) UpsertSemanticMemory(ctx context.Context, content, nodeType, domain string, significanceWeight float64, entityLinks, journalEntryIDs []string) (string, error) {
+	return UpsertSemanticMemory(ctx, content, nodeType, domain, significanceWeight, entityLinks, journalEntryIDs)
+}
+
 // RunQuery runs a query against the journal using the agentic loop.
 func RunQuery(ctx context.Context, question, source string) *QueryResult {
 	return RunQueryWithDebug(ctx, question, source, true)
