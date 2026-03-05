@@ -1,0 +1,70 @@
+package api
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"time"
+
+	"github.com/jackstrohm/jot/pkg/infra"
+	"github.com/jackstrohm/jot/pkg/utils"
+)
+
+func handleProcessEntry(s *Server, w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
+		return
+	}
+	var data struct {
+		UUID      string `json:"uuid"`
+		Content   string `json:"content"`
+		Timestamp string `json:"timestamp"`
+		Source    string `json:"source"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("Invalid JSON: %v", err)})
+		return
+	}
+	if data.UUID == "" || data.Content == "" || data.Source == "" {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "uuid, content, and source are required"})
+		return
+	}
+	ctx := r.Context()
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+	if err := s.Backend.ProcessEntry(ctx, data.UUID, data.Content, data.Timestamp, data.Source); err != nil {
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func handleSaveQuery(s *Server, w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
+		return
+	}
+	var data struct {
+		Question string `json:"question"`
+		Answer   string `json:"answer"`
+		Source   string `json:"source"`
+		IsGap    bool   `json:"is_gap"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("Invalid JSON: %v", err)})
+		return
+	}
+	if data.Question == "" || data.Source == "" {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "question and source are required"})
+		return
+	}
+	ctx := r.Context()
+	if _, err := s.Backend.SaveQuery(ctx, data.Question, data.Answer, data.Source, data.IsGap); err != nil {
+		infra.LoggerFrom(ctx).Error("save-query failed", "error", err)
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	infra.LoggerFrom(ctx).Info("save-query", "question", utils.TruncateString(data.Question, 50))
+	WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}

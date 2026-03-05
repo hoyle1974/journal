@@ -138,11 +138,11 @@ Complete the remaining file moves from the architecture refactor. After **each s
 
 ---
 
-## Step 6: internal/api – router, handlers, ratelimit, auth_test
+## Step 6: internal/api – router, handlers, ratelimit, auth_test ✅ COMPLETE
 
-**Done (partial):** Ratelimit moved to `internal/api` (GetClientIP, CheckRateLimit, StartRateLimitCleanup, RateLimitPath). Jot’s `ratelimit.go` is a thin wrapper that delegates to api. Router and handlers remain in jot because moving them would require api to import jot (circular dependency). To complete Step 6: introduce a Backend (or per-handler Env) interface on Server so api handlers can call domain logic via `pkg/agent`, `pkg/journal`, `pkg/memory`, `pkg/infra` without importing root jot; then move router and handlers into api.
+**Done:** Backend interface added in `internal/api/backend.go`. Router and all HTTP handlers live in `internal/api` (handlers_health, handlers_legal, handlers_log, handlers_dream, handlers_entries, handlers_internal, handlers_sms, handlers_webhook, handlers_sync). Main uses `api.NewServer(..., JotBackend, api.Router)` and `api.StartRateLimitCleanup()`. Jot implements `api.Backend` in `api_backend.go` and keeps `process_entry.go`, `handlers_helpers.go`, and domain logic; duplicate jot handler files were removed. Auth and handler tests updated (auth_test and main_test in jot; EntryUUIDRegex test in internal/api).
 
-**Goal:** Move HTTP routing and all handlers into `internal/api` so the transport layer lives in one package. Root `jot` no longer contains main.go (router) or handlers; it only keeps config/default_config, re-exports if any, and tool/LLM glue used by api and agent.
+**Goal:** Move HTTP routing and all handlers into `internal/api` so the transport layer lives in one package. Root `jot` no longer contains the router or handler implementations; it keeps config, ProcessEntry, handlers_helpers, api_backend, and domain code.
 
 **Moves:**
 
@@ -175,11 +175,13 @@ Complete the remaining file moves from the architecture refactor. After **each s
 
 ---
 
-## Step 7: Root cleanup and entry-point wiring
+## Step 7: Root cleanup and entry-point wiring ✅ COMPLETE
 
 **Goal:** Ensure a single clear entry point for the Cloud Function and for local/server; no dead code in root.
 
-**Actions:**
+**Done:** Entry point confirmed: cmd/server imports the jot package; jot init registers JotAPI and builds the server with api.Router. Removed obsolete jot ratelimit wrapper (ratelimit.go); ratelimit_test.go now calls api.GetClientIP and api.CheckRateLimit directly. Build and tests pass for all packages and cmd/admin, cmd/server, cmd/jot.
+
+**Actions (completed):**
 
 1. Confirm **cmd/server** (and optionally cmd/jot) imports `_ "github.com/jackstrohm/jot/internal/api"` so that api’s init runs and registers `JotAPI`. If root used to have `func main()`, either remove it or leave a minimal main that runs the framework (if still building from root for some target).
 2. Remove any duplicate or obsolete re-exports from root now that api and infra own routing and app.
@@ -196,8 +198,8 @@ Complete the remaining file moves from the architecture refactor. After **each s
 - [ ] **Step 3** – pkg/memory (schema, knowledge, migrate, context, rag) → build + test + commit  
 - [ ] **Step 4** – pkg/journal (entries, analysis, queries) → build + test + commit  
 - [ ] **Step 5** – pkg/agent (foh, specialists, planner, prompter, dreamer, rollup) → build + test + commit  
-- [ ] **Step 6** – internal/api (router, handlers, ratelimit, auth_test) → build + test + commit  
-- [ ] **Step 7** – Root cleanup and entry-point wiring → build + test + commit  
+- [x] **Step 6** – internal/api (router, handlers, ratelimit, Backend) → build + test + commit  
+- [x] **Step 7** – Root cleanup and entry-point wiring → build + test + commit  
 
 ---
 

@@ -48,7 +48,7 @@ func TestGetClientIP(t *testing.T) {
 			for k, v := range tt.headers {
 				r.Header.Set(k, v)
 			}
-			got := getClientIP(r)
+			got := api.GetClientIP(r)
 			if got != tt.expected {
 				t.Errorf("getClientIP() = %q, want %q", got, tt.expected)
 			}
@@ -86,7 +86,7 @@ func TestCheckRateLimit_AllowsWithinLimit(t *testing.T) {
 	r.Header.Set("X-Forwarded-For", "192.168.1.1")
 
 	// First request should succeed
-	if !checkRateLimit(r, "/query") {
+	if !api.CheckRateLimit(r, "/query") {
 		t.Error("first request should be allowed")
 	}
 }
@@ -99,7 +99,7 @@ func TestCheckRateLimit_ExceedsLimit(t *testing.T) {
 	for i := 0; i < 30; i++ {
 		r, _ := http.NewRequest("GET", "/query", nil)
 		r.Header.Set("X-Forwarded-For", testIP)
-		if !checkRateLimit(r, "/query") {
+		if !api.CheckRateLimit(r, "/query") {
 			t.Errorf("request %d should be allowed (within limit)", i+1)
 		}
 	}
@@ -107,7 +107,7 @@ func TestCheckRateLimit_ExceedsLimit(t *testing.T) {
 	// 31st request should be rate limited
 	r, _ := http.NewRequest("GET", "/query", nil)
 	r.Header.Set("X-Forwarded-For", testIP)
-	if checkRateLimit(r, "/query") {
+	if api.CheckRateLimit(r, "/query") {
 		t.Error("31st request should be rate limited")
 	}
 }
