@@ -4,65 +4,33 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sort"
-	"strings"
 	"time"
 
 	"cloud.google.com/go/firestore"
+	"github.com/jackstrohm/jot/pkg/infra"
+	"github.com/jackstrohm/jot/pkg/journal"
 	"google.golang.org/api/iterator"
 )
 
-// =============================================================================
-// ENTRY TYPES
-// =============================================================================
-
-// Entry represents a journal entry.
-type Entry struct {
-	UUID      string `firestore:"-" json:"uuid"`
-	Content   string `firestore:"content" json:"content"`
-	Source    string `firestore:"source" json:"source"`
-	Timestamp string `firestore:"timestamp" json:"timestamp"`
-}
+// Entry is a journal entry. Re-exported from journal.
+type Entry = journal.Entry
 
 // EntryWithAnalysis pairs an entry with its parsed journal_analysis (when present).
 type EntryWithAnalysis struct {
-	Entry    Entry
+	Entry    journal.Entry
 	Analysis *JournalAnalysis
 }
 
-// =============================================================================
-// ENTRY OPERATIONS
-// =============================================================================
-
-// AddEntry adds a new entry to Firestore. Returns the entry UUID.
+// AddEntry adds a new entry to Firestore and enqueues process-entry. Returns the entry UUID.
 func AddEntry(ctx context.Context, content, source string, timestamp *string) (string, error) {
-	if content == "" {
-		return "", fmt.Errorf("content is required and must be a non-empty string")
+	entryUUID, err := journal.AddEntry(ctx, content, source, timestamp)
+	if err != nil {
+		return "", err
 	}
-	if source == "" {
-		return "", fmt.Errorf("source is required and must be a string")
-	}
-
-	entryUUID := GenerateUUID()
 	ts := time.Now().Format(time.RFC3339)
 	if timestamp != nil && *timestamp != "" {
 		ts = *timestamp
 	}
-
-	client, err := GetFirestoreClient(ctx)
-	if err != nil {
-		return "", err
-	}
-
-	_, err = client.Collection(EntriesCollection).Doc(entryUUID).Set(ctx, map[string]interface{}{
-		"content":   content,
-		"source":    source,
-		"timestamp": ts,
-	})
-	if err != nil {
-		return "", err
-	}
-
 	payload := map[string]interface{}{
 		"uuid":      entryUUID,
 		"content":   content,
@@ -71,7 +39,6 @@ func AddEntry(ctx context.Context, content, source string, timestamp *string) (s
 	}
 	if err := EnqueueTask(ctx, "/internal/process-entry", payload); err != nil {
 		LoggerFrom(ctx).Warn("failed to enqueue process-entry task, running inline", "entry_uuid", entryUUID, "error", err)
-		// Run process-entry inline (e.g. when JOT_API_URL is not set or Cloud Tasks unavailable)
 		app := GetApp(ctx)
 		if app != nil {
 			bgCtx := WithApp(context.Background(), app)
@@ -80,87 +47,27 @@ func AddEntry(ctx context.Context, content, source string, timestamp *string) (s
 			})
 		}
 	}
-
 	return entryUUID, nil
 }
 
 // GetEntries fetches entries from Firestore, ordered by timestamp descending.
 func GetEntries(ctx context.Context, limit int) ([]Entry, error) {
-	client, err := GetFirestoreClient(ctx)
-	if err != nil {
-		return nil, err
-	}
-	query := client.Collection(EntriesCollection).
-		OrderBy("timestamp", firestore.Desc).
-		Limit(limit)
-	return QueryDocuments(ctx, query, func(doc *firestore.DocumentSnapshot) (Entry, error) {
-		var e Entry
-		if err := doc.DataTo(&e); err != nil {
-			return Entry{}, err
-		}
-		e.UUID = doc.Ref.ID
-		return e, nil
-	})
+	return journal.GetEntries(ctx, limit)
 }
 
 // GetEntriesAsc fetches entries from Firestore, ordered by timestamp ascending (oldest first).
-// Use this when the user asks for the "oldest" or "earliest" entry or memory.
 func GetEntriesAsc(ctx context.Context, limit int) ([]Entry, error) {
-	client, err := GetFirestoreClient(ctx)
-	if err != nil {
-		return nil, err
-	}
-	query := client.Collection(EntriesCollection).
-		OrderBy("timestamp", firestore.Asc).
-		Limit(limit)
-	return QueryDocuments(ctx, query, func(doc *firestore.DocumentSnapshot) (Entry, error) {
-		var e Entry
-		if err := doc.DataTo(&e); err != nil {
-			return Entry{}, err
-		}
-		e.UUID = doc.Ref.ID
-		return e, nil
-	})
+	return journal.GetEntriesAsc(ctx, limit)
 }
 
 // GetEntriesByDateRange fetches entries within a date range.
 func GetEntriesByDateRange(ctx context.Context, startDate, endDate string, limit int) ([]Entry, error) {
-	client, err := GetFirestoreClient(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	// Normalize dates to include full day
-	if len(startDate) == 10 {
-		startDate = startDate + "T00:00:00"
-	}
-	if len(endDate) == 10 {
-		endDate = endDate + "T23:59:59"
-	}
-
-	query := client.Collection(EntriesCollection).
-		Where("timestamp", ">=", startDate).
-		Where("timestamp", "<=", endDate).
-		OrderBy("timestamp", firestore.Desc).
-		Limit(limit)
-	entries, err := QueryDocuments(ctx, query, func(doc *firestore.DocumentSnapshot) (Entry, error) {
-		var e Entry
-		if err := doc.DataTo(&e); err != nil {
-			return Entry{}, err
-		}
-		e.UUID = doc.Ref.ID
-		return e, nil
-	})
-	if err != nil {
-		return nil, WrapFirestoreIndexError(err)
-	}
-	return entries, nil
+	return journal.GetEntriesByDateRange(ctx, startDate, endDate, limit)
 }
 
 // GetEntriesWithAnalysisByDateRange fetches entries in the date range and parses journal_analysis from each doc.
-// Entries without journal_analysis are included with Analysis == nil. Used by query_entities and roll-up.
 func GetEntriesWithAnalysisByDateRange(ctx context.Context, startDate, endDate string, limit int) ([]EntryWithAnalysis, error) {
-	client, err := GetFirestoreClient(ctx)
+	client, err := infra.GetFirestoreClient(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -178,9 +85,9 @@ func GetEntriesWithAnalysisByDateRange(ctx context.Context, startDate, endDate s
 		Where("timestamp", "<=", endDate).
 		OrderBy("timestamp", firestore.Desc).
 		Limit(limit)
-	result, err := QueryDocuments(ctx, query, func(doc *firestore.DocumentSnapshot) (EntryWithAnalysis, error) {
+	result, err := infra.QueryDocuments(ctx, query, func(doc *firestore.DocumentSnapshot) (EntryWithAnalysis, error) {
 		data := doc.Data()
-		e := Entry{
+		e := journal.Entry{
 			UUID:      doc.Ref.ID,
 			Content:   getStringField(data, "content"),
 			Source:    getStringField(data, "source"),
@@ -210,275 +117,60 @@ func GetEntriesWithAnalysisByDateRange(ctx context.Context, startDate, endDate s
 
 // SearchEntries searches entries containing keywords (case-insensitive).
 func SearchEntries(ctx context.Context, keywords string, limit int) ([]Entry, error) {
-	client, err := GetFirestoreClient(ctx)
-	if err != nil {
-		return nil, err
-	}
-	keywordsLower := strings.Fields(strings.ToLower(keywords))
-	query := client.Collection(EntriesCollection).
-		OrderBy("timestamp", firestore.Desc).
-		Limit(500)
-	entries, err := QueryDocuments(ctx, query, func(doc *firestore.DocumentSnapshot) (Entry, error) {
-		var e Entry
-		if err := doc.DataTo(&e); err != nil {
-			return Entry{}, err
-		}
-		contentLower := strings.ToLower(e.Content)
-		for _, kw := range keywordsLower {
-			if !strings.Contains(contentLower, kw) {
-				return Entry{}, fmt.Errorf("skip")
-			}
-		}
-		e.UUID = doc.Ref.ID
-		return e, nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	if len(entries) > limit {
-		entries = entries[:limit]
-	}
-	return entries, nil
+	return journal.SearchEntries(ctx, keywords, limit)
 }
 
 // CountEntries counts entries, optionally within a date range.
 func CountEntries(ctx context.Context, startDate, endDate *string) (int, error) {
-	client, err := GetFirestoreClient(ctx)
-	if err != nil {
-		return 0, err
-	}
-
-	var query firestore.Query
-	if startDate != nil && endDate != nil && *startDate != "" && *endDate != "" {
-		start := *startDate
-		end := *endDate
-		if len(start) == 10 {
-			start = start + "T00:00:00"
-		}
-		if len(end) == 10 {
-			end = end + "T23:59:59"
-		}
-		query = client.Collection(EntriesCollection).
-			Where("timestamp", ">=", start).
-			Where("timestamp", "<=", end)
-	} else {
-		query = client.Collection(EntriesCollection).Query
-	}
-
-	iter := query.Documents(ctx)
-	defer iter.Stop()
-
-	count := 0
-	for {
-		_, err := iter.Next()
-		if err == iterator.Done {
-			break
-		}
-		if err != nil {
-			return 0, WrapFirestoreIndexError(err)
-		}
-		count++
-	}
-	return count, nil
+	return journal.CountEntries(ctx, startDate, endDate)
 }
 
-// GetUniqueSources gets all unique sources from entries.
+// GetUniqueSources returns all unique source values from entries.
 func GetUniqueSources(ctx context.Context) ([]string, error) {
-	client, err := GetFirestoreClient(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	iter := client.Collection(EntriesCollection).Limit(1000).Documents(ctx)
-	defer iter.Stop()
-
-	sources := make(map[string]bool)
-	for {
-		doc, err := iter.Next()
-		if err == iterator.Done {
-			break
-		}
-		if err != nil {
-			return nil, err
-		}
-
-		data := doc.Data()
-		if source, ok := data["source"].(string); ok && source != "" {
-			sources[source] = true
-		}
-	}
-
-	result := make([]string, 0, len(sources))
-	for s := range sources {
-		result = append(result, s)
-	}
-	sort.Strings(result)
-	return result, nil
+	return journal.GetUniqueSources(ctx)
 }
 
-// GetEntriesBySource gets entries filtered by source (partial match).
+// GetEntriesBySource returns entries filtered by source (partial match).
 func GetEntriesBySource(ctx context.Context, sourceFilter string, limit int) ([]Entry, error) {
-	client, err := GetFirestoreClient(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	sourceFilterLower := strings.ToLower(sourceFilter)
-	query := client.Collection(EntriesCollection).
-		OrderBy("timestamp", firestore.Desc).
-		Limit(500)
-	entries, err := QueryDocuments(ctx, query, func(doc *firestore.DocumentSnapshot) (Entry, error) {
-		var e Entry
-		if err := doc.DataTo(&e); err != nil {
-			return Entry{}, err
-		}
-		if !strings.Contains(strings.ToLower(e.Source), sourceFilterLower) {
-			return Entry{}, fmt.Errorf("skip")
-		}
-		e.UUID = doc.Ref.ID
-		return e, nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	if len(entries) > limit {
-		entries = entries[:limit]
-	}
-	return entries, nil
+	return journal.GetEntriesBySource(ctx, sourceFilter, limit)
 }
 
 // GetEntry fetches a single entry by UUID.
 func GetEntry(ctx context.Context, entryUUID string) (*Entry, error) {
-	client, err := GetFirestoreClient(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	doc, err := client.Collection(EntriesCollection).Doc(entryUUID).Get(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	var e Entry
-	if err := doc.DataTo(&e); err != nil {
-		return nil, err
-	}
-	e.UUID = doc.Ref.ID
-	return &e, nil
+	return journal.GetEntry(ctx, entryUUID)
 }
 
-// GetEntryDates fetches timestamps for the given entry UUIDs and returns a map from UUID to date string (YYYY-MM-DD).
-// Missing or failed entries are omitted. Used for source receipt display (e.g. "Source: 2026-02-15").
+// GetEntryDates fetches timestamps for the given entry UUIDs (map UUID -> YYYY-MM-DD). Used for source receipt.
 func GetEntryDates(ctx context.Context, entryIDs []string) (map[string]string, error) {
-	if len(entryIDs) == 0 {
-		return nil, nil
-	}
-	seen := make(map[string]bool)
-	deduped := make([]string, 0, len(entryIDs))
-	for _, id := range entryIDs {
-		if id != "" && !seen[id] {
-			seen[id] = true
-			deduped = append(deduped, id)
-		}
-	}
-	result := make(map[string]string, len(deduped))
-	for _, id := range deduped {
-		e, err := GetEntry(ctx, id)
-		if err != nil || e == nil || e.Timestamp == "" {
-			continue
-		}
-		date := TruncateTimestamp(e.Timestamp, DateDisplayLen)
-		result[id] = date
-	}
-	return result, nil
+	return journal.GetEntryDates(ctx, entryIDs)
 }
 
 // UpdateEntry updates an entry's content.
 func UpdateEntry(ctx context.Context, entryUUID, newContent string) error {
-	client, err := GetFirestoreClient(ctx)
-	if err != nil {
-		return err
-	}
-
-	_, err = client.Collection(EntriesCollection).Doc(entryUUID).Update(ctx, []firestore.Update{
-		{Path: "content", Value: newContent},
-	})
-	return err
+	return journal.UpdateEntry(ctx, entryUUID, newContent)
 }
 
 // DeleteEntry deletes a single entry.
 func DeleteEntry(ctx context.Context, entryUUID string) error {
-	client, err := GetFirestoreClient(ctx)
-	if err != nil {
-		return err
-	}
-
-	_, err = client.Collection(EntriesCollection).Doc(entryUUID).Delete(ctx)
-	return err
+	return journal.DeleteEntry(ctx, entryUUID)
 }
 
 // DeleteEntries deletes multiple entries.
 func DeleteEntries(ctx context.Context, entryUUIDs []string) error {
-	if len(entryUUIDs) == 0 {
-		return nil
-	}
-
-	client, err := GetFirestoreClient(ctx)
-	if err != nil {
-		return err
-	}
-
-	batch := client.Batch()
-	for _, uuid := range entryUUIDs {
-		batch.Delete(client.Collection(EntriesCollection).Doc(uuid))
-	}
-	_, err = batch.Commit(ctx)
-	return err
+	return journal.DeleteEntries(ctx, entryUUIDs)
 }
 
-// GetDatesWithEntries gets list of dates that have entries.
+// GetDatesWithEntries returns sorted dates (YYYY-MM-DD) that have at least one entry.
 func GetDatesWithEntries(ctx context.Context) ([]string, error) {
-	client, err := GetFirestoreClient(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	iter := client.Collection(EntriesCollection).
-		OrderBy("timestamp", firestore.Asc).
-		Documents(ctx)
-	defer iter.Stop()
-
-	dates := make(map[string]bool)
-	for {
-		doc, err := iter.Next()
-		if err == iterator.Done {
-			break
-		}
-		if err != nil {
-			return nil, err
-		}
-
-		data := doc.Data()
-		if ts, ok := data["timestamp"].(string); ok && len(ts) >= 10 {
-			dates[ts[:10]] = true
-		}
-	}
-
-	result := make([]string, 0, len(dates))
-	for d := range dates {
-		result = append(result, d)
-	}
-	sort.Strings(result)
-	return result, nil
+	return journal.GetDatesWithEntries(ctx)
 }
 
 // QuerySimilarEntries performs a KNN vector search on journal entries.
-// Requires a Firestore vector index on entries.embedding (768 dimensions).
 func QuerySimilarEntries(ctx context.Context, queryVector []float32, limit int) ([]Entry, error) {
 	ctx, span := StartSpan(ctx, "entries.query_similar")
 	defer span.End()
 
-	client, err := GetFirestoreClient(ctx)
+	client, err := infra.GetFirestoreClient(ctx)
 	if err != nil {
 		span.RecordError(err)
 		return nil, err
@@ -518,7 +210,6 @@ func QuerySimilarEntries(ctx context.Context, queryVector []float32, limit int) 
 }
 
 // BackfillEntryEmbeddings finds entries without embeddings, generates them, and updates docs.
-// Processes up to limit entries per call. Returns number processed and any error.
 func BackfillEntryEmbeddings(ctx context.Context, limit int) (int, error) {
 	ctx, span := StartSpan(ctx, "entries.backfill_embeddings")
 	defer span.End()
@@ -527,7 +218,7 @@ func BackfillEntryEmbeddings(ctx context.Context, limit int) (int, error) {
 		limit = 20
 	}
 
-	client, err := GetFirestoreClient(ctx)
+	client, err := infra.GetFirestoreClient(ctx)
 	if err != nil {
 		return 0, err
 	}
