@@ -47,21 +47,22 @@ func GetApp(ctx context.Context) *App {
 // App holds runtime dependencies (Firestore, Gemini, Logger, worker pools).
 type App struct {
 	Logger *slog.Logger
+	cfg    *config.Config
 
-	firestoreClient       *firestore.Client
-	firestoreErr          error
-	geminiClient          *genai.Client
-	geminiErr             error
-	effectiveGeminiModel  string
-	effectiveDreamerModel string
-	configuredGeminiModel string
+	firestoreClient        *firestore.Client
+	firestoreErr           error
+	geminiClient           *genai.Client
+	geminiErr              error
+	effectiveGeminiModel   string
+	effectiveDreamerModel  string
+	configuredGeminiModel  string
 	configuredDreamerModel string
 
-	gdocLogPool            *ants.PoolWithFunc
-	toolExecutionPool      *ants.Pool
-	asyncFireAndForgetPool *ants.Pool
-	summaryGenerationPool  *ants.Pool
-	backgroundTasksWg     *sync.WaitGroup
+	gdocLogPool             *ants.PoolWithFunc
+	toolExecutionPool       *ants.Pool
+	asyncFireAndForgetPool  *ants.Pool
+	summaryGenerationPool   *ants.Pool
+	backgroundTasksWg      *sync.WaitGroup
 }
 
 // Firestore returns the Firestore client for the app, or the error from creation.
@@ -89,6 +90,27 @@ func (a *App) EffectiveModel(configured string) string {
 		return a.effectiveDreamerModel
 	}
 	return configured
+}
+
+// QueryModel returns the resolved model name for the main query agent.
+func (a *App) QueryModel() string {
+	if a.effectiveGeminiModel != "" {
+		return a.effectiveGeminiModel
+	}
+	return a.configuredGeminiModel
+}
+
+// DreamerModel returns the resolved model name for the dreamer/specialist agent.
+func (a *App) DreamerModel() string {
+	if a.effectiveDreamerModel != "" {
+		return a.effectiveDreamerModel
+	}
+	return a.configuredDreamerModel
+}
+
+// EnqueueTask creates a Cloud Task that POSTs the payload to the API at endpoint.
+func (a *App) EnqueueTask(ctx context.Context, endpoint string, payload map[string]interface{}) error {
+	return EnqueueTask(ctx, a.cfg, endpoint, payload)
 }
 
 // SubmitAsync submits a task to the async fire-and-forget pool with WaitGroup tracking.
@@ -199,6 +221,7 @@ func NewApp(ctx context.Context, cfg *config.Config, gdocLog GDocLogFunc, gemini
 
 	app := &App{
 		Logger:                 logger,
+		cfg:                    cfg,
 		backgroundTasksWg:      &sync.WaitGroup{},
 		configuredGeminiModel:  cfg.GeminiModel,
 		configuredDreamerModel: cfg.DreamerModel,
