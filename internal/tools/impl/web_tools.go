@@ -69,7 +69,7 @@ func registerWebTools() {
 			if !ok {
 				return tools.MissingParam("query")
 			}
-			result, err := jot.SearchWikipedia(query)
+			result, err := utils.SearchWikipedia(query)
 			if err != nil {
 				return tools.Fail("Wikipedia error: %v", err)
 			}
@@ -97,7 +97,7 @@ func registerWebTools() {
 				return tools.MissingParam("query")
 			}
 			numResults := args.IntBounded("num_results", 5, 1, 10)
-			result, err := jot.WebSearch(query, numResults)
+			result, err := utils.WebSearch(query, numResults)
 			if err != nil {
 				return tools.Fail("Web search error: %v", err)
 			}

@@ -6,11 +6,12 @@ import (
 	"fmt"
 
 	"cloud.google.com/go/firestore"
+	"github.com/jackstrohm/jot/pkg/utils"
 )
 
 // ProcessEntry runs evaluator, context detection, journal analysis, and embedding for an entry.
 func ProcessEntry(ctx context.Context, entryUUID, content, timestamp, source string) error {
-	LoggerFrom(ctx).Info("process-entry start", "entry_uuid", entryUUID, "content", truncateString(content, 50), "source", source)
+	LoggerFrom(ctx).Info("process-entry start", "entry_uuid", entryUUID, "content", utils.TruncateString(content, 50), "source", source)
 	RunEvaluator(ctx, content, entryUUID, timestamp)
 
 	contextUUIDs, err := DetectOrCreateContext(ctx, content, entryUUID)

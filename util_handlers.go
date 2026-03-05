@@ -6,26 +6,9 @@ import (
 	"fmt"
 	"strings"
 	"time"
-
-	"github.com/jackstrohm/jot/pkg/utils"
 )
 
-// GenerateRandom generates random values. Re-exported from utils.
-func GenerateRandom(randType string, minVal, maxVal int, choices string) string {
-	return utils.GenerateRandom(randType, minVal, maxVal, choices)
-}
-
-// LookupWord fetches word definition from Free Dictionary API. Re-exported from utils.
-func LookupWord(word string) (string, error) {
-	return utils.LookupWord(word)
-}
-
-// EncodeDecodeText performs encoding/decoding operations. Re-exported from utils.
-func EncodeDecodeText(operation, text string) (string, error) {
-	return utils.EncodeDecodeText(operation, text)
-}
-
-// HandleCountdown manages countdown events (uses knowledge/embedding; stays in jot).
+// HandleCountdown manages countdown events (uses knowledge/embedding).
 func HandleCountdown(ctx context.Context, action, name, dateStr string) (string, error) {
 	switch strings.ToLower(action) {
 	case "create":
@@ -113,7 +96,7 @@ func HandleCountdown(ctx context.Context, action, name, dateStr string) (string,
 	}
 }
 
-// HandleBookmark manages bookmarks
+// HandleBookmark manages bookmarks.
 func HandleBookmark(ctx context.Context, action, bookmarkURL, title, tags, query string) (string, error) {
 	switch strings.ToLower(action) {
 	case "save":

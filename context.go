@@ -13,8 +13,16 @@ import (
 	"github.com/google/generative-ai-go/genai"
 	"github.com/jackstrohm/jot/internal/prompts"
 	"github.com/jackstrohm/jot/llmjson"
+	"github.com/jackstrohm/jot/pkg/utils"
 	"google.golang.org/api/iterator"
 )
+
+func truncateForLog(s string, maxLen int) string {
+	if len([]rune(s)) <= maxLen {
+		return s
+	}
+	return utils.TruncateString(s, maxLen) + "..."
+}
 
 // Context system constants
 const (
@@ -686,7 +694,7 @@ func analyzeForNewContext(ctx context.Context, entryContent string) (bool, strin
 		return false, "", nil
 	}
 
-	jsonText := extractTextFromResponse(resp)
+	jsonText := ExtractText(resp)
 
 	type contextResult struct {
 		IsProjectOrPlan bool     `json:"is_project_or_plan"`
@@ -814,7 +822,7 @@ func SynthesizeContext(ctx context.Context, contextUUID string) error {
 		}
 		part := fmt.Sprintf("[%s] %s", entry.Timestamp, entry.Content)
 		if totalLen+len(part) > maxRawLogsChars {
-			part = truncateToMaxBytes(part, maxRawLogsChars-totalLen)
+			part = utils.TruncateToMaxBytes(part, maxRawLogsChars-totalLen)
 		}
 		rawParts = append(rawParts, part)
 		totalLen += len(part)

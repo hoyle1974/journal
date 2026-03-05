@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/jackstrohm/jot/pkg/agent"
 )
 
 func TestParsePlanJSON(t *testing.T) {
@@ -62,7 +64,7 @@ func TestParsePlanJSON(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			plan, err := ParsePlanJSON(tt.jsonText)
+			plan, err := agent.ParsePlanJSON(tt.jsonText)
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("ParsePlanJSON() expected error, got nil")
@@ -93,7 +95,7 @@ func TestParsePlanJSON_PhaseStructure(t *testing.T) {
 		]
 	}`
 
-	plan, err := ParsePlanJSON(jsonText)
+	plan, err := agent.ParsePlanJSON(jsonText)
 	if err != nil {
 		t.Fatalf("ParsePlanJSON() error: %v", err)
 	}
@@ -124,8 +126,8 @@ func TestParsePlanJSON_PhaseStructure(t *testing.T) {
 
 func TestGeneratedPlan_FormatOutput(t *testing.T) {
 	// Test that the plan output format is consistent
-	plan := &GeneratedPlan{
-		Phases: []PlanPhase{
+	plan := &agent.GeneratedPlan{
+		Phases: []agent.PlanPhase{
 			{Title: "Step 1", Description: "Do first thing", Dependencies: []string{}},
 			{Title: "Step 2", Description: "Do second thing", Dependencies: []string{"Step 1"}},
 		},

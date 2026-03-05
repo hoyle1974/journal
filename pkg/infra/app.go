@@ -108,6 +108,11 @@ func (a *App) DreamerModel() string {
 	return a.configuredDreamerModel
 }
 
+// Config returns the config used to create the app (for callers that need project, API keys, etc.).
+func (a *App) Config() *config.Config {
+	return a.cfg
+}
+
 // EnqueueTask creates a Cloud Task that POSTs the payload to the API at endpoint.
 func (a *App) EnqueueTask(ctx context.Context, endpoint string, payload map[string]interface{}) error {
 	return EnqueueTask(ctx, a.cfg, endpoint, payload)
@@ -232,11 +237,13 @@ func NewApp(ctx context.Context, cfg *config.Config, gdocLog GDocLogFunc, gemini
 		return app, app.firestoreErr
 	}
 
-	if geminiFactory != nil {
-		app.geminiClient, app.effectiveGeminiModel, app.effectiveDreamerModel, app.geminiErr = geminiFactory(ctx, cfg)
-		if app.geminiErr != nil {
-			return app, app.geminiErr
-		}
+	factory := geminiFactory
+	if factory == nil {
+		factory = DefaultGeminiFactory
+	}
+	app.geminiClient, app.effectiveGeminiModel, app.effectiveDreamerModel, app.geminiErr = factory(ctx, cfg)
+	if app.geminiErr != nil {
+		return app, app.geminiErr
 	}
 
 	if gdocLog != nil {

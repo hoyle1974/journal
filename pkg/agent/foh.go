@@ -23,8 +23,21 @@ const (
 
 type entryUUIDKey struct{}
 
-func withCurrentEntryUUID(ctx context.Context, entryUUID string) context.Context {
+// WithCurrentEntryUUID returns a context that carries the current journal entry UUID (e.g. the query that triggered FOH).
+func WithCurrentEntryUUID(ctx context.Context, entryUUID string) context.Context {
 	return context.WithValue(ctx, entryUUIDKey{}, entryUUID)
+}
+
+// CurrentEntryUUIDFrom returns the current entry UUID from context, or "" if not set.
+func CurrentEntryUUIDFrom(ctx context.Context) string {
+	if s, ok := ctx.Value(entryUUIDKey{}).(string); ok && s != "" {
+		return s
+	}
+	return ""
+}
+
+func withCurrentEntryUUID(ctx context.Context, entryUUID string) context.Context {
+	return WithCurrentEntryUUID(ctx, entryUUID)
 }
 
 // QueryResult represents the result of a query.

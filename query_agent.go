@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackstrohm/jot/pkg/agent"
 	"github.com/jackstrohm/jot/pkg/journal"
+	"github.com/jackstrohm/jot/pkg/utils"
 )
 
 const (
@@ -23,7 +24,7 @@ type QueryResult = agent.QueryResult
 type jotFOHEnv struct{}
 
 func (jotFOHEnv) BuildSystemPrompt(ctx context.Context) string {
-	return buildSystemPrompt(ctx)
+	return agent.BuildSystemPrompt(ctx, jotFOHEnv{})
 }
 
 func (jotFOHEnv) AddEntryAndEnqueue(ctx context.Context, content, source string, timestamp *string) (string, error) {
@@ -153,7 +154,7 @@ func (jotFOHEnv) LoadDreamerInputs(ctx context.Context) (*agent.DreamerInputs, e
 	}
 	journalContext := strings.Join(lines, "\n")
 	if len(journalContext) > 6000 {
-		journalContext = truncateToMaxBytes(journalContext, 6000) + "\n... (truncated)"
+		journalContext = utils.TruncateToMaxBytes(journalContext, 6000) + "\n... (truncated)"
 	}
 	entryUUIDs := make([]string, 0, len(entries))
 	for _, e := range entries {
@@ -167,11 +168,11 @@ func (jotFOHEnv) LoadDreamerInputs(ctx context.Context) (*agent.DreamerInputs, e
 			if len(ts) > 16 {
 				ts = ts[:16]
 			}
-			qLines = append(qLines, fmt.Sprintf("[%s] Q: %s\n  A: %s", ts, q.Question, truncateString(q.Answer, 200)))
+			qLines = append(qLines, fmt.Sprintf("[%s] Q: %s\n  A: %s", ts, q.Question, utils.TruncateString(q.Answer, 200)))
 		}
 		recentQueriesText = strings.Join(qLines, "\n\n")
 		if len(recentQueriesText) > 8000 {
-			recentQueriesText = truncateToMaxBytes(recentQueriesText, 8000) + "\n... (truncated)"
+			recentQueriesText = utils.TruncateToMaxBytes(recentQueriesText, 8000) + "\n... (truncated)"
 		}
 	}
 	return &agent.DreamerInputs{
@@ -249,6 +250,11 @@ func RunQueryWithDebug(ctx context.Context, question, source string, debug bool)
 func GetAnswer(ctx context.Context, question, source string) string {
 	result := RunQuery(ctx, question, source)
 	return result.Answer
+}
+
+// CreateAndSavePlan forces Gemini to decompose a goal into JSON, then saves it to the Knowledge Graph.
+func CreateAndSavePlan(ctx context.Context, goal string) (string, error) {
+	return agent.CreateAndSavePlan(ctx, jotFOHEnv{}, goal)
 }
 
 // looksLikeQuestion checks if the input looks like a question or information request (for tests and SMS routing).

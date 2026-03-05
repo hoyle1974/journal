@@ -168,6 +168,19 @@ func (cs *ChatSession) SendMessage(ctx context.Context, parts ...genai.Part) (*g
 	return resp, nil
 }
 
+// AddFunctionResponse adds a function response to the conversation history.
+func (cs *ChatSession) AddFunctionResponse(name string, response map[string]any) genai.Part {
+	return genai.FunctionResponse{
+		Name:     name,
+		Response: response,
+	}
+}
+
+// GetHistory returns the current conversation history.
+func (cs *ChatSession) GetHistory() []*genai.Content {
+	return cs.session.History
+}
+
 // TrimHistory keeps only the last n message pairs in history.
 func (cs *ChatSession) TrimHistory(maxPairs int) {
 	history := cs.session.History

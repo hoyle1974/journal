@@ -13,6 +13,7 @@ import (
 	"github.com/jackstrohm/jot/pkg/agent"
 	"github.com/jackstrohm/jot/internal/prompts"
 	"github.com/jackstrohm/jot/llmjson"
+	"github.com/jackstrohm/jot/pkg/utils"
 	"google.golang.org/api/iterator"
 )
 
@@ -61,11 +62,11 @@ func RunGapDetection(ctx context.Context, journalContext string, entryUUIDs []st
 	}
 	var knowledgeLines []string
 	for _, n := range nodes {
-		knowledgeLines = append(knowledgeLines, fmt.Sprintf("[%s] %s", n.NodeType, truncateString(n.Content, 200)))
+		knowledgeLines = append(knowledgeLines, fmt.Sprintf("[%s] %s", n.NodeType, utils.TruncateString(n.Content, 200)))
 	}
 	relevantKnowledge := strings.Join(knowledgeLines, "\n")
 	if len(relevantKnowledge) > 4000 {
-		relevantKnowledge = truncateToMaxBytes(relevantKnowledge, 4000) + "\n... (truncated)"
+		relevantKnowledge = utils.TruncateToMaxBytes(relevantKnowledge, 4000) + "\n... (truncated)"
 	}
 
 	client, err := GetGeminiClient(ctx)
@@ -96,11 +97,11 @@ func RunGapDetection(ctx context.Context, journalContext string, entryUUIDs []st
 		span.RecordError(err)
 		return WrapLLMError(err)
 	}
-	text := extractTextFromResponse(resp)
+	text := ExtractText(resp)
 	var items []gapDetectItem
 	if err := json.Unmarshal([]byte(text), &items); err != nil {
 		if err := llmjson.RepairAndUnmarshal(text, &items); err != nil {
-			LoggerFrom(ctx).Debug("gap detection parse failed", "error", err, "raw", truncateString(text, 300))
+			LoggerFrom(ctx).Debug("gap detection parse failed", "error", err, "raw", utils.TruncateString(text, 300))
 			return nil
 		}
 	}
@@ -185,7 +186,7 @@ func RunEvolutionSynthesis(ctx context.Context, journalSummary string) error {
 	// Optional: shorten journal summary for evolution context only
 	journalForEvolution := ""
 	if len(journalSummary) > 2000 {
-		journalForEvolution = truncateToMaxBytes(journalSummary, 2000) + "\n... (truncated)"
+		journalForEvolution = utils.TruncateToMaxBytes(journalSummary, 2000) + "\n... (truncated)"
 	} else {
 		journalForEvolution = journalSummary
 	}
@@ -338,7 +339,7 @@ func RunPulseAudit(ctx context.Context) (*PulseResult, error) {
 
 		result.StaleNodes = append(result.StaleNodes, nodeID)
 		result.Signals++
-		LoggerFrom(ctx).Info("pulse audit flagged node", "id", nodeID, "content", truncateString(content, 40))
+		LoggerFrom(ctx).Info("pulse audit flagged node", "id", nodeID, "content", utils.TruncateString(content, 40))
 	}
 
 	span.SetAttributes(map[string]string{

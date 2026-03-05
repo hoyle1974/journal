@@ -9,7 +9,9 @@ import (
 	"cloud.google.com/go/firestore"
 	"github.com/google/generative-ai-go/genai"
 	"github.com/jackstrohm/jot/internal/config"
+	"github.com/jackstrohm/jot/pkg/agent"
 	"github.com/jackstrohm/jot/pkg/infra"
+	"github.com/jackstrohm/jot/pkg/utils"
 )
 
 // App is the application container (Firestore, Gemini, pools). Re-exported from infra.
@@ -35,7 +37,7 @@ func GetDefaultApp() (*App, error) {
 
 // InitDefaultApp initializes the process-wide App. Must be called at startup.
 func InitDefaultApp(ctx context.Context) error {
-	err := infra.InitDefaultApp(ctx, defaultConfig, logToGDocSync, geminiFactory)
+	err := infra.InitDefaultApp(ctx, defaultConfig, logToGDocSync, nil)
 	if err != nil {
 		return err
 	}
@@ -43,14 +45,9 @@ func InitDefaultApp(ctx context.Context) error {
 	return nil
 }
 
-// geminiFactory is used by InitDefaultApp and NewApp.
-func geminiFactory(ctx context.Context, cfg *config.Config) (*genai.Client, string, string, error) {
-	return newGeminiClientForApp(ctx, cfg, infra.Logger)
-}
-
-// NewApp creates a new App (e.g. for CLI/admin). Uses the same Gemini factory as the server; gdoc log is nil for CLI.
+// NewApp creates a new App (e.g. for CLI/admin). Uses default Gemini factory; gdoc log is nil for CLI.
 func NewApp(ctx context.Context, cfg *config.Config) (*App, error) {
-	return infra.NewApp(ctx, cfg, nil, geminiFactory)
+	return infra.NewApp(ctx, cfg, nil, nil)
 }
 
 // LoggerFrom returns the logger from the App in context, or the global Logger when app is nil.
@@ -170,3 +167,112 @@ func IsAllowedPhoneNumber(phone string) bool {
 func SendSMS(ctx context.Context, to, body string) error {
 	return infra.SendSMS(ctx, getConfig(), to, body)
 }
+
+// IsLLMQuotaOrBillingError returns true if err indicates rate limit, quota, or billing.
+func IsLLMQuotaOrBillingError(err error) bool {
+	return infra.IsLLMQuotaOrBillingError(err)
+}
+
+// IsLLMPermissionOrBillingDenied returns true if err indicates permission denied or billing not enabled.
+func IsLLMPermissionOrBillingDenied(err error) bool {
+	return infra.IsLLMPermissionOrBillingDenied(err)
+}
+
+// WrapLLMError wraps Gemini/LLM API errors with a user-facing message when applicable.
+func WrapLLMError(err error) error {
+	return infra.WrapLLMError(err)
+}
+
+// --- Gemini and context key re-exports (logic in pkg/infra, pkg/agent) ---
+
+// GetGeminiClient returns the Gemini client from the App in context.
+func GetGeminiClient(ctx context.Context) (*genai.Client, error) {
+	return infra.GetGeminiClient(ctx)
+}
+
+// GetEffectiveModel returns the resolved model name for API calls.
+func GetEffectiveModel(ctx context.Context, configured string) string {
+	return infra.GetEffectiveModel(ctx, configured)
+}
+
+// GenConfig holds generation configuration options. Re-exported from infra.
+type GenConfig = infra.GenConfig
+
+// GenerateContentSimple generates content without tools.
+func GenerateContentSimple(ctx context.Context, systemPrompt, userPrompt string, config *GenConfig) (string, error) {
+	cfg := getConfig()
+	if app := infra.GetApp(ctx); app != nil && app.Config() != nil {
+		cfg = app.Config()
+	}
+	return infra.GenerateContentSimple(ctx, systemPrompt, userPrompt, cfg, config)
+}
+
+// EvaluateFactCollision decides whether the new fact should update or insert.
+func EvaluateFactCollision(ctx context.Context, newFact, existingFact string) (string, error) {
+	cfg := getConfig()
+	if app := infra.GetApp(ctx); app != nil && app.Config() != nil {
+		cfg = app.Config()
+	}
+	return infra.EvaluateFactCollision(ctx, cfg, newFact, existingFact)
+}
+
+// ExtractText extracts text content from a Gemini response.
+func ExtractText(resp *genai.GenerateContentResponse) string {
+	return infra.ExtractText(resp)
+}
+
+// HasFunctionCalls checks if the response contains function calls.
+func HasFunctionCalls(resp *genai.GenerateContentResponse) bool {
+	return infra.HasFunctionCalls(resp)
+}
+
+// ExtractFunctionCalls extracts all function calls from a response.
+func ExtractFunctionCalls(resp *genai.GenerateContentResponse) []genai.FunctionCall {
+	return infra.ExtractFunctionCalls(resp)
+}
+
+// EmptyResponseReason returns a short reason when the API returned no text and no function calls.
+func EmptyResponseReason(resp *genai.GenerateContentResponse) string {
+	return infra.EmptyResponseReason(resp)
+}
+
+// EmbedTaskRetrievalQuery and EmbedTaskRetrievalDocument are task types for embeddings.
+const (
+	EmbedTaskRetrievalQuery    = infra.EmbedTaskRetrievalQuery
+	EmbedTaskRetrievalDocument = infra.EmbedTaskRetrievalDocument
+)
+
+// GenerateEmbedding creates a 768-dimension vector for semantic search.
+func GenerateEmbedding(ctx context.Context, text string, taskType ...string) ([]float32, error) {
+	cfg := getConfig()
+	if app := infra.GetApp(ctx); app != nil && app.Config() != nil {
+		cfg = app.Config()
+	}
+	projectID := ""
+	if cfg != nil {
+		projectID = cfg.GoogleCloudProject
+	}
+	return infra.GenerateEmbedding(ctx, projectID, text, taskType...)
+}
+
+// ChatSession manages a multi-turn conversation with Gemini. Re-exported from infra.
+type ChatSession = infra.ChatSession
+
+// NewChatSession creates a new chat session with tools enabled.
+func NewChatSession(ctx context.Context, systemPrompt string, tools []*genai.FunctionDeclaration) (*ChatSession, error) {
+	return infra.NewChatSession(ctx, systemPrompt, tools)
+}
+
+// WithCurrentEntryUUID returns a context that carries the current journal entry UUID.
+func WithCurrentEntryUUID(ctx context.Context, entryUUID string) context.Context {
+	return agent.WithCurrentEntryUUID(ctx, entryUUID)
+}
+
+// CurrentEntryUUIDFrom returns the current entry UUID from context, or "" if not set.
+func CurrentEntryUUIDFrom(ctx context.Context) string {
+	return agent.CurrentEntryUUIDFrom(ctx)
+}
+
+// SanitizePrompt and WrapAsUserData for prompts (re-exported from utils).
+func SanitizePrompt(s string) string { return utils.SanitizePrompt(s) }
+func WrapAsUserData(s string) string { return utils.WrapAsUserData(s) }

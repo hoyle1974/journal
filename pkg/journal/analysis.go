@@ -1,17 +1,17 @@
-package jot
+package journal
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/google/generative-ai-go/genai"
 	"github.com/jackstrohm/jot/internal/prompts"
 	"github.com/jackstrohm/jot/llmjson"
+	"github.com/jackstrohm/jot/pkg/infra"
+	"github.com/jackstrohm/jot/pkg/utils"
 )
 
-// Canonical entity status values for queryability (e.g. filter Event "Party" where Status != Completed).
 const (
 	EntityStatusPlanned    = "Planned"
 	EntityStatusInProgress = "In-Progress"
@@ -19,20 +19,21 @@ const (
 	EntityStatusCompleted  = "Completed"
 )
 
+const dateDisplayLen = 10
+
 // Entity represents a person, project, or event mentioned in a journal entry.
-// Status must be one of: Planned, In-Progress, Stalled, Completed (normalized after parse if needed).
 type Entity struct {
 	Name     string `json:"name"`
-	Type     string `json:"type"`     // "person", "project", "event", "place"
-	Status   string `json:"status"`   // canonical: Planned, In-Progress, Stalled, Completed
-	SourceID string `json:"source_id"` // entry UUID; required for traceability
+	Type     string `json:"type"`
+	Status   string `json:"status"`
+	SourceID string `json:"source_id"`
 }
 
 // OpenLoop represents a task or unanswered question from a journal entry.
 type OpenLoop struct {
 	Task     string `json:"task"`
-	Priority string `json:"priority"` // e.g. "low", "med", "high"
-	SourceID string `json:"source_id"` // entry UUID; required for traceability
+	Priority string `json:"priority"`
+	SourceID string `json:"source_id"`
 }
 
 // JournalAnalysis is the structured output from analyzing a journal entry.
@@ -41,33 +42,39 @@ type JournalAnalysis struct {
 	Mood      string     `json:"mood"`
 	Tags      []string   `json:"tags"`
 	Entities  []Entity   `json:"entities"`
-	OpenLoops []OpenLoop `json:"open_loops"` // tasks or unanswered questions
-	SourceID  string     `json:"source_id"`  // entry UUID; set by caller after unmarshal
+	OpenLoops []OpenLoop `json:"open_loops"`
+	SourceID  string     `json:"source_id"`
 }
 
 // AnalyzeJournalEntry uses Gemini with JSON schema to analyze a journal entry.
-// entryTimestamp is optional (e.g. RFC3339); if empty, date context may be omitted.
-// Returns a JournalAnalysis with SourceID set on the analysis and every entity/open_loop (guardrail fills if LLM omits).
 func AnalyzeJournalEntry(ctx context.Context, entryContent, entryUUID, entryTimestamp string) (*JournalAnalysis, error) {
-	ctx, span := StartSpan(ctx, "journal.analyze")
+	ctx, span := infra.StartSpan(ctx, "journal.analyze")
 	defer span.End()
 
 	if len(entryContent) < 20 {
 		return nil, nil
 	}
 
-	client, err := GetGeminiClient(ctx)
+	client, err := infra.GetGeminiClient(ctx)
 	if err != nil {
-		LoggerFrom(ctx).Warn("journal analysis skipped", "reason", "no gemini client", "error", err)
+		infra.LoggerFrom(ctx).Warn("journal analysis skipped", "reason", "no gemini client", "error", err)
 		return nil, err
 	}
 
-	entryDate := TruncateTimestamp(entryTimestamp, DateDisplayLen)
+	entryDate := entryTimestamp
+	if len(entryDate) > dateDisplayLen {
+		entryDate = utils.TruncateString(entryDate, dateDisplayLen)
+	}
 	if entryDate == "" {
 		entryDate = "unknown"
 	}
 
-	model := client.GenerativeModel(GetEffectiveModel(ctx, defaultConfig.GeminiModel))
+	cfg := infra.GetApp(ctx).Config()
+	if cfg == nil {
+		return nil, fmt.Errorf("no app config")
+	}
+	modelName := infra.GetEffectiveModel(ctx, cfg.GeminiModel)
+	model := client.GenerativeModel(modelName)
 	model.ResponseMIMEType = "application/json"
 	model.SetMaxOutputTokens(1024)
 	model.ResponseSchema = &genai.Schema{
@@ -102,23 +109,22 @@ func AnalyzeJournalEntry(ctx context.Context, entryContent, entryUUID, entryTime
 		},
 	}
 
-	prompt := prompts.FormatJournalAnalyze(entryUUID, entryDate, WrapAsUserData(SanitizePrompt(entryContent)))
+	prompt := prompts.FormatJournalAnalyze(entryUUID, entryDate, utils.WrapAsUserData(utils.SanitizePrompt(entryContent)))
 	resp, err := model.GenerateContent(ctx, genai.Text(prompt))
 	if err != nil {
-		LoggerFrom(ctx).Warn("journal analysis failed", "error", err)
+		infra.LoggerFrom(ctx).Warn("journal analysis failed", "error", err)
 		return nil, fmt.Errorf("journal analysis: %w", err)
 	}
 
-	jsonText := extractTextFromResponse(resp)
+	jsonText := infra.ExtractText(resp)
 	analysis, parseErr := llmjson.ParseLLMResponse[JournalAnalysis](jsonText, []string{"summary", "mood", "tags", "entities", "open_loops"})
 	if analysis == nil {
 		if parseErr == nil {
 			parseErr = fmt.Errorf("parse failed")
 		}
-		LoggerFrom(ctx).Warn("failed to parse journal analysis response", "error", parseErr)
+		infra.LoggerFrom(ctx).Warn("failed to parse journal analysis response", "error", parseErr)
 		return nil, fmt.Errorf("journal analysis parse: %w", parseErr)
 	}
-	// Consistency guardrail: ensure every entity and open_loop has source_id; normalize entity status
 	for i := range analysis.Entities {
 		if analysis.Entities[i].SourceID == "" {
 			analysis.Entities[i].SourceID = entryUUID
@@ -134,7 +140,7 @@ func AnalyzeJournalEntry(ctx context.Context, entryContent, entryUUID, entryTime
 	return analysis, nil
 }
 
-// NormalizeEntityStatus maps LLM output to canonical status (Planned, In-Progress, Stalled, Completed).
+// NormalizeEntityStatus maps LLM output to canonical status.
 func NormalizeEntityStatus(s string) string {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "planned", "planning", "pending", "scheduled":
@@ -147,26 +153,8 @@ func NormalizeEntityStatus(s string) string {
 		return EntityStatusCompleted
 	default:
 		if s == "" {
-			return EntityStatusInProgress // default for unspecified
+			return EntityStatusInProgress
 		}
-		return s // preserve if already canonical or unknown
+		return s
 	}
-}
-
-// parseOpenLoops unmarshals open_loops from raw JSON, supporting either []OpenLoop or legacy []string.
-func parseOpenLoops(raw []byte, out *[]OpenLoop) error {
-	var asStructs []OpenLoop
-	if err := json.Unmarshal(raw, &asStructs); err == nil {
-		*out = asStructs
-		return nil
-	}
-	var asStrings []string
-	if err := json.Unmarshal(raw, &asStrings); err != nil {
-		return err
-	}
-	*out = make([]OpenLoop, len(asStrings))
-	for i, s := range asStrings {
-		(*out)[i] = OpenLoop{Task: s, Priority: "", SourceID: ""}
-	}
-	return nil
 }
