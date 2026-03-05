@@ -191,6 +191,7 @@ case "$MODE" in
       --concurrency="$CONCURRENCY" \
       --timeout="${QUERY_TIMEOUT}s" \
       --max-instances=100 \
+      --set-env-vars="FUNCTION_TARGET=JotAPI,GOOGLE_CLOUD_PROJECT=$PROJECT,JOT_API_URL=https://${REGION}-${PROJECT}.cloudfunctions.net/${FUNCTION_NAME},SYNC_GDOC_URL=https://${REGION}-${PROJECT}.cloudfunctions.net/${FUNCTION_NAME}/sync,DREAMER_MODEL=gemini-2.5-flash" \
       --quiet
     ;;
 

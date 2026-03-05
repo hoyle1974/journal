@@ -1,29 +1,33 @@
-// backfill-knowledge-links runs the evaluator over journal entries and links extracted facts to knowledge nodes (with journal_entry_ids).
-// Use after enabling source linkage so existing entries get linked. One-off; safe to run multiple times (appends entry IDs to existing nodes).
-//
-// Usage: go run ./cmd/backfill-knowledge-links [-limit=100] [-dry-run]
-// -limit: max entries to process (oldest first). Default 100.
-// -dry-run: only log what would be done, do not write.
+// backfill_links runs the evaluator over journal entries and links extracted facts to knowledge nodes.
+// Use after enabling source linkage so existing entries get linked. One-off; safe to run multiple times.
 package main
 
 import (
 	"context"
 	"flag"
 	"log"
+	"os"
 	"time"
 
 	"github.com/jackstrohm/jot"
+	"github.com/jackstrohm/jot/internal/config"
 )
 
 const distanceThreshold = 0.15
 
-func main() {
-	limit := flag.Int("limit", 100, "Max journal entries to process (oldest first)")
-	dryRun := flag.Bool("dry-run", false, "Only log; do not create or update knowledge nodes")
-	flag.Parse()
+func runBackfillLinks() {
+	args := os.Args[2:]
+	fs := flag.NewFlagSet("backfill-links", flag.ExitOnError)
+	limit := fs.Int("limit", 100, "Max journal entries to process (oldest first)")
+	dryRun := fs.Bool("dry-run", false, "Only log; do not create or update knowledge nodes")
+	_ = fs.Parse(args)
 
 	ctx := context.Background()
-	app, err := jot.NewApp(ctx)
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("config: %v", err)
+	}
+	app, err := jot.NewApp(ctx, cfg)
 	if err != nil {
 		log.Fatalf("init app: %v", err)
 	}
@@ -76,9 +80,8 @@ func main() {
 					}
 				}
 				linked++
-				log.Printf("[%d/%d] linked entry %s -> node %s (fact: %q)", i+1, len(entries), e.UUID, existing.UUID, truncate(extract.FactToStore, 50))
+				log.Printf("[%d/%d] linked entry %s -> node %s (fact: %q)", i+1, len(entries), e.UUID, existing.UUID, truncateStr(extract.FactToStore, 50))
 			} else {
-				// insert new node
 				if !*dryRun {
 					nodeType := "fact"
 					if extract.Domain == "relationship" {
@@ -93,7 +96,7 @@ func main() {
 					}
 				}
 				created++
-				log.Printf("[%d/%d] created node from entry %s (fact: %q)", i+1, len(entries), e.UUID, truncate(extract.FactToStore, 50))
+				log.Printf("[%d/%d] created node from entry %s (fact: %q)", i+1, len(entries), e.UUID, truncateStr(extract.FactToStore, 50))
 			}
 		} else {
 			if !*dryRun {
@@ -110,17 +113,16 @@ func main() {
 				}
 			}
 			created++
-			log.Printf("[%d/%d] created node from entry %s (fact: %q)", i+1, len(entries), e.UUID, truncate(extract.FactToStore, 50))
+			log.Printf("[%d/%d] created node from entry %s (fact: %q)", i+1, len(entries), e.UUID, truncateStr(extract.FactToStore, 50))
 		}
 
-		// Rate-limit Gemini/Vertex
 		time.Sleep(200 * time.Millisecond)
 	}
 
 	log.Printf("Done: linked=%d created=%d skipped=%d errors=%d", linked, created, skipped, errors)
 }
 
-func truncate(s string, max int) string {
+func truncateStr(s string, max int) string {
 	if len(s) <= max {
 		return s
 	}

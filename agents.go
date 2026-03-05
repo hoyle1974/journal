@@ -31,7 +31,7 @@ func RunEvaluatorExtract(ctx context.Context, content string) (*EvaluatorExtract
 	if err != nil {
 		return nil, err
 	}
-	model := client.GenerativeModel(GetEffectiveModel(ctx, GeminiModel))
+	model := client.GenerativeModel(GetEffectiveModel(ctx, defaultConfig.GeminiModel))
 	model.ResponseMIMEType = "application/json"
 	model.SetMaxOutputTokens(256)
 	model.ResponseSchema = &genai.Schema{
@@ -158,121 +158,6 @@ var specialistSystemPrompts = map[Domain]string{
 	DomainEvolution:    prompts.Specialist("evolution"),
 }
 
-// BatchCommitteeOutput is the consolidated response from the unified committee (one LLM call for all domains).
-type BatchCommitteeOutput struct {
-	Domains          map[string][]string `json:"domains"`           // keys: relationship, work, task, thought, selfmodel
-	IdentityMarkers  []string            `json:"identity_markers"`  // permanent persona facts (PERSONA-style)
-	ImpactedContexts []string            `json:"impacted_contexts"`  // context/project names mentioned
-	QueryAnalysis    string              `json:"query_analysis"`     // optional: semantic clusters, knowledge gaps, curiosity trends (when recent queries provided)
-}
-
-// RunUnifiedCommittee runs a single "committee dispatch" LLM call to extract facts for all domains, identity markers, and impacted contexts.
-// If recentQueries is non-empty, the committee also analyzes queries (semantic clusters, knowledge gaps, curiosity trends) and returns query_analysis.
-func RunUnifiedCommittee(ctx context.Context, logs string, recentQueries string) (*BatchCommitteeOutput, error) {
-	ctx, span := StartSpan(ctx, "agent.unified_committee")
-	defer span.End()
-
-	client, err := GetGeminiClient(ctx)
-	if err != nil {
-		return nil, WrapLLMError(err)
-	}
-
-	schemaProps := map[string]*genai.Schema{
-		"relationship":      {Type: genai.TypeArray, Items: &genai.Schema{Type: genai.TypeString}},
-		"work":              {Type: genai.TypeArray, Items: &genai.Schema{Type: genai.TypeString}},
-		"task":              {Type: genai.TypeArray, Items: &genai.Schema{Type: genai.TypeString}},
-		"thought":           {Type: genai.TypeArray, Items: &genai.Schema{Type: genai.TypeString}},
-		"selfmodel":         {Type: genai.TypeArray, Items: &genai.Schema{Type: genai.TypeString}},
-		"identity_markers":   {Type: genai.TypeArray, Items: &genai.Schema{Type: genai.TypeString}},
-		"impacted_contexts": {Type: genai.TypeArray, Items: &genai.Schema{Type: genai.TypeString}},
-	}
-	if recentQueries != "" {
-		schemaProps["query_analysis"] = &genai.Schema{Type: genai.TypeString, Description: "Analysis of recent queries: semantic clusters, knowledge gaps, curiosity trends"}
-	}
-
-	model := client.GenerativeModel(GetEffectiveModel(ctx, DreamerModel))
-	model.ResponseMIMEType = "application/json"
-	model.SetMaxOutputTokens(4096)
-	model.ResponseSchema = &genai.Schema{
-		Type:       genai.TypeObject,
-		Properties: schemaProps,
-	}
-	model.SystemInstruction = &genai.Content{Parts: []genai.Part{genai.Text(prompts.UnifiedCommittee())}}
-
-	userPrompt := "Consolidate the last 24 hours of journal entries. Extract GOLD: people, projects, events, preferences, milestones, who is involved in what. Discard GRAVEL only: trivial one-off errands (buy milk, pick up package) with no lasting significance. For impacted_contexts: list only ongoing projects/plans/events as short snake_case names (e.g. party_planning, job_search); ignore queries and system commands.\n\nJournal logs:\n" + WrapAsUserData(SanitizePrompt(logs))
-	if recentQueries != "" {
-		userPrompt += "\n\nAnalyze the user's recent queries (below). (1) Group them into semantic clusters (e.g. 'Jot Development', 'Family Logistics'). (2) Identify Knowledge Gaps: What is the user asking that we couldn't answer? (3) Identify Curiosity Trends: What is the user becoming more interested in? Put the full analysis in the query_analysis field (single string).\n\nRecent queries:\n" + WrapAsUserData(SanitizePrompt(recentQueries))
-	}
-
-	apiCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
-	defer cancel()
-
-	GeminiCallsTotal.Inc()
-	LoggerFrom(ctx).Info("unified_committee api_call_start", "logs_len", len(logs))
-	resp, err := model.GenerateContent(apiCtx, genai.Text(userPrompt))
-	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "context deadline exceeded") {
-			apiCtx2, cancel2 := context.WithTimeout(ctx, 90*time.Second)
-			defer cancel2()
-			resp, err = model.GenerateContent(apiCtx2, genai.Text(userPrompt))
-		}
-	}
-	if err != nil {
-		span.RecordError(err)
-		return nil, WrapLLMError(err)
-	}
-
-	text := strings.TrimSpace(extractTextFromResponse(resp))
-	if text == "" {
-		reason := "no content in response"
-		if resp != nil {
-			if len(resp.Candidates) == 0 && resp.PromptFeedback != nil && resp.PromptFeedback.BlockReason != genai.BlockReasonUnspecified {
-				reason = fmt.Sprintf("prompt blocked (block_reason=%s)", resp.PromptFeedback.BlockReason.String())
-			} else if len(resp.Candidates) == 0 {
-				reason = "no candidates returned"
-			} else if len(resp.Candidates) > 0 {
-				reason = fmt.Sprintf("finish_reason=%s", resp.Candidates[0].FinishReason.String())
-			}
-		}
-		LoggerFrom(ctx).Warn("unified_committee empty response", "reason", reason)
-		return nil, fmt.Errorf("unified committee returned empty response: %s (try DREAMER_UNIFIED_COMMITTEE=false to use per-domain specialists, or check model/safety settings)", reason)
-	}
-	type committeeParsed struct {
-		Relationship     []string `json:"relationship"`
-		Work             []string `json:"work"`
-		Task             []string `json:"task"`
-		Thought          []string `json:"thought"`
-		Selfmodel        []string `json:"selfmodel"`
-		IdentityMarkers  []string `json:"identity_markers"`
-		ImpactedContexts []string `json:"impacted_contexts"`
-		QueryAnalysis    string   `json:"query_analysis"`
-	}
-	committeeKeys := []string{"relationship", "work", "task", "thought", "selfmodel", "identity_markers", "impacted_contexts", "query_analysis"}
-	parsed, parseErr := llmjson.ParseLLMResponse[committeeParsed](text, committeeKeys)
-	if parsed == nil {
-		LoggerFrom(ctx).Warn("unified_committee parse failed", "error", parseErr, "raw", truncateString(text, 500), "text_len", len(text))
-		if parseErr != nil && (strings.Contains(parseErr.Error(), "unexpected end of JSON input") || len(text) < 20) {
-			return nil, fmt.Errorf("unified committee returned empty or truncated response (try DREAMER_UNIFIED_COMMITTEE=false to use per-domain specialists): %w", parseErr)
-		}
-		return nil, fmt.Errorf("unified committee JSON parse failed: %w", parseErr)
-	}
-
-	out := &BatchCommitteeOutput{
-		Domains: map[string][]string{
-			"relationship": parsed.Relationship,
-			"work":        parsed.Work,
-			"task":        parsed.Task,
-			"thought":     parsed.Thought,
-			"selfmodel":   parsed.Selfmodel,
-		},
-		IdentityMarkers:  parsed.IdentityMarkers,
-		ImpactedContexts: parsed.ImpactedContexts,
-		QueryAnalysis:    strings.TrimSpace(parsed.QueryAnalysis),
-	}
-	LoggerFrom(ctx).Info("unified_committee done", "identity_markers", len(out.IdentityMarkers), "impacted_contexts", len(out.ImpactedContexts), "query_analysis_len", len(out.QueryAnalysis))
-	return out, nil
-}
-
 // EvolutionAuditOutput is the Cognitive Engineer's nightly analysis (tool efficacy, knowledge gaps, proposals).
 type EvolutionAuditOutput struct {
 	Summary  string   `json:"summary"`
@@ -290,7 +175,7 @@ func RunEvolutionAudit(ctx context.Context, queriesText, journalSummary string) 
 		return nil, WrapLLMError(err)
 	}
 
-	model := client.GenerativeModel(GetEffectiveModel(ctx, DreamerModel))
+	model := client.GenerativeModel(GetEffectiveModel(ctx, defaultConfig.DreamerModel))
 	model.ResponseMIMEType = "application/json"
 	model.SetMaxOutputTokens(2048)
 	model.ResponseSchema = &genai.Schema{
@@ -363,7 +248,7 @@ Recent journal context:
 	// Debug: log full prompt sent to LLM
 	LoggerFrom(ctx).Info("specialist prompt", "domain", domain, "prompt_len", len(prompt), "prompt", prompt)
 
-	modelName := GeminiModel
+	modelName := defaultConfig.GeminiModel
 	if modelOverride != "" {
 		modelName = modelOverride
 	}
@@ -434,6 +319,111 @@ Recent journal context:
 	}, nil
 }
 
+const contextExtractorPrompt = `From the journal entries, list ongoing projects, plans, or events as short snake_case names only (e.g. party_planning, job_search, vacation_research). Ignore one-off questions and system commands. Return JSON: {"impacted_contexts": ["name1", "name2"]}.`
+
+// RunContextExtractor uses Gemini to extract impacted_contexts (short snake_case names for active projects/plans) from the journal.
+func RunContextExtractor(ctx context.Context, journalContext string) ([]string, error) {
+	ctx, span := StartSpan(ctx, "agent.context_extractor")
+	defer span.End()
+
+	client, err := GetGeminiClient(ctx)
+	if err != nil {
+		return nil, WrapLLMError(err)
+	}
+
+	model := client.GenerativeModel(GetEffectiveModel(ctx, defaultConfig.DreamerModel))
+	model.ResponseMIMEType = "application/json"
+	model.SetMaxOutputTokens(512)
+	model.ResponseSchema = &genai.Schema{
+		Type: genai.TypeObject,
+		Properties: map[string]*genai.Schema{
+			"impacted_contexts": {Type: genai.TypeArray, Items: &genai.Schema{Type: genai.TypeString}},
+		},
+	}
+	model.SystemInstruction = &genai.Content{Parts: []genai.Part{genai.Text(contextExtractorPrompt + prompts.DataSafety())}}
+
+	userPrompt := "Journal entries:\n" + WrapAsUserData(SanitizePrompt(journalContext))
+
+	apiCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
+
+	GeminiCallsTotal.Inc()
+	LoggerFrom(ctx).Info("context_extractor api_call_start", "journal_len", len(journalContext))
+	resp, err := model.GenerateContent(apiCtx, genai.Text(userPrompt))
+	if err != nil {
+		span.RecordError(err)
+		return nil, WrapLLMError(err)
+	}
+
+	text := strings.TrimSpace(extractTextFromResponse(resp))
+	if text == "" {
+		LoggerFrom(ctx).Debug("context_extractor empty response")
+		return nil, nil
+	}
+	parsedOut, parseErr := llmjson.ParseLLMResponse[struct{ ImpactedContexts []string }](text, []string{"impacted_contexts"})
+	if parseErr != nil || parsedOut == nil {
+		LoggerFrom(ctx).Warn("context_extractor parse failed", "error", parseErr, "raw", truncateString(text, 300))
+		return nil, nil
+	}
+	LoggerFrom(ctx).Info("context_extractor done", "count", len(parsedOut.ImpactedContexts))
+	return parsedOut.ImpactedContexts, nil
+}
+
+const queryAnalyzerPrompt = `Analyze the user's recent queries. (1) Group them into semantic clusters (e.g. "Jot Development", "Family Logistics"). (2) Identify Knowledge Gaps: What is the user asking that we couldn't answer? (3) Identify Curiosity Trends: What is the user becoming more interested in? Return JSON with a single string field "query_analysis" containing the full analysis.`
+
+// RunQueryAnalyzer uses Gemini to analyze recent queries for semantic clusters, knowledge gaps, and curiosity trends.
+func RunQueryAnalyzer(ctx context.Context, recentQueriesText string) (string, error) {
+	if strings.TrimSpace(recentQueriesText) == "" {
+		return "", nil
+	}
+
+	ctx, span := StartSpan(ctx, "agent.query_analyzer")
+	defer span.End()
+
+	client, err := GetGeminiClient(ctx)
+	if err != nil {
+		return "", WrapLLMError(err)
+	}
+
+	model := client.GenerativeModel(GetEffectiveModel(ctx, defaultConfig.DreamerModel))
+	model.ResponseMIMEType = "application/json"
+	model.SetMaxOutputTokens(1024)
+	model.ResponseSchema = &genai.Schema{
+		Type: genai.TypeObject,
+		Properties: map[string]*genai.Schema{
+			"query_analysis": {Type: genai.TypeString, Description: "Analysis: semantic clusters, knowledge gaps, curiosity trends"},
+		},
+	}
+	model.SystemInstruction = &genai.Content{Parts: []genai.Part{genai.Text(queryAnalyzerPrompt + prompts.DataSafety())}}
+
+	userPrompt := "Recent queries:\n" + WrapAsUserData(SanitizePrompt(recentQueriesText))
+
+	apiCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
+
+	GeminiCallsTotal.Inc()
+	LoggerFrom(ctx).Info("query_analyzer api_call_start", "queries_len", len(recentQueriesText))
+	resp, err := model.GenerateContent(apiCtx, genai.Text(userPrompt))
+	if err != nil {
+		span.RecordError(err)
+		return "", WrapLLMError(err)
+	}
+
+	text := strings.TrimSpace(extractTextFromResponse(resp))
+	if text == "" {
+		LoggerFrom(ctx).Debug("query_analyzer empty response")
+		return "", nil
+	}
+	parsedOut, parseErr := llmjson.ParseLLMResponse[struct{ QueryAnalysis string }](text, []string{"query_analysis"})
+	if parseErr != nil || parsedOut == nil {
+		LoggerFrom(ctx).Warn("query_analyzer parse failed", "error", parseErr, "raw", truncateString(text, 300))
+		return "", nil
+	}
+	out := strings.TrimSpace(parsedOut.QueryAnalysis)
+	LoggerFrom(ctx).Info("query_analyzer done", "len", len(out))
+	return out, nil
+}
+
 // DecompositionResult is the output of the decomposition step.
 type DecompositionResult struct {
 	Domains []Domain `json:"domains"`
@@ -449,7 +439,7 @@ func DecomposeMessage(ctx context.Context, userMessage string) ([]Domain, error)
 		return nil, WrapLLMError(err)
 	}
 
-	model := client.GenerativeModel(GetEffectiveModel(ctx, GeminiModel))
+	model := client.GenerativeModel(GetEffectiveModel(ctx, defaultConfig.GeminiModel))
 	model.ResponseMIMEType = "application/json"
 	model.SetMaxOutputTokens(512)
 	model.ResponseSchema = &genai.Schema{

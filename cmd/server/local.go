@@ -1,5 +1,4 @@
-// Command local runs the Jot API as a plain HTTP server for local development.
-// Bypasses the Functions Framework to avoid path routing issues.
+// runLocal runs the Jot API as a plain HTTP server for local development (bypasses Functions Framework).
 package main
 
 import (
@@ -9,12 +8,10 @@ import (
 	"net/http"
 	"os"
 
-	_ "github.com/jackstrohm/jot"
 	jot "github.com/jackstrohm/jot"
-	_ "github.com/jackstrohm/jot/internal/tools/impl"
 )
 
-func main() {
+func runLocal() {
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"

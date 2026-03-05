@@ -1,6 +1,4 @@
-// clean-test-data deletes Firestore entries matching a query (e.g. by source).
-// Usage: go run ./cmd/clean-test-data -source=old_source
-// Optional: -dry-run to only count matching documents.
+// clean deletes Firestore entries matching a query (e.g. by source). Subcommand: clean-test.
 package main
 
 import (
@@ -8,23 +6,31 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"os"
 
 	"google.golang.org/api/iterator"
 
 	"github.com/jackstrohm/jot"
+	"github.com/jackstrohm/jot/internal/config"
 )
 
-func main() {
-	source := flag.String("source", "", "Delete entries where source equals this value (required)")
-	dryRun := flag.Bool("dry-run", false, "Only count matching documents, do not delete")
-	flag.Parse()
+func runCleanTest() {
+	args := os.Args[2:]
+	fs := flag.NewFlagSet("clean-test", flag.ExitOnError)
+	source := fs.String("source", "", "Delete entries where source equals this value (required)")
+	dryRun := fs.Bool("dry-run", false, "Only count matching documents, do not delete")
+	_ = fs.Parse(args)
 
 	if *source == "" {
 		log.Fatal(" -source is required (e.g. -source=old_source)")
 	}
 
 	ctx := context.Background()
-	app, err := jot.NewApp(ctx)
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("config: %v", err)
+	}
+	app, err := jot.NewApp(ctx, cfg)
 	if err != nil {
 		log.Fatal(err)
 	}

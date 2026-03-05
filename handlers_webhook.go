@@ -8,10 +8,11 @@ import (
 	cloudtasks "cloud.google.com/go/cloudtasks/apiv2"
 	"cloud.google.com/go/cloudtasks/apiv2/cloudtaskspb"
 	"github.com/google/uuid"
+	"github.com/jackstrohm/jot/internal/api"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-func handleWebhook(w http.ResponseWriter, r *http.Request) {
+func handleWebhook(s *api.Server, w http.ResponseWriter, r *http.Request) {
 	startTime := time.Now()
 	ctx := r.Context()
 
@@ -35,7 +36,7 @@ func handleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if SyncGDocURL == "" {
+	if s.Config.SyncGDocURL == "" {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "SYNC_GDOC_URL not configured"})
 		return
 	}
@@ -49,7 +50,7 @@ func handleWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tasksClient.Close()
 
-	parent := fmt.Sprintf("projects/%s/locations/%s/queues/%s", GoogleCloudProject, CloudTasksLocation, CloudTasksQueue)
+	parent := fmt.Sprintf("projects/%s/locations/%s/queues/%s", s.Config.GoogleCloudProject, s.Config.CloudTasksLocation, s.Config.CloudTasksQueue)
 
 	fsClient, err := GetFirestoreClient(ctx)
 	if err != nil {
@@ -80,10 +81,10 @@ func handleWebhook(w http.ResponseWriter, r *http.Request) {
 		MessageType: &cloudtaskspb.Task_HttpRequest{
 			HttpRequest: &cloudtaskspb.HttpRequest{
 				HttpMethod: cloudtaskspb.HttpMethod_POST,
-				Url:        SyncGDocURL,
+				Url:        s.Config.SyncGDocURL,
 				Headers: map[string]string{
 					"Content-Type": "application/json",
-					"X-API-Key":    JotAPIKey,
+					"X-API-Key":    s.Config.JotAPIKey,
 				},
 			},
 		},

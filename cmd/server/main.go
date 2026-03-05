@@ -1,5 +1,4 @@
-// Command server runs the Jot API as a standalone HTTP server.
-// This is used for container-based deployment to Cloud Run.
+// Command server runs the Jot API: use RUN_LOCAL=1 for plain HTTP (local dev), else Functions Framework (Cloud Run).
 package main
 
 import (
@@ -13,11 +12,15 @@ import (
 )
 
 func main() {
+	if os.Getenv("RUN_LOCAL") == "1" || os.Getenv("RUN_LOCAL") == "true" {
+		runLocal()
+		return
+	}
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
-
 	if err := jot.InitDefaultApp(context.Background()); err != nil {
 		log.Fatalf("init app: %v", err)
 	}

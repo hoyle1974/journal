@@ -34,7 +34,7 @@ func CreateAndSavePlan(ctx context.Context, goal string) (string, error) {
 		return "", err
 	}
 
-	model := client.GenerativeModel(GetEffectiveModel(ctx, GeminiModel))
+	model := client.GenerativeModel(GetEffectiveModel(ctx, defaultConfig.GeminiModel))
 	model.SystemInstruction = &genai.Content{Parts: []genai.Part{genai.Text(prompts.PlanSystem())}}
 	model.ResponseMIMEType = "application/json"
 	model.SetMaxOutputTokens(2048)

@@ -6,9 +6,11 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/jackstrohm/jot/internal/api"
 )
 
-func handleDecayContexts(w http.ResponseWriter, r *http.Request) {
+func handleDecayContexts(s *api.Server, w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
 		return
@@ -36,7 +38,7 @@ func handleDecayContexts(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func handleBackfillEmbeddings(w http.ResponseWriter, r *http.Request) {
+func handleBackfillEmbeddings(s *api.Server, w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
 		return
@@ -67,7 +69,7 @@ func handleBackfillEmbeddings(w http.ResponseWriter, r *http.Request) {
 
 var entryUUIDRegex = regexp.MustCompile(`^/entries/([a-f0-9-]+)$`)
 
-func handleEntries(w http.ResponseWriter, r *http.Request, path string) {
+func handleEntries(s *api.Server, w http.ResponseWriter, r *http.Request, path string) {
 	ctx := r.Context()
 
 	match := entryUUIDRegex.FindStringSubmatch(path)

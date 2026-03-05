@@ -6,16 +6,23 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/http"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
 
+	"cloud.google.com/go/compute/metadata"
 	"cloud.google.com/go/firestore"
+	"github.com/jackstrohm/jot/internal/api"
+	"github.com/jackstrohm/jot/internal/config"
 	"google.golang.org/api/docs/v1"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
+
+// googleDocIDRe matches a Google Docs document ID (from URL path /document/d/ID/edit).
+var googleDocIDRe = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
 // sanitizeResponseForDoc ensures the LLM response never contains a standalone "done" or "done." line.
 // Writing that into the doc would create a new sync trigger and cause an infinite sync loop.
@@ -45,15 +52,49 @@ type syncBlock struct {
 	kind        int
 }
 
-func syncCreateDocsService(ctx context.Context) (*docs.Service, error) {
-	if ServiceAccountFile != "" {
-		return docs.NewService(ctx, option.WithCredentialsFile(ServiceAccountFile))
+func syncCreateDocsService(ctx context.Context, cfg *config.Config) (*docs.Service, error) {
+	if cfg != nil && cfg.ServiceAccountFile != "" {
+		return docs.NewService(ctx, option.WithCredentialsFile(cfg.ServiceAccountFile))
 	}
 	return docs.NewService(ctx)
 }
 
 func syncFetchDoc(ctx context.Context, docsService *docs.Service, documentID string) (*docs.Document, error) {
 	return docsService.Documents.Get(documentID).Do()
+}
+
+// syncFetchDocErrMessage returns a user-facing hint when Documents.Get fails (e.g. 400 with HTML body).
+func syncFetchDocErrMessage(err error) string {
+	if err == nil {
+		return ""
+	}
+	s := err.Error()
+	// Google often returns 400 with HTML "Page Not Found" / "unable to open the file" when the app has no access or bad doc ID.
+	htmlErr := strings.Contains(s, "400") && (strings.Contains(s, "DOCTYPE") || strings.Contains(s, "<html"))
+	pageNotFound := strings.Contains(s, "Page Not Found") || strings.Contains(s, "unable to open the file")
+	if htmlErr || pageNotFound {
+		return "Document not found or access denied. Share the Google Doc with the service account (see log line 'sync fetch identity' for the email) and ensure DOCUMENT_ID is the ID from docs.google.com/document/d/ID/edit."
+	}
+	if strings.Contains(s, "403") || strings.Contains(s, "Forbidden") {
+		return "Access denied to document. Share the Google Doc with the service account (see log line 'sync fetch identity' for the email)."
+	}
+	if strings.Contains(s, "404") || strings.Contains(s, "Not Found") {
+		return "Document not found. Check DOCUMENT_ID and that the document has not been deleted."
+	}
+	return ""
+}
+
+// syncIdentityForLog returns a short description of the identity used for Docs API (for logging when access fails).
+func syncIdentityForLog(cfg *config.Config) string {
+	if cfg != nil && cfg.ServiceAccountFile != "" {
+		return "SERVICE_ACCOUNT_FILE=" + cfg.ServiceAccountFile
+	}
+	if metadata.OnGCE() {
+		if email, err := metadata.Email("default"); err == nil && email != "" {
+			return "Share the Google Doc with this account: " + email
+		}
+	}
+	return "Application Default Credentials (share the Google Doc with the Cloud Run service account email from GCP Console > Cloud Run > jot-api-go > Security)"
 }
 
 func findSyncDoneTrigger(doc *docs.Document) (elem *docs.TextRun, startIndex, endIndex int64) {
@@ -214,7 +255,7 @@ func syncApplyBatchUpdate(docsService *docs.Service, documentID string, requests
 	return err
 }
 
-func handleSync(w http.ResponseWriter, r *http.Request) {
+func handleSync(s *api.Server, w http.ResponseWriter, r *http.Request) {
 	startTime := time.Now()
 	ctx := r.Context()
 	ctx = WithSyncInProgress(ctx) // don't forward logs to doc during sync; appends would shift indices
@@ -229,8 +270,16 @@ func handleSync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if DocumentID == "" {
+	if s.Config.DocumentID == "" {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "DOCUMENT_ID not configured"})
+		return
+	}
+	documentID := strings.TrimSpace(s.Config.DocumentID)
+	if !googleDocIDRe.MatchString(documentID) {
+		LoggerFrom(ctx).Error("sync failed", "stage", "Config", "reason", "invalid DOCUMENT_ID format")
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "DOCUMENT_ID must be the document ID only (e.g. from docs.google.com/document/d/ID/edit), not a full URL or path.",
+		})
 		return
 	}
 
@@ -250,7 +299,7 @@ func handleSync(w http.ResponseWriter, r *http.Request) {
 	var docsService *docs.Service
 	var doc *docs.Document
 	var err error
-	docsService, err = syncCreateDocsService(ctx)
+	docsService, err = syncCreateDocsService(ctx, s.Config)
 	if err != nil {
 		span.RecordError(err)
 		LoggerFrom(ctx).Error("sync failed", "stage", "DocsService", "error", err)
@@ -259,11 +308,17 @@ func handleSync(w http.ResponseWriter, r *http.Request) {
 	}
 
 	docFetchStart := time.Now()
-	doc, err = syncFetchDoc(ctx, docsService, DocumentID)
+	doc, err = syncFetchDoc(ctx, docsService, documentID)
 	if err != nil {
 		span.RecordError(err)
 		LoggerFrom(ctx).Error("sync failed", "stage", "FetchDoc", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("Failed to fetch document: %v", err)})
+		LoggerFrom(ctx).Info("sync fetch identity", "identity", syncIdentityForLog(s.Config))
+		msg := fmt.Sprintf("Failed to fetch document: %v", err)
+		if hint := syncFetchDocErrMessage(err); hint != "" {
+			LoggerFrom(ctx).Info("sync fetch hint", "hint", hint)
+			msg = hint
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": msg})
 		return
 	}
 	LoggerFrom(ctx).Debug("doc fetched", "duration_ms", time.Since(docFetchStart).Milliseconds())
@@ -310,7 +365,7 @@ func handleSync(w http.ResponseWriter, r *http.Request) {
 
 	if len(requests) > 0 {
 		updateStart := time.Now()
-		err = syncApplyBatchUpdate(docsService, DocumentID, requests)
+		err = syncApplyBatchUpdate(docsService, documentID, requests)
 		if err != nil {
 			LoggerFrom(ctx).Error("doc update failed", "error", err)
 			span.RecordError(err)

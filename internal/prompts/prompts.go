@@ -14,9 +14,6 @@ var systemPromptTxt string
 //go:embed source_code.txt
 var sourceCodeTxt string
 
-//go:embed unified_committee.txt
-var unifiedCommitteeTxt string
-
 //go:embed data_safety.txt
 var dataSafetyTxt string
 
@@ -92,9 +89,6 @@ func SystemPromptTemplate() string { return systemPromptTxt }
 
 // SourceCodeBlock returns the static source-code block appended to the system prompt.
 func SourceCodeBlock() string { return sourceCodeTxt }
-
-// UnifiedCommittee returns the unified committee system prompt.
-func UnifiedCommittee() string { return unifiedCommitteeTxt }
 
 // DataSafety returns the prompt-injection safety suffix appended to many system prompts.
 func DataSafety() string { return dataSafetyTxt }

@@ -53,7 +53,7 @@ func runRollUpLLM(ctx context.Context, periodLabel, analysesText string) (string
 	if err != nil {
 		return "", nil, err
 	}
-	model := client.GenerativeModel(GetEffectiveModel(ctx, DreamerModel))
+	model := client.GenerativeModel(GetEffectiveModel(ctx, defaultConfig.DreamerModel))
 	model.ResponseMIMEType = "application/json"
 	model.SetMaxOutputTokens(1024)
 	model.ResponseSchema = &genai.Schema{

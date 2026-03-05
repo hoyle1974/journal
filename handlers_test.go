@@ -5,13 +5,16 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/jackstrohm/jot/internal/config"
 )
 
 func TestHandleHealth(t *testing.T) {
+	s := testServer(&config.Config{GoogleCloudProject: "test-project"})
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/health", nil)
 
-	handleHealth(rec, req)
+	handleHealth(s, rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Errorf("handleHealth status = %d, want 200", rec.Code)
@@ -29,10 +32,11 @@ func TestHandleHealth(t *testing.T) {
 }
 
 func TestHandleMetrics(t *testing.T) {
+	s := testServer(nil)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/metrics", nil)
 
-	handleMetrics(rec, req)
+	handleMetrics(s, rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Errorf("handleMetrics status = %d, want 200", rec.Code)

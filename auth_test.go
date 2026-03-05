@@ -4,19 +4,26 @@ import (
 	"log/slog"
 	"net/http"
 	"testing"
+
+	"github.com/jackstrohm/jot/internal/api"
+	"github.com/jackstrohm/jot/internal/config"
 )
 
 func testApp() *App {
 	return &App{Logger: slog.Default()}
 }
 
-func TestCheckAuth_NoKeyConfigured(t *testing.T) {
-	orig := JotAPIKey
-	JotAPIKey = ""
-	defer func() { JotAPIKey = orig }()
+func testServer(cfg *config.Config) *api.Server {
+	if cfg == nil {
+		cfg = &config.Config{}
+	}
+	return api.NewServer(testApp(), cfg, slog.Default(), nil)
+}
 
+func TestCheckAuth_NoKeyConfigured(t *testing.T) {
+	s := testServer(&config.Config{JotAPIKey: ""})
 	r, _ := http.NewRequest("GET", "/query", nil)
-	code, msg := checkAuth(testApp(), r)
+	code, msg := checkAuth(s, r)
 	if code != 0 {
 		t.Errorf("checkAuth() with no key configured: code = %d, want 0", code)
 	}
@@ -26,12 +33,9 @@ func TestCheckAuth_NoKeyConfigured(t *testing.T) {
 }
 
 func TestCheckAuth_MissingHeader(t *testing.T) {
-	orig := JotAPIKey
-	JotAPIKey = "secret"
-	defer func() { JotAPIKey = orig }()
-
+	s := testServer(&config.Config{JotAPIKey: "secret"})
 	r, _ := http.NewRequest("GET", "/query", nil)
-	code, msg := checkAuth(testApp(), r)
+	code, msg := checkAuth(s, r)
 	if code != http.StatusUnauthorized {
 		t.Errorf("checkAuth() missing header: code = %d, want 401", code)
 	}
@@ -41,13 +45,10 @@ func TestCheckAuth_MissingHeader(t *testing.T) {
 }
 
 func TestCheckAuth_InvalidKey(t *testing.T) {
-	orig := JotAPIKey
-	JotAPIKey = "correct-key"
-	defer func() { JotAPIKey = orig }()
-
+	s := testServer(&config.Config{JotAPIKey: "correct-key"})
 	r, _ := http.NewRequest("GET", "/query", nil)
 	r.Header.Set("X-API-Key", "wrong-key")
-	code, msg := checkAuth(testApp(), r)
+	code, msg := checkAuth(s, r)
 	if code != http.StatusForbidden {
 		t.Errorf("checkAuth() invalid key: code = %d, want 403", code)
 	}
@@ -57,13 +58,10 @@ func TestCheckAuth_InvalidKey(t *testing.T) {
 }
 
 func TestCheckAuth_ValidKey(t *testing.T) {
-	orig := JotAPIKey
-	JotAPIKey = "secret"
-	defer func() { JotAPIKey = orig }()
-
+	s := testServer(&config.Config{JotAPIKey: "secret"})
 	r, _ := http.NewRequest("GET", "/query", nil)
 	r.Header.Set("X-API-Key", "secret")
-	code, msg := checkAuth(testApp(), r)
+	code, msg := checkAuth(s, r)
 	if code != 0 {
 		t.Errorf("checkAuth() valid key: code = %d, want 0", code)
 	}

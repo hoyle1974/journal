@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+
+	"github.com/jackstrohm/jot/internal/api"
 )
 
-func handleLog(w http.ResponseWriter, r *http.Request) {
+func handleLog(s *api.Server, w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
@@ -54,7 +56,7 @@ func handleLog(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func handleQuery(w http.ResponseWriter, r *http.Request) {
+func handleQuery(s *api.Server, w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
 		return
@@ -94,7 +96,7 @@ func handleQuery(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
-func handlePlan(w http.ResponseWriter, r *http.Request) {
+func handlePlan(s *api.Server, w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
 		return

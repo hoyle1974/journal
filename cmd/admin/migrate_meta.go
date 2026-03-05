@@ -1,6 +1,4 @@
-// migrate_knowledge_metadata repairs and normalizes metadata on knowledge_nodes documents.
-// Usage: go run ./cmd/migrate_knowledge_metadata [-dry-run]
-// Use -dry-run to log what would be updated without writing. Without -dry-run, applies changes.
+// migrate_meta repairs and normalizes metadata on knowledge_nodes documents.
 package main
 
 import (
@@ -8,17 +6,25 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"os"
 
 	"github.com/jackstrohm/jot"
+	"github.com/jackstrohm/jot/internal/config"
 	"github.com/jackstrohm/jot/internal/memory"
 )
 
-func main() {
-	dryRun := flag.Bool("dry-run", false, "Log updates only, do not write to Firestore")
-	flag.Parse()
+func runMigrateMeta() {
+	args := os.Args[2:]
+	fs := flag.NewFlagSet("migrate-meta", flag.ExitOnError)
+	dryRun := fs.Bool("dry-run", false, "Log updates only, do not write to Firestore")
+	_ = fs.Parse(args)
 
 	ctx := context.Background()
-	app, err := jot.NewApp(ctx)
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("config: %v", err)
+	}
+	app, err := jot.NewApp(ctx, cfg)
 	if err != nil {
 		log.Fatalf("NewApp: %v", err)
 	}

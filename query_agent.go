@@ -53,7 +53,7 @@ func RunQueryWithDebug(ctx context.Context, question, source string, debug bool)
 		"source":       source,
 	})
 
-	if GeminiAPIKey == "" {
+	if defaultConfig.GeminiAPIKey == "" {
 		ErrorsTotal.Inc()
 		return &QueryResult{
 			Answer:     "Error: GEMINI_API_KEY not configured",
@@ -537,7 +537,7 @@ func runReflectionCheck(ctx context.Context, answer, question string) (pass bool
 	if err != nil {
 		return true, "", err // on error, pass through (don't block)
 	}
-	model := client.GenerativeModel(GetEffectiveModel(ctx, GeminiModel))
+	model := client.GenerativeModel(GetEffectiveModel(ctx, defaultConfig.GeminiModel))
 	model.ResponseMIMEType = "application/json"
 	model.SetMaxOutputTokens(256)
 	model.ResponseSchema = &genai.Schema{

@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+
+	"github.com/jackstrohm/jot/internal/api"
 )
 
-func handleSMS(w http.ResponseWriter, r *http.Request) {
+func handleSMS(s *api.Server, w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	ctx, span := StartSpan(ctx, "sms.webhook")
@@ -18,7 +20,7 @@ func handleSMS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	webhookURL := fmt.Sprintf("https://us-central1-%s.cloudfunctions.net/jot-api-go/sms", GoogleCloudProject)
+	webhookURL := fmt.Sprintf("https://us-central1-%s.cloudfunctions.net/jot-api-go/sms", s.Config.GoogleCloudProject)
 
 	if !ValidateTwilioSignature(r, webhookURL) {
 		LoggerFrom(ctx).Warn("invalid Twilio signature")

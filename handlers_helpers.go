@@ -43,12 +43,6 @@ func SubmitGDocLog(ctx context.Context, msg string) {
 	}
 }
 
-// gdocLogPayload carries context and message for async GDoc logging.
-type gdocLogPayload struct {
-	ctx context.Context
-	msg string
-}
-
 // docIndexLen returns the length of s in UTF-16 code units (Google Docs API StartIndex/EndIndex).
 func docIndexLen(s string) int64 {
 	return int64(len(utf16.Encode([]rune(s))))
@@ -103,8 +97,8 @@ func logToGDocSync(ctx context.Context, message string) {
 	var docsService *docs.Service
 	var err error
 
-	if ServiceAccountFile != "" {
-		docsService, err = docs.NewService(ctx, option.WithCredentialsFile(ServiceAccountFile))
+	if defaultConfig.ServiceAccountFile != "" {
+		docsService, err = docs.NewService(ctx, option.WithCredentialsFile(defaultConfig.ServiceAccountFile))
 	} else {
 		docsService, err = docs.NewService(ctx)
 	}
@@ -114,7 +108,7 @@ func logToGDocSync(ctx context.Context, message string) {
 		return
 	}
 
-	doc, err := docsService.Documents.Get(DocumentID).Do()
+	doc, err := docsService.Documents.Get(defaultConfig.DocumentID).Do()
 	if err != nil {
 		LoggerFrom(ctx).Error("failed to fetch document for logging", "error", err)
 		span.RecordError(err)
@@ -152,7 +146,7 @@ func logToGDocSync(ctx context.Context, message string) {
 		},
 	}
 
-	_, err = docsService.Documents.BatchUpdate(DocumentID, &docs.BatchUpdateDocumentRequest{
+	_, err = docsService.Documents.BatchUpdate(defaultConfig.DocumentID, &docs.BatchUpdateDocumentRequest{
 		Requests: requests,
 	}).Do()
 	if err != nil {

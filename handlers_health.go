@@ -3,17 +3,19 @@ package jot
 import (
 	"net/http"
 	"time"
+
+	"github.com/jackstrohm/jot/internal/api"
 )
 
-func handleHealth(w http.ResponseWriter, r *http.Request) {
+func handleHealth(s *api.Server, w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"status":    "healthy",
 		"timestamp": time.Now().Format(time.RFC3339),
-		"project":   GoogleCloudProject,
+		"project":   s.Config.GoogleCloudProject,
 	})
 }
 
-func handleMetrics(w http.ResponseWriter, r *http.Request) {
+func handleMetrics(s *api.Server, w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"queries_total":      QueriesTotal.Value(),
 		"entries_total":      EntriesTotal.Value(),

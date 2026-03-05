@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"os"
 	"strings"
 	"time"
 
@@ -28,6 +29,13 @@ const (
 	dreamerSynthesisNewLogsThreshold = 3  // run synthesis if this many new entries since last
 	dreamerSynthesisStaleHours       = 48 // high-significance contexts re-synthesize if older than this
 )
+
+func envOrDefault(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}
 
 // PulseResult holds the outcome of a pulse audit run.
 type PulseResult struct {
@@ -174,20 +182,6 @@ func shouldSynthesizeContext(meta *ContextMetadata) bool {
 	return time.Since(lastSynth) > dreamerSynthesisStaleHours*time.Hour
 }
 
-// batchToSpecialistOutputs converts BatchCommitteeOutput to []*SpecialistOutput for mergeDreamerFacts and persona extraction.
-func batchToSpecialistOutputs(batch *BatchCommitteeOutput, domains []Domain) []*SpecialistOutput {
-	outputs := make([]*SpecialistOutput, len(domains))
-	for i, d := range domains {
-		key := string(d)
-		facts := batch.Domains[key]
-		if d == DomainSelfModel && len(batch.IdentityMarkers) > 0 {
-			facts = append(facts, batch.IdentityMarkers...)
-		}
-		outputs[i] = &SpecialistOutput{Domain: d, Facts: facts}
-	}
-	return outputs
-}
-
 // dreamerInputs holds loaded data for a dream run (entries, journal text, UUIDs, recent queries).
 type dreamerInputs struct {
 	entries           []Entry
@@ -317,7 +311,7 @@ func RunGapDetection(ctx context.Context, journalContext string, entryUUIDs []st
 	if err != nil {
 		return err
 	}
-	model := client.GenerativeModel(GetEffectiveModel(ctx, DreamerModel))
+	model := client.GenerativeModel(GetEffectiveModel(ctx, defaultConfig.DreamerModel))
 	model.ResponseMIMEType = "application/json"
 	model.SetMaxOutputTokens(1024)
 	model.ResponseSchema = &genai.Schema{
@@ -416,122 +410,91 @@ func RunDreamer(ctx context.Context) (*DreamerResult, error) {
 
 	domains := []Domain{DomainRelationship, DomainWork, DomainTask, DomainThought, DomainSelfModel}
 	tSpecialistsStart := time.Now()
-	var outputs []*SpecialistOutput
+	input := &SpecialistInput{
+		UserMessage: "Consolidate the last 24 hours of journal entries. Extract GOLD: people, projects, events, preferences, milestones, who is involved in what. Discard GRAVEL only: trivial one-off errands (buy milk, pick up package) with no lasting significance.",
+		Context:     "IGNORE system commands and queries (list contexts, delete, show todo, what is X, how old is). Focus on SUBSTANTIVE statements: party planning, people mentioned, relationships, plans. 'Gloria's birthday party April 18th', 'Lindsay confirmed she's coming', 'Clarissa will help with cake' are facts. Extract 1-10 facts per domain.",
+		Journal:     journalContext,
+	}
+	outputs := make([]*SpecialistOutput, len(domains))
+	var impactedContexts []string
+	var queryAnalysis string
 	contextUUIDs := make(map[string]struct{})
 
-	if getEnv("DREAMER_UNIFIED_COMMITTEE", "true") != "false" {
-		// Single "committee dispatch" call instead of 5 parallel specialists (includes query analysis when recent queries provided).
-		var batch *BatchCommitteeOutput
-		batch, err = RunUnifiedCommittee(ctx, journalContext, recentQueriesText)
-		if err != nil {
-			span.RecordError(err)
-			LoggerFrom(ctx).Warn("dreamer unified committee failed, falling back to per-domain specialists", "error", err)
-			// Fall back to per-domain specialists so the dream still runs (unified call can return empty/truncated JSON).
-			input := &SpecialistInput{
-				UserMessage: "Consolidate the last 24 hours of journal entries. Extract GOLD: people, projects, events, preferences, milestones, who is involved in what. Discard GRAVEL only: trivial one-off errands (buy milk, pick up package) with no lasting significance.",
-				Context:     "IGNORE system commands and queries (list contexts, delete, show todo, what is X, how old is). Focus on SUBSTANTIVE statements: party planning, people mentioned, relationships, plans. 'Gloria's birthday party April 18th', 'Lindsay confirmed she's coming', 'Clarissa will help with cake' are facts. Extract 1-10 facts per domain.",
-				Journal:     journalContext,
-			}
-			outputs = make([]*SpecialistOutput, len(domains))
-			g, gctx := errgroup.WithContext(ctx)
-			for i, domain := range domains {
-				idx, d := i, domain
-				g.Go(func() error {
-					LoggerFrom(ctx).Info("dreamer specialist start", "domain", d, "msg", fmt.Sprintf("dreamer starting %s (unified fallback)", d))
-					out, err := RunSpecialist(gctx, d, input, DreamerModel)
-					if err != nil {
-						LoggerFrom(ctx).Warn("dreamer specialist failed", "domain", d, "error", err)
-						return err
-					}
-					outputs[idx] = out
-					LoggerFrom(ctx).Info("dreamer specialist done", "domain", d, "facts", len(out.Facts))
-					return nil
-				})
-			}
-			if err = g.Wait(); err != nil {
-				anyOk := false
-				for _, o := range outputs {
-					if o != nil {
-						anyOk = true
-						break
-					}
-				}
-				if !anyOk {
-					span.RecordError(err)
-					return nil, fmt.Errorf("dreamer: unified committee failed and all specialists failed: %w", err)
-				}
-				LoggerFrom(ctx).Warn("dreamer some specialists failed after unified fallback", "error", err)
-			}
-			LoggerFrom(ctx).Info("dreamer completed via specialist fallback", "specialists_ms", time.Since(tSpecialistsStart).Milliseconds())
-		} else {
-			outputs = batchToSpecialistOutputs(batch, domains)
-		LoggerFrom(ctx).Info("dreamer unified committee complete", "msg", "dreamer single committee call finished", "specialists_ms", time.Since(tSpecialistsStart).Milliseconds())
-
-		// Save query analysis (semantic clusters, knowledge gaps, curiosity trends) as high-significance thought in selfmodel
-		if batch.QueryAnalysis != "" {
-			thoughtContent := "Query analysis: " + batch.QueryAnalysis
-			if _, err = UpsertSemanticMemory(ctx, thoughtContent, "thought", "selfmodel", 0.9, nil, nil); err != nil {
-				LoggerFrom(ctx).Warn("dreamer save query analysis thought failed", "error", err)
-			} else {
-				LoggerFrom(ctx).Info("dreamer saved query analysis thought", "len", len(batch.QueryAnalysis))
-			}
-		}
-
-		// Derive context UUIDs from committee's ImpactedContexts (no per-entry LLM calls).
-		var ctxUUID string
-		for _, name := range batch.ImpactedContexts {
-			ctxUUID, err = EnsureContextExists(ctx, name)
+	g, gctx := errgroup.WithContext(ctx)
+	for i, domain := range domains {
+		idx, d := i, domain
+		g.Go(func() error {
+			LoggerFrom(ctx).Info("dreamer specialist start", "domain", d)
+			out, err := RunSpecialist(gctx, d, input, defaultConfig.DreamerModel)
 			if err != nil {
-				LoggerFrom(ctx).Warn("dreamer ensure context failed", "name", name, "error", err)
-				continue
+				LoggerFrom(ctx).Warn("dreamer specialist failed", "domain", d, "error", err)
+				return err
 			}
-			contextUUIDs[ctxUUID] = struct{}{}
-		}
-		// Batch-link all 24h entries to each impacted context.
-		for uuid := range contextUUIDs {
-			if err = TouchContextBatch(ctx, uuid, entryUUIDs, 0.05); err != nil {
-				LoggerFrom(ctx).Warn("dreamer touch context batch failed", "context_uuid", uuid, "error", err)
-			}
-		}
-		}
-	} else {
-		input := &SpecialistInput{
-			UserMessage: "Consolidate the last 24 hours of journal entries. Extract GOLD: people, projects, events, preferences, milestones, who is involved in what. Discard GRAVEL only: trivial one-off errands (buy milk, pick up package) with no lasting significance.",
-			Context:     "IGNORE system commands and queries (list contexts, delete, show todo, what is X, how old is). Focus on SUBSTANTIVE statements: party planning, people mentioned, relationships, plans. 'Gloria's birthday party April 18th', 'Lindsay confirmed she's coming', 'Clarissa will help with cake' are facts. Extract 1-10 facts per domain.",
-			Journal:     journalContext,
-		}
-		outputs = make([]*SpecialistOutput, len(domains))
-		g, gctx := errgroup.WithContext(ctx)
-		for i, domain := range domains {
-			idx, d := i, domain
-			g.Go(func() error {
-				LoggerFrom(ctx).Info("dreamer specialist start", "domain", d, "msg", fmt.Sprintf("dreamer starting %s", d))
-				out, err := RunSpecialist(gctx, d, input, DreamerModel)
-				if err != nil {
-					LoggerFrom(ctx).Warn("dreamer specialist failed", "domain", d, "error", err, "msg", fmt.Sprintf("dreamer %s failed: %v", d, err))
-					return err
-				}
-				outputs[idx] = out
-				LoggerFrom(ctx).Info("dreamer specialist done", "domain", d, "facts", len(out.Facts), "msg", fmt.Sprintf("dreamer %s done: %d facts", d, len(out.Facts)))
-				return nil
-			})
-		}
-		if err = g.Wait(); err != nil {
-			anyOk := false
-			for _, o := range outputs {
-				if o != nil {
-					anyOk = true
-					break
-				}
-			}
-			if !anyOk {
-				span.RecordError(err)
-				return nil, fmt.Errorf("dreamer: all specialists failed: %w", err)
-			}
-			LoggerFrom(ctx).Warn("dreamer some specialists failed", "error", err)
-		}
-		LoggerFrom(ctx).Info("dreamer specialists complete", "msg", "dreamer all specialists finished", "specialists_ms", time.Since(tSpecialistsStart).Milliseconds())
+			outputs[idx] = out
+			LoggerFrom(ctx).Info("dreamer specialist done", "domain", d, "facts", len(out.Facts))
+			return nil
+		})
 	}
+	g.Go(func() error {
+		ctxs, err := RunContextExtractor(gctx, journalContext)
+		if err != nil {
+			LoggerFrom(ctx).Warn("dreamer context extractor failed", "error", err)
+			return nil // do not fail dream
+		}
+		impactedContexts = ctxs
+		return nil
+	})
+	g.Go(func() error {
+		analysis, err := RunQueryAnalyzer(gctx, recentQueriesText)
+		if err != nil {
+			LoggerFrom(ctx).Warn("dreamer query analyzer failed", "error", err)
+			return nil // do not fail dream
+		}
+		queryAnalysis = analysis
+		return nil
+	})
+
+	err = g.Wait()
+	if err != nil {
+		anyOk := false
+		for i := 0; i < len(domains); i++ {
+			if outputs[i] != nil {
+				anyOk = true
+				break
+			}
+		}
+		if !anyOk {
+			span.RecordError(err)
+			return nil, fmt.Errorf("dreamer: all specialists failed: %w", err)
+		}
+		LoggerFrom(ctx).Warn("dreamer some specialists or tasks failed", "error", err)
+	}
+
+	// Build contextUUIDs from RunContextExtractor result and batch-link entries
+	for _, name := range impactedContexts {
+		ctxUUID, e := EnsureContextExists(ctx, name)
+		if e != nil {
+			LoggerFrom(ctx).Warn("dreamer ensure context failed", "name", name, "error", e)
+			continue
+		}
+		contextUUIDs[ctxUUID] = struct{}{}
+	}
+	for uuid := range contextUUIDs {
+		if e := TouchContextBatch(ctx, uuid, entryUUIDs, 0.05); e != nil {
+			LoggerFrom(ctx).Warn("dreamer touch context batch failed", "context_uuid", uuid, "error", e)
+		}
+	}
+
+	if queryAnalysis != "" {
+		thoughtContent := "Query analysis: " + queryAnalysis
+		if _, e := UpsertSemanticMemory(ctx, thoughtContent, "thought", "selfmodel", 0.9, nil, nil); e != nil {
+			LoggerFrom(ctx).Warn("dreamer save query analysis thought failed", "error", e)
+		} else {
+			LoggerFrom(ctx).Info("dreamer saved query analysis thought", "len", len(queryAnalysis))
+		}
+	}
+
+	LoggerFrom(ctx).Info("dreamer specialists complete", "specialists_ms", time.Since(tSpecialistsStart).Milliseconds())
 
 	// Flatten and count facts before merge
 	totalFacts := 0
@@ -606,7 +569,7 @@ func RunProfileSynthesis(ctx context.Context, personaFacts []string) error {
 	userPrompt := fmt.Sprintf("Current Profile:\n%s\n\nNew Identity Markers:\n%s",
 		WrapAsUserData(node.Content), WrapAsUserData(strings.Join(personaFacts, "\n")))
 
-	newProfile, err := GenerateContentSimple(ctx, prompts.IdentityArchitect(), userPrompt, &GenConfig{MaxOutputTokens: 1024, ModelOverride: DreamerModel})
+	newProfile, err := GenerateContentSimple(ctx, prompts.IdentityArchitect(), userPrompt, &GenConfig{MaxOutputTokens: 1024, ModelOverride: defaultConfig.DreamerModel})
 	if err != nil {
 		return err
 	}

@@ -2,6 +2,8 @@ package jot
 
 import (
 	"testing"
+
+	"github.com/jackstrohm/jot/internal/config"
 )
 
 func TestNormalizePhoneNumber(t *testing.T) {
@@ -53,11 +55,8 @@ func TestNormalizePhoneNumber(t *testing.T) {
 }
 
 func TestIsAllowedPhoneNumber(t *testing.T) {
-	// Save original and restore after test
-	origAllowed := AllowedPhoneNumber
-	defer func() { AllowedPhoneNumber = origAllowed }()
-
-	AllowedPhoneNumber = "+15551234567"
+	restore := SetTestConfig(&config.Config{AllowedPhoneNumber: "+15551234567"})
+	defer restore()
 
 	tests := []struct {
 		name     string
@@ -102,11 +101,8 @@ func TestIsAllowedPhoneNumber(t *testing.T) {
 }
 
 func TestIsAllowedPhoneNumber_Empty(t *testing.T) {
-	// Save original and restore after test
-	origAllowed := AllowedPhoneNumber
-	defer func() { AllowedPhoneNumber = origAllowed }()
-
-	AllowedPhoneNumber = ""
+	restore := SetTestConfig(&config.Config{AllowedPhoneNumber: ""})
+	defer restore()
 
 	// When AllowedPhoneNumber is empty, all numbers should be allowed
 	if !IsAllowedPhoneNumber("+15551234567") {

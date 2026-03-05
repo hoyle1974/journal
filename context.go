@@ -656,7 +656,7 @@ func analyzeForNewContext(ctx context.Context, entryContent string) (bool, strin
 		return false, "", nil
 	}
 
-	model := client.GenerativeModel(GetEffectiveModel(ctx, GeminiModel))
+	model := client.GenerativeModel(GetEffectiveModel(ctx, defaultConfig.GeminiModel))
 	model.ResponseMIMEType = "application/json"
 	model.SetMaxOutputTokens(512)
 	model.ResponseSchema = &genai.Schema{

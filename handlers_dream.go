@@ -6,9 +6,11 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/jackstrohm/jot/internal/api"
 )
 
-func handleDream(w http.ResponseWriter, r *http.Request) {
+func handleDream(s *api.Server, w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
 		return
@@ -58,7 +60,7 @@ func handleDream(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-func handleJanitor(w http.ResponseWriter, r *http.Request) {
+func handleJanitor(s *api.Server, w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
 		return
@@ -87,7 +89,7 @@ func handleJanitor(w http.ResponseWriter, r *http.Request) {
 }
 
 // handlePendingQuestions returns unresolved pending questions (GET /pending-questions).
-func handlePendingQuestions(w http.ResponseWriter, r *http.Request) {
+func handlePendingQuestions(s *api.Server, w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
 		return
@@ -107,7 +109,7 @@ func handlePendingQuestions(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleRollup runs weekly and monthly roll-up (POST /rollup). Call weekly from cron/scheduler.
-func handleRollup(w http.ResponseWriter, r *http.Request) {
+func handleRollup(s *api.Server, w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
 		return
@@ -135,7 +137,7 @@ func handleRollup(w http.ResponseWriter, r *http.Request) {
 }
 
 // handlePendingQuestionResolve resolves one pending question (POST /pending-questions/:id/resolve).
-func handlePendingQuestionResolve(w http.ResponseWriter, r *http.Request, questionID string) {
+func handlePendingQuestionResolve(s *api.Server, w http.ResponseWriter, r *http.Request, questionID string) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
 		return

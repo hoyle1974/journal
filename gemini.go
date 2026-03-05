@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/generative-ai-go/genai"
+	"github.com/jackstrohm/jot/internal/config"
 	"github.com/jackstrohm/jot/llmjson"
 	"golang.org/x/oauth2/google"
 	"log/slog"
@@ -43,11 +44,11 @@ func modelID(m *genai.ModelInfo) string {
 
 // listAllModels returns all model names and those that support generateContent (uses global Logger).
 func listAllModels(ctx context.Context, client *genai.Client) (all []string, generateContent []string) {
-	return listAllModelsWithLogger(ctx, client, nil)
+	return listAllModelsWithLogger(ctx, client, nil, "")
 }
 
-// listAllModelsWithLogger is like listAllModels but uses the given logger when non-nil.
-func listAllModelsWithLogger(ctx context.Context, client *genai.Client, log *slog.Logger) (all []string, generateContent []string) {
+// listAllModelsWithLogger is like listAllModels but uses the given logger and optional apiKey for REST fallback.
+func listAllModelsWithLogger(ctx context.Context, client *genai.Client, log *slog.Logger, apiKey string) (all []string, generateContent []string) {
 	if log == nil {
 		log = Logger
 	}
@@ -69,8 +70,8 @@ func listAllModelsWithLogger(ctx context.Context, client *genai.Client, log *slo
 			generateContent = append(generateContent, id)
 		}
 	}
-	if len(all) == 0 && GeminiAPIKey != "" {
-		all = listModelsViaRESTWithLogger(ctx, log)
+	if len(all) == 0 && apiKey != "" {
+		all = listModelsViaRESTWithLogger(ctx, log, apiKey)
 		if len(all) > 0 {
 			log.Info("gemini models (via REST fallback)", "models", all)
 			generateContent = all
@@ -81,14 +82,18 @@ func listAllModelsWithLogger(ctx context.Context, client *genai.Client, log *slo
 
 // listModelsViaREST fetches model list from GET .../v1beta/models?key= (uses global Logger).
 func listModelsViaREST(ctx context.Context) []string {
-	return listModelsViaRESTWithLogger(ctx, nil)
+	apiKey := ""
+	if defaultConfig != nil {
+		apiKey = defaultConfig.GeminiAPIKey
+	}
+	return listModelsViaRESTWithLogger(ctx, nil, apiKey)
 }
 
-func listModelsViaRESTWithLogger(ctx context.Context, log *slog.Logger) []string {
+func listModelsViaRESTWithLogger(ctx context.Context, log *slog.Logger, apiKey string) []string {
 	if log == nil {
 		log = Logger
 	}
-	url := "https://generativelanguage.googleapis.com/v1beta/models?key=" + GeminiAPIKey
+	url := "https://generativelanguage.googleapis.com/v1beta/models?key=" + apiKey
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return nil
@@ -155,33 +160,33 @@ func resolveModel(configured string, available []string) string {
 
 // newGeminiClientForApp creates a Gemini client and resolves model names; used by App.
 // Returns (client, effectiveGeminiModel, effectiveDreamerModel, error).
-func newGeminiClientForApp(ctx context.Context, log *slog.Logger) (*genai.Client, string, string, error) {
-	if GeminiAPIKey == "" {
+func newGeminiClientForApp(ctx context.Context, cfg *config.Config, log *slog.Logger) (*genai.Client, string, string, error) {
+	if cfg == nil || cfg.GeminiAPIKey == "" {
 		return nil, "", "", fmt.Errorf("GEMINI_API_KEY not configured")
 	}
-	client, err := genai.NewClient(ctx, option.WithAPIKey(GeminiAPIKey))
+	client, err := genai.NewClient(ctx, option.WithAPIKey(cfg.GeminiAPIKey))
 	if err != nil {
 		return nil, "", "", fmt.Errorf("failed to create Gemini client: %w", err)
 	}
-	allModels, available := listAllModelsWithLogger(ctx, client, log)
+	allModels, available := listAllModelsWithLogger(ctx, client, log, cfg.GeminiAPIKey)
 	log.Info("gemini models (all)", "models", allModels)
-	effGen := GeminiModel
-	effDream := DreamerModel
+	effGen := cfg.GeminiModel
+	effDream := cfg.DreamerModel
 	if len(available) > 0 {
 		log.Info("gemini models (generateContent)", "models", available)
-		effGen = resolveModel(GeminiModel, available)
-		effDream = resolveModel(DreamerModel, available)
-		if effGen != GeminiModel || effDream != DreamerModel {
+		effGen = resolveModel(cfg.GeminiModel, available)
+		effDream = resolveModel(cfg.DreamerModel, available)
+		if effGen != cfg.GeminiModel || effDream != cfg.DreamerModel {
 			log.Info("gemini model resolved (configured not in list)",
-				"gemini_configured", GeminiModel, "gemini_resolved", effGen,
-				"dreamer_configured", DreamerModel, "dreamer_resolved", effDream)
+				"gemini_configured", cfg.GeminiModel, "gemini_resolved", effGen,
+				"dreamer_configured", cfg.DreamerModel, "dreamer_resolved", effDream)
 		}
 	}
 	if effGen == "" {
-		effGen = GeminiModel
+		effGen = cfg.GeminiModel
 	}
 	if effDream == "" {
-		effDream = DreamerModel
+		effDream = cfg.DreamerModel
 	}
 	log.Info("gemini client initialized", "model", effGen, "dreamer_model", effDream)
 	return client, effGen, effDream, nil
@@ -218,7 +223,7 @@ func GenerateContentSimple(ctx context.Context, systemPrompt, userPrompt string,
 		return "", err
 	}
 
-	effectiveModel := GetEffectiveModel(ctx, GeminiModel)
+	effectiveModel := GetEffectiveModel(ctx, defaultConfig.GeminiModel)
 	if config != nil && config.ModelOverride != "" {
 		effectiveModel = GetEffectiveModel(ctx, config.ModelOverride)
 	}
@@ -285,7 +290,7 @@ func EvaluateFactCollision(ctx context.Context, newFact, existingFact string) (a
 
 	text, err := GenerateContentSimple(ctx, factCollisionSystemPrompt, userPrompt, &GenConfig{
 		MaxOutputTokens: 16,
-		ModelOverride:   GeminiModel,
+		ModelOverride:   defaultConfig.GeminiModel,
 	})
 	if err != nil {
 		span.RecordError(err)
@@ -481,7 +486,7 @@ func NewChatSession(ctx context.Context, systemPrompt string, tools []*genai.Fun
 		return nil, err
 	}
 
-	effectiveModel := GetEffectiveModel(ctx, GeminiModel)
+	effectiveModel := GetEffectiveModel(ctx, defaultConfig.GeminiModel)
 	model := client.GenerativeModel(effectiveModel)
 
 	if systemPrompt != "" {
@@ -661,7 +666,7 @@ func GenerateEmbedding(ctx context.Context, text string, taskType ...string) ([]
 	}
 
 	// Use Vertex AI text-embedding-005 via REST API (768 dims, same as 004)
-	endpoint := fmt.Sprintf("https://us-central1-aiplatform.googleapis.com/v1/projects/%s/locations/us-central1/publishers/google/models/text-embedding-005:predict", GoogleCloudProject)
+	endpoint := fmt.Sprintf("https://us-central1-aiplatform.googleapis.com/v1/projects/%s/locations/us-central1/publishers/google/models/text-embedding-005:predict", defaultConfig.GoogleCloudProject)
 
 	instance := map[string]interface{}{"content": text, "task_type": task}
 	requestBody := map[string]interface{}{
