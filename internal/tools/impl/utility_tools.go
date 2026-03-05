@@ -3,7 +3,7 @@ package impl
 import (
 	"context"
 
-	"github.com/jackstrohm/jot"
+	"github.com/jackstrohm/jot/pkg/utils"
 	"github.com/jackstrohm/jot/tools"
 )
 
@@ -25,7 +25,7 @@ func registerUtilityTools() {
 			if !ok {
 				return tools.MissingParam("expression")
 			}
-			result, err := jot.EvaluateMathExpression(expression)
+			result, err := utils.EvaluateMathExpression(expression)
 			if err != nil {
 				return tools.Fail("Calculation error: %v", err)
 			}
@@ -55,7 +55,7 @@ func registerUtilityTools() {
 			}
 			date2Str := args.String("date2", "")
 			days := args.Int("days", 0)
-			result, err := jot.PerformDateCalculation(operation, date1Str, date2Str, days)
+			result, err := utils.PerformDateCalculation(operation, date1Str, date2Str, days)
 			if err != nil {
 				return tools.Fail("Date calculation error: %v", err)
 			}
@@ -75,7 +75,7 @@ func registerUtilityTools() {
 			if !ok {
 				return tools.MissingParam("text")
 			}
-			stats := jot.AnalyzeText(text)
+			stats := utils.AnalyzeText(text)
 			return tools.OK("%s", stats)
 		},
 	})
@@ -100,7 +100,7 @@ func registerUtilityTools() {
 			if !ok {
 				return tools.MissingParam("to_unit")
 			}
-			result, err := jot.ConvertUnits(value, fromUnit, toUnit)
+			result, err := utils.ConvertUnits(value, fromUnit, toUnit)
 			if err != nil {
 				return tools.Fail("Conversion error: %v", err)
 			}
@@ -126,7 +126,7 @@ func registerUtilityTools() {
 			minVal := args.Int("min", 1)
 			maxVal := args.Int("max", 100)
 			choices := args.String("choices", "")
-			result := jot.GenerateRandom(randType, minVal, maxVal, choices)
+			result := utils.GenerateRandom(randType, minVal, maxVal, choices)
 			return tools.OK("%s", result)
 		},
 	})
@@ -153,7 +153,7 @@ func registerUtilityTools() {
 			if !ok {
 				return tools.MissingParam("to_tz")
 			}
-			result, err := jot.ConvertTimezone(timeStr, fromTZ, toTZ)
+			result, err := utils.ConvertTimezone(timeStr, fromTZ, toTZ)
 			if err != nil {
 				return tools.Fail("Timezone conversion error: %v", err)
 			}
@@ -179,7 +179,7 @@ func registerUtilityTools() {
 			if !ok {
 				return tools.MissingParam("text")
 			}
-			result, err := jot.EncodeDecodeText(operation, text)
+			result, err := utils.EncodeDecodeText(operation, text)
 			if err != nil {
 				return tools.Fail("Encode/decode error: %v", err)
 			}

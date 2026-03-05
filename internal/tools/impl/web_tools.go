@@ -5,6 +5,7 @@ import (
 
 	"github.com/google/generative-ai-go/genai"
 	"github.com/jackstrohm/jot"
+	"github.com/jackstrohm/jot/pkg/utils"
 	"github.com/jackstrohm/jot/tools"
 )
 
@@ -28,7 +29,7 @@ func registerWebTools() {
 				return tools.MissingParam("url")
 			}
 			maxLength := args.Int("max_length", 5000)
-			content, err := jot.FetchURLContent(urlStr, maxLength)
+			content, err := utils.FetchURLContent(urlStr, maxLength)
 			if err != nil {
 				return tools.Fail("Fetch error: %v", err)
 			}
@@ -48,7 +49,7 @@ func registerWebTools() {
 			if !ok {
 				return tools.MissingParam("word")
 			}
-			definition, err := jot.LookupWord(word)
+			definition, err := utils.LookupWord(word)
 			if err != nil {
 				return tools.Fail("Definition error: %v", err)
 			}

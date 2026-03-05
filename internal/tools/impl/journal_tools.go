@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/jackstrohm/jot"
+	"github.com/jackstrohm/jot/pkg/utils"
 	"github.com/jackstrohm/jot/tools"
 )
 
@@ -64,7 +65,7 @@ func registerJournalTools() {
 			if !ok {
 				return tools.MissingParam("end_date")
 			}
-			startStr, endStr, err := jot.ResolveDateRange(startDate, endDate)
+			startStr, endStr, err := utils.ResolveDateRange(startDate, endDate)
 			if err != nil {
 				return tools.Fail("Date range error: %v", err)
 			}
@@ -212,7 +213,7 @@ func registerJournalTools() {
 		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
 			startDate := args.String("start_date", "30 days ago")
 			endDate := args.String("end_date", "today")
-			startStr, endStr, err := jot.ResolveDateRange(startDate, endDate)
+			startStr, endStr, err := utils.ResolveDateRange(startDate, endDate)
 			if err != nil {
 				return tools.Fail("Date range error: %v", err)
 			}
