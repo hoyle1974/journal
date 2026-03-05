@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/firestore"
-	"github.com/jackstrohm/jot/internal/memory"
+	"github.com/jackstrohm/jot/pkg/memory"
 	"google.golang.org/api/iterator"
 )
 

@@ -41,7 +41,6 @@ func MigrateKnowledgeMetadata(ctx context.Context, client *firestore.Client, col
 		var m map[string]any
 		if metadataStr != "" {
 			if err := json.Unmarshal([]byte(metadataStr), &m); err != nil {
-				// Unparseable: treat as empty and optionally store as generic
 				m = make(map[string]any)
 			}
 		}
@@ -49,7 +48,6 @@ func MigrateKnowledgeMetadata(ctx context.Context, client *firestore.Client, col
 			m = make(map[string]any)
 		}
 
-		// Merge top-level archive_summary into metadata for project/goal
 		if topLevelArchive != "" && (nodeType == NodeTypeProject || nodeType == NodeTypeGoal) {
 			current, _ := m["archive_summary"].(string)
 			if current == "" {
@@ -74,7 +72,6 @@ func MigrateKnowledgeMetadata(ctx context.Context, client *firestore.Client, col
 			}
 			shouldUpdate = newMetadata != metadataStr
 		} else {
-			// Unregistered type: only update when merging top-level archive_summary
 			if topLevelArchive != "" && (nodeType == NodeTypeProject || nodeType == NodeTypeGoal) {
 				b, err := json.Marshal(m)
 				if err != nil {

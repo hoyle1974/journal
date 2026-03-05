@@ -10,7 +10,7 @@ import (
 
 	"github.com/jackstrohm/jot"
 	"github.com/jackstrohm/jot/internal/config"
-	"github.com/jackstrohm/jot/internal/memory"
+	"github.com/jackstrohm/jot/pkg/memory"
 )
 
 func runMigrateMeta() {

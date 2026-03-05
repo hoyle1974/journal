@@ -25,11 +25,11 @@ const (
 
 // Project/Goal status values (metadataStatus and existing code expect lowercase).
 const (
-	StatusActive   = "active"
-	StatusBlocked  = "blocked"
-	StatusDone     = "done"
-	StatusPlanning = "planning"
-	StatusPending  = "pending"
+	StatusActive    = "active"
+	StatusBlocked   = "blocked"
+	StatusDone      = "done"
+	StatusPlanning  = "planning"
+	StatusPending   = "pending"
 	StatusCompleted = "completed"
 )
 
@@ -74,40 +74,39 @@ type PersonMeta struct {
 }
 
 // ProjectGoalMeta is the metadata schema for project/goal nodes.
-// Uses "status" and "parent_goal" for compatibility with metadataStatus and GetLinkedCompletedProjectID.
 type ProjectGoalMeta struct {
-	Status        string `json:"status"`          // active, blocked, done, planning, pending, completed
-	Deadline      string `json:"deadline"`
-	ParentGoalID  string `json:"parent_goal"`     // canonical key for compatibility
+	Status         string `json:"status"`
+	Deadline       string `json:"deadline"`
+	ParentGoalID   string `json:"parent_goal"`
 	ArchiveSummary string `json:"archive_summary"`
 }
 
 // PreferenceMeta is the metadata schema for preference nodes.
 type PreferenceMeta struct {
 	Subject   string `json:"subject"`
-	Category  string `json:"category"`  // food, workflow, tech
-	Sentiment string `json:"sentiment"`  // like, dislike, rigid
+	Category  string `json:"category"`
+	Sentiment string `json:"sentiment"`
 }
 
 // EventMilestoneMeta is the metadata schema for event/milestone nodes.
 type EventMilestoneMeta struct {
-	Date       string   `json:"date"`
-	Type       string   `json:"type"`       // celebration, work, health
-	Attendees  []string `json:"attendees"`  // UUIDs
+	Date      string   `json:"date"`
+	Type      string   `json:"type"`
+	Attendees []string `json:"attendees"`
 }
 
 // PlaceMeta is the metadata schema for place nodes.
 type PlaceMeta struct {
 	Address  string `json:"address"`
-	Category string `json:"category"` // home, office, travel
+	Category string `json:"category"`
 	Notes    string `json:"notes"`
 }
 
 // AssetToolMeta is the metadata schema for asset/tool nodes.
 type AssetToolMeta struct {
-	Type          string            `json:"type"` // software, hardware, account
-	Configuration map[string]any    `json:"configuration"`
-	Preferences   map[string]any    `json:"preferences"`
+	Type          string         `json:"type"`
+	Configuration map[string]any `json:"configuration"`
+	Preferences   map[string]any `json:"preferences"`
 }
 
 // GenericNodeMeta is the fallback schema for uncategorized facts.
@@ -143,7 +142,7 @@ func IsRegistered(nodeType string) bool {
 	return ok
 }
 
-// ValidateMetadata validates m against the schema for nodeType. Returns nil if nodeType is not registered.
+// ValidateMetadata validates m against the schema for nodeType.
 func ValidateMetadata(nodeType string, m map[string]any) error {
 	if m == nil {
 		return errors.New("metadata map is nil")
@@ -155,8 +154,7 @@ func ValidateMetadata(nodeType string, m map[string]any) error {
 	return entry.validate(m)
 }
 
-// NormalizeMetadata normalizes m for the given nodeType. Returns the normalized map and nil error.
-// If nodeType is not registered, returns m unchanged and nil.
+// NormalizeMetadata normalizes m for the given nodeType.
 func NormalizeMetadata(nodeType string, m map[string]any) (map[string]any, error) {
 	if m == nil {
 		return map[string]any{}, nil
@@ -180,10 +178,7 @@ func MetadataToJSON(m map[string]any) (string, error) {
 	return string(b), nil
 }
 
-func validatePerson(m map[string]any) error {
-	// All fields optional for person
-	return nil
-}
+func validatePerson(m map[string]any) error { return nil }
 
 func normalizePerson(m map[string]any) (map[string]any, error) {
 	out := make(map[string]any)
@@ -210,7 +205,6 @@ func validateProjectGoal(m map[string]any) error {
 
 func normalizeProjectGoal(m map[string]any) (map[string]any, error) {
 	out := make(map[string]any)
-	// Accept parent_goal, parent_goal_id, project_id; output both for GetLinkedCompletedProjectID compatibility
 	pid := getString(m, "parent_goal")
 	if pid == "" {
 		pid = getString(m, "parent_goal_id")
@@ -222,14 +216,12 @@ func normalizeProjectGoal(m map[string]any) (map[string]any, error) {
 		out["parent_goal"] = pid
 		out["project_id"] = pid
 	}
-	// status: normalize to lowercase
 	s := getString(m, "status")
 	if s != "" {
 		out["status"] = strings.ToLower(s)
 	}
 	setString(out, "deadline", getString(m, "deadline"))
 	setString(out, "archive_summary", getString(m, "archive_summary"))
-	// Preserve task-specific keys not in schema (step_number, dependencies) for backward compat
 	if v, ok := m["step_number"]; ok {
 		out["step_number"] = v
 	}
@@ -335,9 +327,7 @@ func normalizeAssetTool(m map[string]any) (map[string]any, error) {
 	return out, nil
 }
 
-func validateGeneric(m map[string]any) error {
-	return nil
-}
+func validateGeneric(m map[string]any) error { return nil }
 
 func normalizeGeneric(m map[string]any) (map[string]any, error) {
 	out := make(map[string]any)
