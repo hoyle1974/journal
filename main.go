@@ -41,16 +41,10 @@ func init() {
 
 // Public routes that don't require API key auth
 var publicRoutes = map[string]bool{
-	"":                      true,
-	"/health":               true,
-	"/metrics":              true,
-	"/webhook":              true,
-	"/sms":                  true, // Twilio webhook (validated separately)
-	"/privacy-policy":       true,
-	"/terms-and-conditions": true,
+	"": true, "/health": true, "/metrics": true, "/webhook": true, "/sms": true,
+	"/privacy-policy": true, "/terms-and-conditions": true,
 }
 
-// getConfig returns the config to use (test override if set, else default). For tests, use SetTestConfig.
 func getConfig() *config.Config {
 	if testConfigOverride != nil {
 		return testConfigOverride
@@ -68,19 +62,12 @@ func checkAuth(s *api.Server, r *http.Request) (int, string) {
 		return http.StatusUnauthorized, "Missing X-API-Key header"
 	}
 	if apiKey != s.Config.JotAPIKey {
-		s.Logger.Warn("invalid API key attempted",
-			"path", r.URL.Path,
-			"method", r.Method,
-			"ip", getClientIP(r),
-			"user_agent", r.UserAgent(),
-			"key_length", len(apiKey),
-		)
+		s.Logger.Warn("invalid API key attempted", "path", r.URL.Path, "method", r.Method, "ip", getClientIP(r), "user_agent", r.UserAgent(), "key_length", len(apiKey))
 		return http.StatusForbidden, "Invalid API key"
 	}
 	return 0, ""
 }
 
-// jotRouter is the full request handler: prelude (trace, app, span, auth, rate limit) then path dispatch.
 func jotRouter(s *api.Server, w http.ResponseWriter, r *http.Request) {
 	startTime := time.Now()
 	ctx := r.Context()
@@ -159,8 +146,7 @@ func jotRouter(s *api.Server, w http.ResponseWriter, r *http.Request) {
 		handleSaveQuery(s, rw, reqWithCtx)
 	default:
 		writeJSON(rw, http.StatusNotFound, map[string]interface{}{
-			"error": "Not found",
-			"path":  path,
+			"error": "Not found", "path": path,
 			"available_routes": []string{
 				"GET  /health", "GET  /metrics", "GET  /privacy-policy", "GET  /terms-and-conditions",
 				"POST /log", "POST /query", "POST /plan", "GET  /entries", "POST /sync", "POST /dream",
@@ -173,7 +159,6 @@ func jotRouter(s *api.Server, w http.ResponseWriter, r *http.Request) {
 	span.SetAttributes(map[string]string{"http.status_code": fmt.Sprintf("%d", rw.statusCode)})
 }
 
-// JotAPI is the main entry point for the cloud function.
 func JotAPI(w http.ResponseWriter, r *http.Request) {
 	if defaultServer == nil {
 		Logger.Error("server not initialized")
@@ -183,7 +168,6 @@ func JotAPI(w http.ResponseWriter, r *http.Request) {
 	defaultServer.ServeHTTP(w, r)
 }
 
-// parsePendingQuestionPath parses "/pending-questions/{id}/resolve" into (id, "resolve", true). Otherwise returns ("", "", false).
 func parsePendingQuestionPath(path string) (id, suffix string, ok bool) {
 	const prefix = "/pending-questions/"
 	if !strings.HasPrefix(path, prefix) {
@@ -201,7 +185,6 @@ func parsePendingQuestionPath(path string) (id, suffix string, ok bool) {
 	return id, suffix, true
 }
 
-// responseWriter wraps http.ResponseWriter to capture the status code.
 type responseWriter struct {
 	http.ResponseWriter
 	statusCode int

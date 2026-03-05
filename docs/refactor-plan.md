@@ -140,6 +140,8 @@ Complete the remaining file moves from the architecture refactor. After **each s
 
 ## Step 6: internal/api – router, handlers, ratelimit, auth_test
 
+**Done (partial):** Ratelimit moved to `internal/api` (GetClientIP, CheckRateLimit, StartRateLimitCleanup, RateLimitPath). Jot’s `ratelimit.go` is a thin wrapper that delegates to api. Router and handlers remain in jot because moving them would require api to import jot (circular dependency). To complete Step 6: introduce a Backend (or per-handler Env) interface on Server so api handlers can call domain logic via `pkg/agent`, `pkg/journal`, `pkg/memory`, `pkg/infra` without importing root jot; then move router and handlers into api.
+
 **Goal:** Move HTTP routing and all handlers into `internal/api` so the transport layer lives in one package. Root `jot` no longer contains main.go (router) or handlers; it only keeps config/default_config, re-exports if any, and tool/LLM glue used by api and agent.
 
 **Moves:**

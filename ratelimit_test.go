@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackstrohm/jot/internal/api"
 )
 
 func TestGetClientIP(t *testing.T) {
@@ -72,7 +73,7 @@ func TestRateLimitPath(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.path, func(t *testing.T) {
-			got := rateLimitPath(tt.path)
+			got := api.RateLimitPath(tt.path)
 			if got != tt.expected {
 				t.Errorf("rateLimitPath(%q) = %q, want %q", tt.path, got, tt.expected)
 			}
