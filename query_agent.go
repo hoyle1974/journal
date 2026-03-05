@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackstrohm/jot/pkg/agent"
 	"github.com/jackstrohm/jot/pkg/journal"
@@ -129,6 +130,109 @@ func (jotFOHEnv) GetWeeklySummariesForRollup(ctx context.Context, startDate, end
 		}
 	}
 	return strings.Join(lines, "\n\n"), allSourceIDs, nil
+}
+
+// DreamerResult is the outcome of a dream run. Re-exported from agent.
+type DreamerResult = agent.DreamerResult
+
+// DreamerEnv: LoadDreamerInputs loads the last 24h of entries and builds journal context, entry UUIDs, and recent queries text.
+func (jotFOHEnv) LoadDreamerInputs(ctx context.Context) (*agent.DreamerInputs, error) {
+	cutoff := time.Now().Add(-24 * time.Hour)
+	startDate := cutoff.Format("2006-01-02")
+	endDate := time.Now().Format("2006-01-02")
+	entries, err := GetEntriesByDateRange(ctx, startDate, endDate, 200)
+	if err != nil {
+		return nil, err
+	}
+	if len(entries) == 0 {
+		return &agent.DreamerInputs{}, nil
+	}
+	var lines []string
+	for _, e := range entries {
+		lines = append(lines, fmt.Sprintf("[%s] %s", e.Timestamp, e.Content))
+	}
+	journalContext := strings.Join(lines, "\n")
+	if len(journalContext) > 6000 {
+		journalContext = truncateToMaxBytes(journalContext, 6000) + "\n... (truncated)"
+	}
+	entryUUIDs := make([]string, 0, len(entries))
+	for _, e := range entries {
+		entryUUIDs = append(entryUUIDs, e.UUID)
+	}
+	recentQueriesText := ""
+	if queries, qErr := GetRecentQueries(ctx, 50); qErr == nil && len(queries) > 0 {
+		var qLines []string
+		for _, q := range queries {
+			ts := q.Timestamp
+			if len(ts) > 16 {
+				ts = ts[:16]
+			}
+			qLines = append(qLines, fmt.Sprintf("[%s] Q: %s\n  A: %s", ts, q.Question, truncateString(q.Answer, 200)))
+		}
+		recentQueriesText = strings.Join(qLines, "\n\n")
+		if len(recentQueriesText) > 8000 {
+			recentQueriesText = truncateToMaxBytes(recentQueriesText, 8000) + "\n... (truncated)"
+		}
+	}
+	return &agent.DreamerInputs{
+		JournalContext:    journalContext,
+		EntryUUIDs:        entryUUIDs,
+		RecentQueriesText: recentQueriesText,
+	}, nil
+}
+
+// DreamerEnv: GenerateEmbedding delegates to jot.GenerateEmbedding.
+func (jotFOHEnv) GenerateEmbedding(ctx context.Context, text string, taskType ...string) ([]float32, error) {
+	return GenerateEmbedding(ctx, text, taskType...)
+}
+
+// DreamerEnv: EnsureContextExists delegates to jot.EnsureContextExists.
+func (jotFOHEnv) EnsureContextExists(ctx context.Context, name string) (string, error) {
+	return EnsureContextExists(ctx, name)
+}
+
+// DreamerEnv: TouchContextBatch delegates to jot.TouchContextBatch.
+func (jotFOHEnv) TouchContextBatch(ctx context.Context, contextUUID string, entryUUIDs []string, relevanceBoost float64) error {
+	return TouchContextBatch(ctx, contextUUID, entryUUIDs, relevanceBoost)
+}
+
+// DreamerEnv: GetContextMetadata converts jot metadata to agent.ContextMetadata.
+func (jotFOHEnv) GetContextMetadata(ctx context.Context, contextUUID string) (*agent.ContextMetadata, error) {
+	m, err := GetContextMetadata(ctx, contextUUID)
+	if err != nil || m == nil {
+		return nil, err
+	}
+	return &agent.ContextMetadata{
+		LastSynthesizedAt:          m.LastSynthesizedAt,
+		SourceEntryCountAtSynthesis: m.SourceEntryCountAtSynthesis,
+		SourceEntries:              m.SourceEntries,
+		Relevance:                  m.Relevance,
+	}, nil
+}
+
+// DreamerEnv: TouchContext delegates to jot.TouchContext (no new source entry).
+func (jotFOHEnv) TouchContext(ctx context.Context, contextUUID string, relevanceBoost float64) error {
+	return TouchContext(ctx, contextUUID, nil, relevanceBoost)
+}
+
+// DreamerEnv: SynthesizeContext delegates to jot.SynthesizeContext.
+func (jotFOHEnv) SynthesizeContext(ctx context.Context, contextUUID string) error {
+	return SynthesizeContext(ctx, contextUUID)
+}
+
+// DreamerEnv: RunGapDetection delegates to jot.RunGapDetection.
+func (jotFOHEnv) RunGapDetection(ctx context.Context, journalContext string, entryUUIDs []string) error {
+	return RunGapDetection(ctx, journalContext, entryUUIDs)
+}
+
+// DreamerEnv: RunProfileSynthesis delegates to jot.RunProfileSynthesis.
+func (jotFOHEnv) RunProfileSynthesis(ctx context.Context, personaFacts []string) error {
+	return RunProfileSynthesis(ctx, personaFacts)
+}
+
+// DreamerEnv: RunEvolutionSynthesis delegates to jot.RunEvolutionSynthesis.
+func (jotFOHEnv) RunEvolutionSynthesis(ctx context.Context, journalContext string) error {
+	return RunEvolutionSynthesis(ctx, journalContext)
 }
 
 // RunQuery runs a query against the journal using the agentic loop.

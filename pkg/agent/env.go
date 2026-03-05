@@ -57,3 +57,44 @@ type RollupEnv interface {
 	// UpsertSemanticMemory creates or updates a semantic memory node (same as SpecialistsEnv).
 	UpsertSemanticMemory(ctx context.Context, content, nodeType, domain string, significanceWeight float64, entityLinks, journalEntryIDs []string) (string, error)
 }
+
+// DreamerEnv provides dreamer (nightly consolidation) dependencies. Caller typically implements SpecialistsEnv too for shared helpers.
+type DreamerEnv interface {
+	// LoadDreamerInputs loads the last 24h of entries and builds journal context, entry UUIDs, and recent queries text.
+	LoadDreamerInputs(ctx context.Context) (*DreamerInputs, error)
+	// GenerateEmbedding returns the embedding vector for text; optional taskType (e.g. for retrieval documents).
+	GenerateEmbedding(ctx context.Context, text string, taskType ...string) ([]float32, error)
+	// EnsureContextExists finds or creates a context by name; returns context UUID.
+	EnsureContextExists(ctx context.Context, name string) (string, error)
+	// TouchContextBatch appends entry UUIDs to the context and updates last_touched.
+	TouchContextBatch(ctx context.Context, contextUUID string, entryUUIDs []string, relevanceBoost float64) error
+	// GetContextMetadata returns metadata for synthesis decisions (lazy loading). Nil if not found.
+	GetContextMetadata(ctx context.Context, contextUUID string) (*ContextMetadata, error)
+	// TouchContext updates last_touched for the context (e.g. when skipping synthesis).
+	TouchContext(ctx context.Context, contextUUID string, relevanceBoost float64) error
+	// SynthesizeContext runs the LLM to produce a briefing and overwrites the context node content.
+	SynthesizeContext(ctx context.Context, contextUUID string) error
+	// RunGapDetection compares journal to knowledge and appends gaps to pending questions.
+	RunGapDetection(ctx context.Context, journalContext string, entryUUIDs []string) error
+	// RunProfileSynthesis merges persona facts into the user_profile context node.
+	RunProfileSynthesis(ctx context.Context, personaFacts []string) error
+	// RunEvolutionSynthesis runs the Cognitive Engineer and writes to system_evolution context.
+	RunEvolutionSynthesis(ctx context.Context, journalContext string) error
+	// UpsertSemanticMemory creates or updates a semantic memory node (same as SpecialistsEnv).
+	UpsertSemanticMemory(ctx context.Context, content, nodeType, domain string, significanceWeight float64, entityLinks, journalEntryIDs []string) (string, error)
+}
+
+// DreamerInputs holds loaded data for a dream run.
+type DreamerInputs struct {
+	JournalContext    string
+	EntryUUIDs        []string
+	RecentQueriesText string
+}
+
+// ContextMetadata is a minimal view of context node metadata for synthesis decisions (lazy loading).
+type ContextMetadata struct {
+	LastSynthesizedAt           string
+	SourceEntryCountAtSynthesis  int
+	SourceEntries               []string
+	Relevance                    float64
+}

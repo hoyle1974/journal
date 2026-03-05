@@ -113,7 +113,7 @@ Complete the remaining file moves from the architecture refactor. After **each s
 
 ## Step 5: pkg/agent – foh, specialists, planner, prompter, dreamer, rollup
 
-**Done (partial):** FOH, planner, prompter, specialists, and rollup moved to `pkg/agent` with Env interfaces (FOHEnv, PlannerEnv, PrompterEnv, SpecialistsEnv, RollupEnv); jot implements all via `jotFOHEnv`. Rollup: `pkg/agent/rollup.go` has RunWeeklyRollup/RunMonthlyRollup; jot keeps GetWeeklySummaryNodesInRange and thin wrappers. Dreamer (cron.go) remains in jot (need DreamerEnv with GetContextMetadata, EnsureContext, TouchContextBatch, RunGapDetection, RunProfileSynthesis, RunEvolutionSynthesis, GenerateEmbedding).
+**Done:** FOH, planner, prompter, specialists, rollup, and dreamer moved to `pkg/agent` with Env interfaces (FOHEnv, PlannerEnv, PrompterEnv, SpecialistsEnv, RollupEnv, DreamerEnv); jot implements all via `jotFOHEnv`. Dreamer: `pkg/agent/dreamer.go` has RunDreamer(ctx, env); jot keeps RunGapDetection, RunProfileSynthesis, RunEvolutionSynthesis, RunJanitor, RunPulseAudit and thin RunDreamer wrapper. Step 5 complete.
 
 **Goal:** Create `pkg/agent` and move FOH, specialists, planner, prompter, dreamer, and rollup.
 
