@@ -2,6 +2,7 @@ package jot
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/jackstrohm/jot/pkg/agent"
@@ -83,6 +84,51 @@ func (jotFOHEnv) FindContextContent(ctx context.Context, name string) (string, e
 // SpecialistsEnv: UpsertSemanticMemory delegates to jot.UpsertSemanticMemory.
 func (jotFOHEnv) UpsertSemanticMemory(ctx context.Context, content, nodeType, domain string, significanceWeight float64, entityLinks, journalEntryIDs []string) (string, error) {
 	return UpsertSemanticMemory(ctx, content, nodeType, domain, significanceWeight, entityLinks, journalEntryIDs)
+}
+
+// RollupEnv: GetEntriesWithAnalysisForRollup formats entries with analysis for the rollup LLM.
+func (jotFOHEnv) GetEntriesWithAnalysisForRollup(ctx context.Context, start, end string, limit int) (string, []string, error) {
+	withAnalyses, err := GetEntriesWithAnalysisByDateRange(ctx, start, end, limit)
+	if err != nil {
+		return "", nil, err
+	}
+	var lines []string
+	var sourceIDs []string
+	for _, ew := range withAnalyses {
+		sourceIDs = append(sourceIDs, ew.Entry.UUID)
+		if ew.Analysis != nil {
+			lines = append(lines, fmt.Sprintf("Summary: %s | Mood: %s | Tags: %s",
+				ew.Analysis.Summary, ew.Analysis.Mood, strings.Join(ew.Analysis.Tags, ", ")))
+			for _, e := range ew.Analysis.Entities {
+				lines = append(lines, fmt.Sprintf("  Entity: %s (%s) %s", e.Name, e.Type, e.Status))
+			}
+			for _, o := range ew.Analysis.OpenLoops {
+				lines = append(lines, fmt.Sprintf("  Open loop: %s [%s]", o.Task, o.Priority))
+			}
+		}
+	}
+	return strings.Join(lines, "\n"), sourceIDs, nil
+}
+
+// RollupEnv: GetWeeklySummariesForRollup returns concatenated weekly summary content and aggregated source IDs.
+func (jotFOHEnv) GetWeeklySummariesForRollup(ctx context.Context, startDate, endDate string, limit int) (string, []string, error) {
+	nodes, err := GetWeeklySummaryNodesInRange(ctx, startDate, endDate, limit)
+	if err != nil {
+		return "", nil, err
+	}
+	var lines []string
+	var allSourceIDs []string
+	seenIDs := make(map[string]bool)
+	for _, n := range nodes {
+		lines = append(lines, n.Content)
+		for _, id := range n.JournalEntryIDs {
+			if !seenIDs[id] {
+				seenIDs[id] = true
+				allSourceIDs = append(allSourceIDs, id)
+			}
+		}
+	}
+	return strings.Join(lines, "\n\n"), allSourceIDs, nil
 }
 
 // RunQuery runs a query against the journal using the agentic loop.

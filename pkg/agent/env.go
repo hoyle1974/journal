@@ -47,3 +47,13 @@ type SpecialistsEnv interface {
 	// UpsertSemanticMemory creates or updates a semantic memory node. entityLinks and journalEntryIDs can be nil.
 	UpsertSemanticMemory(ctx context.Context, content, nodeType, domain string, significanceWeight float64, entityLinks, journalEntryIDs []string) (string, error)
 }
+
+// RollupEnv provides rollup dependencies (entries with analysis, weekly summaries, semantic memory write).
+type RollupEnv interface {
+	// GetEntriesWithAnalysisForRollup returns formatted analyses text and source entry IDs for the date range.
+	GetEntriesWithAnalysisForRollup(ctx context.Context, start, end string, limit int) (analysesText string, sourceIDs []string, err error)
+	// GetWeeklySummariesForRollup returns concatenated weekly summary content and aggregated source IDs for the date range.
+	GetWeeklySummariesForRollup(ctx context.Context, startDate, endDate string, limit int) (contentText string, sourceIDs []string, err error)
+	// UpsertSemanticMemory creates or updates a semantic memory node (same as SpecialistsEnv).
+	UpsertSemanticMemory(ctx context.Context, content, nodeType, domain string, significanceWeight float64, entityLinks, journalEntryIDs []string) (string, error)
+}
