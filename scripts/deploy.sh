@@ -156,6 +156,13 @@ case "$MODE" in
     # Clean up build artifacts
     rm -f server
 
+    # If the service already exists, we know its URL and can set JOT_API_URL/SYNC_GDOC_URL in one deploy.
+    EXISTING_URL=$(gcloud run services describe "$FUNCTION_NAME" --region="$REGION" --format='value(status.url)' 2>/dev/null) || true
+    ENV_VARS="FUNCTION_TARGET=JotAPI,GOOGLE_CLOUD_PROJECT=$PROJECT,LOG_LEVEL=debug,DREAMER_MODEL=gemini-2.5-flash"
+    if [ -n "$EXISTING_URL" ]; then
+      ENV_VARS="$ENV_VARS,JOT_API_URL=${EXISTING_URL},SYNC_GDOC_URL=${EXISTING_URL}/sync"
+    fi
+
     echo -e "${YELLOW}Deploying container to Cloud Run...${NC}"
     time gcloud beta run deploy "$FUNCTION_NAME" \
       --region="$REGION" \
@@ -167,8 +174,16 @@ case "$MODE" in
       --max-instances=1 \
       --allow-unauthenticated \
       --execution-environment=gen1 \
-      --update-env-vars="FUNCTION_TARGET=JotAPI,GOOGLE_CLOUD_PROJECT=$PROJECT,JOT_API_URL=https://${REGION}-${PROJECT}.cloudfunctions.net/${FUNCTION_NAME},SYNC_GDOC_URL=https://${REGION}-${PROJECT}.cloudfunctions.net/${FUNCTION_NAME}/sync,DREAMER_MODEL=gemini-2.5-flash" \
+      --update-env-vars="$ENV_VARS" \
       --quiet
+
+    DEPLOYED_BASE_URL=$(gcloud run services describe "$FUNCTION_NAME" --region="$REGION" --format='value(status.url)' 2>/dev/null)
+    # First deploy: service had no URL before; set JOT_API_URL and SYNC_GDOC_URL now.
+    if [ -n "$DEPLOYED_BASE_URL" ] && [ -z "$EXISTING_URL" ]; then
+      gcloud run services update "$FUNCTION_NAME" --region="$REGION" \
+        --update-env-vars="JOT_API_URL=${DEPLOYED_BASE_URL},SYNC_GDOC_URL=${DEPLOYED_BASE_URL}/sync" \
+        --quiet
+    fi
     ;;
 
   source|slow)
@@ -194,7 +209,7 @@ case "$MODE" in
       --concurrency="$CONCURRENCY" \
       --timeout="${QUERY_TIMEOUT}s" \
       --max-instances=1 \
-      --set-env-vars="FUNCTION_TARGET=JotAPI,GOOGLE_CLOUD_PROJECT=$PROJECT,JOT_API_URL=https://${REGION}-${PROJECT}.cloudfunctions.net/${FUNCTION_NAME},SYNC_GDOC_URL=https://${REGION}-${PROJECT}.cloudfunctions.net/${FUNCTION_NAME}/sync,DREAMER_MODEL=gemini-2.5-flash" \
+      --set-env-vars="FUNCTION_TARGET=JotAPI,GOOGLE_CLOUD_PROJECT=$PROJECT,LOG_LEVEL=debug,JOT_API_URL=https://${REGION}-${PROJECT}.cloudfunctions.net/${FUNCTION_NAME},SYNC_GDOC_URL=https://${REGION}-${PROJECT}.cloudfunctions.net/${FUNCTION_NAME}/sync,DREAMER_MODEL=gemini-2.5-flash" \
       --quiet
     ;;
 
@@ -206,7 +221,12 @@ case "$MODE" in
     ;;
 esac
 
-BASE_URL="https://${REGION}-${PROJECT}.cloudfunctions.net/${FUNCTION_NAME}"
+# Use Cloud Run URL when we just deployed a container; otherwise Cloud Functions URL for source deploy.
+if [ -n "${DEPLOYED_BASE_URL:-}" ]; then
+  BASE_URL="$DEPLOYED_BASE_URL"
+else
+  BASE_URL="https://${REGION}-${PROJECT}.cloudfunctions.net/${FUNCTION_NAME}"
+fi
 
 echo ""
 echo -e "${GREEN}Deployment successful!${NC}"
@@ -214,7 +234,7 @@ echo ""
 
 # Reset Drive watch so the Google Doc webhook subscription is fresh (expires in 7 days)
 echo -e "${YELLOW}Resetting Drive watch (Google Doc)...${NC}"
-export GDOC_WEBHOOK_URL="https://${REGION}-${PROJECT}.cloudfunctions.net/${FUNCTION_NAME}/webhook"
+export GDOC_WEBHOOK_URL="${BASE_URL}/webhook"
 DRIVE_WATCH_VENV=".venv-drive-watch"
 if [ ! -d "$DRIVE_WATCH_VENV" ]; then
   echo "  Creating venv for Drive watch ($DRIVE_WATCH_VENV)..."

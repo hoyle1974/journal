@@ -1,7 +1,9 @@
 package infra
 
 import (
+	"bufio"
 	"context"
+	"io"
 	"log/slog"
 	"os"
 	"reflect"
@@ -117,11 +119,16 @@ func initLogger(cfg *config.Config) {
 		level = slog.LevelDebug
 	}
 
+	// In Cloud Run, stdout is captured by the platform; flush after each write so logs appear promptly.
+	var logWriter io.Writer = os.Stdout
+	if os.Getenv("K_SERVICE") != "" {
+		logWriter = &flushAfterWriteWriter{w: bufio.NewWriter(os.Stdout)}
+	}
 	var handler slog.Handler
 	if os.Getenv("K_SERVICE") != "" {
-		handler = slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level, AddSource: true})
+		handler = slog.NewJSONHandler(logWriter, &slog.HandlerOptions{Level: level, AddSource: true})
 	} else {
-		handler = slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: level, AddSource: false})
+		handler = slog.NewTextHandler(logWriter, &slog.HandlerOptions{Level: level, AddSource: false})
 	}
 
 	if os.Getenv("K_SERVICE") != "" && cfg != nil && cfg.DocumentID != "" {
@@ -133,6 +140,19 @@ func initLogger(cfg *config.Config) {
 		slog.String("version", "1.0.0"),
 	)
 	slog.SetDefault(Logger)
+}
+
+// flushAfterWriteWriter wraps a *bufio.Writer and flushes after each Write so Cloud Run sees each log line promptly.
+type flushAfterWriteWriter struct {
+	w *bufio.Writer
+}
+
+func (f *flushAfterWriteWriter) Write(p []byte) (n int, err error) {
+	n, err = f.w.Write(p)
+	if err != nil {
+		return n, err
+	}
+	return n, f.w.Flush()
 }
 
 type gdocForwardingHandler struct {
