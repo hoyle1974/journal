@@ -36,7 +36,9 @@ func sanitizeResponseForDoc(response string) string {
 	for i, line := range lines {
 		trimmed := strings.TrimSpace(strings.ToLower(line))
 		if trimmed == "done." || trimmed == "done" {
-			lines[i] = "[logged]."
+			lines[i] = "[logged]"
+		} else if trimmed == "logged." || trimmed == "logged" {
+			lines[i] = "[logged]"
 		}
 	}
 	return strings.Join(lines, "\n")
@@ -243,8 +245,8 @@ func buildSyncRequests(ctx context.Context, s *Server, doneStartIndex, doneEndIn
 	requests = append(requests,
 		&docs.Request{
 			InsertText: &docs.InsertTextRequest{
-				Location: &docs.Location{Index: doneEndIndex - 1},
-				Text:     " [processed]",
+				Location: &docs.Location{Index: doneEndIndex},
+				Text:     "\n[processed]",
 			},
 		},
 		&docs.Request{
@@ -301,7 +303,11 @@ func buildSyncRequests(ctx context.Context, s *Server, doneStartIndex, doneEndIn
 		processStart := time.Now()
 		response := s.Agent.RunQuery(ctx, text, source).Answer
 		infra.LoggerFrom(ctx).Info("input processed", "duration_ms", time.Since(processStart).Milliseconds())
-		inserted := "\n→ " + sanitizeResponseForDoc(response)
+		sanitized := sanitizeResponseForDoc(response)
+		inserted := "\n→ " + sanitized
+		if strings.TrimSpace(sanitized) == "[logged]" || strings.TrimSpace(sanitized) == "[logged]." {
+			inserted = "\n[logged]"
+		}
 		requests = append(requests,
 			&docs.Request{UpdateTextStyle: &docs.UpdateTextStyleRequest{Range: &docs.Range{StartIndex: block.startIndex, EndIndex: block.endIndex}, TextStyle: &docs.TextStyle{Bold: true}, Fields: "bold"}},
 			&docs.Request{InsertText: &docs.InsertTextRequest{Location: &docs.Location{Index: block.endIndex}, Text: inserted}},
