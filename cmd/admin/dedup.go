@@ -7,13 +7,11 @@ import (
 	"fmt"
 	"log"
 	"math"
-	"os"
 	"strings"
 
 	"cloud.google.com/go/firestore"
 	"google.golang.org/api/iterator"
 
-	"github.com/jackstrohm/jot/internal/config"
 	"github.com/jackstrohm/jot/pkg/infra"
 	"github.com/jackstrohm/jot/pkg/memory"
 )
@@ -29,27 +27,15 @@ type nodeRow struct {
 	Embedding       []float32
 }
 
-func runDedup() {
-	args := os.Args[2:]
+func runDedup(ctx context.Context, app *infra.App, args []string) {
 	fs := flag.NewFlagSet("dedup", flag.ExitOnError)
 	dryRun := fs.Bool("dry-run", false, "Log merge plan only; do not write to Firestore")
 	threshold := fs.Float64("threshold", 0.95, "Cosine similarity threshold (>=) to consider nodes duplicates")
 	_ = fs.Parse(args)
 
-	ctx := context.Background()
-	cfg, err := config.Load()
+	client, err := app.Firestore(ctx)
 	if err != nil {
-		log.Fatalf("config: %v", err)
-	}
-	app, err := infra.NewApp(ctx, cfg, nil, nil)
-	if err != nil {
-		log.Fatalf("NewApp: %v", err)
-	}
-	ctx = infra.WithApp(ctx, app)
-
-	client, err := infra.GetFirestoreClient(ctx)
-	if err != nil {
-		log.Fatalf("GetFirestoreClient: %v", err)
+		log.Fatalf("Firestore: %v", err)
 	}
 
 	nodes, err := fetchAllKnowledgeNodes(ctx, client)

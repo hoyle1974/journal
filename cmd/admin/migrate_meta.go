@@ -6,33 +6,19 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"os"
 
-	"github.com/jackstrohm/jot/internal/config"
 	"github.com/jackstrohm/jot/pkg/infra"
 	"github.com/jackstrohm/jot/pkg/memory"
 )
 
-func runMigrateMeta() {
-	args := os.Args[2:]
+func runMigrateMeta(ctx context.Context, app *infra.App, args []string) {
 	fs := flag.NewFlagSet("migrate-meta", flag.ExitOnError)
 	dryRun := fs.Bool("dry-run", false, "Log updates only, do not write to Firestore")
 	_ = fs.Parse(args)
 
-	ctx := context.Background()
-	cfg, err := config.Load()
+	client, err := app.Firestore(ctx)
 	if err != nil {
-		log.Fatalf("config: %v", err)
-	}
-	app, err := infra.NewApp(ctx, cfg, nil, nil)
-	if err != nil {
-		log.Fatalf("NewApp: %v", err)
-	}
-	ctx = infra.WithApp(ctx, app)
-
-	client, err := infra.GetFirestoreClient(ctx)
-	if err != nil {
-		log.Fatalf("GetFirestoreClient: %v", err)
+		log.Fatalf("Firestore: %v", err)
 	}
 
 	updated, err := memory.MigrateKnowledgeMetadata(ctx, client, memory.KnowledgeCollection, *dryRun)

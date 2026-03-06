@@ -1,0 +1,73 @@
+package api
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"strings"
+
+	"github.com/jackstrohm/jot/pkg/infra"
+	"github.com/jackstrohm/jot/pkg/utils"
+)
+
+func handleSMS(s *Server, w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	path := pathForLog(r.URL.Path)
+	LogHandlerRequest(ctx, r.Method, path)
+	ctx, span := infra.StartSpan(ctx, "sms.webhook")
+	defer span.End()
+	if r.Method != http.MethodPost {
+		LogHandlerResponse(ctx, r.Method, path, http.StatusMethodNotAllowed, "error", "Method not allowed")
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
+		return
+	}
+	webhookURL := fmt.Sprintf("https://us-central1-%s.cloudfunctions.net/jot-api-go/sms", s.Config.GoogleCloudProject)
+	if !s.SMS.ValidateTwilioSignature(r, webhookURL) {
+		infra.LoggerFrom(ctx).Warn("invalid Twilio signature")
+		LogHandlerResponse(ctx, r.Method, path, http.StatusUnauthorized, "error", "Invalid signature")
+		WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "Invalid signature"})
+		return
+	}
+	msg, err := s.SMS.ParseTwilioWebhook(r)
+	if err != nil {
+		infra.LoggerFrom(ctx).Error("failed to parse Twilio webhook", "error", err)
+		LogHandlerResponse(ctx, r.Method, path, http.StatusBadRequest, "error", "Invalid request")
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid request"})
+		return
+	}
+	span.SetAttributes(map[string]string{"sms.from": msg.From, "sms.message_sid": msg.MessageSid})
+	bodyPreview := strings.TrimSpace(msg.Body)
+	if bodyPreview == "" {
+		bodyPreview = "(empty)"
+	} else {
+		bodyPreview = utils.TruncateString(bodyPreview, 80)
+	}
+	LogHandlerRequest(ctx, r.Method, path, "from", msg.From, "sid", msg.MessageSid, "body_preview", bodyPreview)
+	if !s.SMS.IsAllowedPhoneNumber(msg.From) {
+		infra.LoggerFrom(ctx).Warn("SMS from unauthorized number", "from", msg.From)
+		LogHandlerResponse(ctx, r.Method, path, http.StatusOK, "status", "ignored", "reason", "unauthorized number")
+		w.Header().Set("Content-Type", "text/xml")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?><Response></Response>`))
+		return
+	}
+	LogHandlerResponse(ctx, r.Method, path, http.StatusOK, "status", "accepted", "from", msg.From)
+	w.Header().Set("Content-Type", "text/xml")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?><Response></Response>`))
+	infra.LoggerFrom(ctx).Info("sms responded 200, processing in background")
+	go func() {
+		bgCtx := context.Background()
+		infra.LoggerFrom(bgCtx).Info("sms processing", "from", msg.From)
+		response := s.SMS.ProcessIncomingSMS(bgCtx, msg)
+		if response != "" {
+			if err := s.SMS.SendSMS(bgCtx, msg.From, response); err != nil {
+				infra.LoggerFrom(bgCtx).Error("sms reply failed", "to", msg.From, "error", err)
+			} else {
+				infra.LoggerFrom(bgCtx).Info("sms reply sent", "to", msg.From, "preview", utils.TruncateString(response, 60))
+			}
+		} else {
+			infra.LoggerFrom(bgCtx).Info("sms processed", "from", msg.From, "reply", "none")
+		}
+	}()
+}

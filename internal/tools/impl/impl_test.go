@@ -37,6 +37,7 @@ func TestToolDefinitionsComplete(t *testing.T) {
 		"touch_context",
 		"delete_context",
 		"get_system_health_audit",
+		"get_latest_dream",
 		"get_project_timeline",
 		"update_project_status",
 		"calculate",

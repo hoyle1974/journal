@@ -71,6 +71,9 @@ var rollUpTxt string
 //go:embed activity_history.txt
 var activityHistoryTxt string
 
+//go:embed dream_story.txt
+var dreamStoryTxt string
+
 var (
 	specialistMap   map[string]string
 	specialistMapOnce sync.Once
@@ -151,6 +154,9 @@ func FormatReflectionCheck(answer, semanticMemory string) string {
 func FormatKnowledgeGap(gapListContent string) string {
 	return fmt.Sprintf(KnowledgeGapTemplate(), gapListContent)
 }
+
+// DreamStoryTemplate returns the dream narrative (morning readout) system prompt.
+func DreamStoryTemplate() string { return dreamStoryTxt }
 
 // GapDetectorTemplate returns the gap-detector prompt template with two %s placeholders: recent journal, relevant knowledge.
 func GapDetectorTemplate() string { return gapDetectorTxt }

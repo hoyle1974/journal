@@ -144,3 +144,44 @@ func TestRepair_TrailingCommaRemoved(t *testing.T) {
 		t.Errorf("got %v", v)
 	}
 }
+
+func TestPartialUnmarshalObject_TruncatedStringValue(t *testing.T) {
+	// LLM truncation: string value never closed (e.g. "sand environment", "manager")
+	text := `{"summary": "The author cleaned up duplicates", "entities": ["sand environment", "manager"`
+	m, _ := PartialUnmarshalObject(text, []string{"summary", "entities"})
+	if m == nil {
+		t.Fatal("expected non-nil map from truncated input")
+	}
+	if raw, ok := m["summary"]; !ok || len(raw) == 0 {
+		t.Errorf("expected summary key: %v", m)
+	}
+	// entities array is truncated; best-effort should close it and return partial
+	if raw, ok := m["entities"]; ok && len(raw) > 0 {
+		var entities []string
+		if err := json.Unmarshal(raw, &entities); err == nil && len(entities) >= 1 {
+			if entities[0] != "sand environment" {
+				t.Errorf("entities[0]: got %q", entities[0])
+			}
+		}
+	}
+}
+
+func TestPartialUnmarshalObject_TruncatedArray(t *testing.T) {
+	// Array truncated before closing ]
+	text := `{"impacted_contexts": ["party_planning", "job_search"`
+	m, _ := PartialUnmarshalObject(text, []string{"impacted_contexts"})
+	if m == nil {
+		t.Fatal("expected non-nil map")
+	}
+	raw, ok := m["impacted_contexts"]
+	if !ok || len(raw) == 0 {
+		t.Fatalf("expected impacted_contexts: %v", m)
+	}
+	var ctxs []string
+	if err := json.Unmarshal(raw, &ctxs); err != nil {
+		t.Errorf("unmarshal repaired array: %v", err)
+	}
+	if len(ctxs) != 2 || ctxs[0] != "party_planning" || ctxs[1] != "job_search" {
+		t.Errorf("impacted_contexts: got %v", ctxs)
+	}
+}

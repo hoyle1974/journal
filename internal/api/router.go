@@ -68,6 +68,8 @@ func Router(s *Server, w http.ResponseWriter, r *http.Request) {
 		handleEntries(s, rw, reqWithCtx, path)
 	case path == "/sync":
 		handleSync(s, rw, reqWithCtx)
+	case path == "/dream/latest":
+		handleDreamLatest(s, rw, reqWithCtx)
 	case path == "/dream":
 		handleDream(s, rw, reqWithCtx)
 	case path == "/janitor":
@@ -92,10 +94,6 @@ func Router(s *Server, w http.ResponseWriter, r *http.Request) {
 		handleDecayContexts(s, rw, reqWithCtx)
 	case path == "/backfill-embeddings":
 		handleBackfillEmbeddings(s, rw, reqWithCtx)
-	case path == "/tools/drafts":
-		handleDraftTools(s, rw, reqWithCtx)
-	case path == "/tools/drafts/apply":
-		handleDraftToolApply(s, rw, reqWithCtx)
 	case path == "/internal/process-entry":
 		handleProcessEntry(s, rw, reqWithCtx)
 	case path == "/internal/save-query":
@@ -106,10 +104,9 @@ func Router(s *Server, w http.ResponseWriter, r *http.Request) {
 			"error": "Not found", "path": path,
 			"available_routes": []string{
 				"GET  /health", "GET  /metrics", "GET  /privacy-policy", "GET  /terms-and-conditions",
-				"POST /log", "POST /query", "POST /plan", "GET  /entries", "POST /sync", "POST /dream",
-				"POST /janitor", "POST /rollup", "POST /webhook", "POST /sms", "POST /decay-contexts",
+				"POST /log", "POST /query", "POST /plan", "GET  /entries", "POST /sync", "GET  /dream/latest", "POST /dream",
+				"POST /janitor", "POST /rollup", "POST /webhook", "POST /sms", 				"POST /decay-contexts",
 				"POST /backfill-embeddings", "GET  /pending-questions", "POST /pending-questions/:id/resolve",
-				"GET  /tools/drafts", "POST /tools/drafts/apply",
 			},
 		})
 	}

@@ -11,6 +11,8 @@ import (
 	"github.com/jackstrohm/jot/internal/prompts"
 	"github.com/jackstrohm/jot/llmjson"
 	"github.com/jackstrohm/jot/pkg/infra"
+	"github.com/jackstrohm/jot/pkg/journal"
+	"github.com/jackstrohm/jot/pkg/memory"
 	"github.com/jackstrohm/jot/pkg/utils"
 )
 
@@ -45,8 +47,7 @@ func lastCompletedMonth(now time.Time) (year int, month int) {
 	return now.Year(), int(now.Month()) - 1
 }
 
-func runRollUpLLM(ctx context.Context, periodLabel, analysesText string) (string, *rollUpOutput, error) {
-	app := infra.GetApp(ctx)
+func runRollUpLLM(ctx context.Context, app *infra.App, periodLabel, analysesText string) (string, *rollUpOutput, error) {
 	if app == nil {
 		return "", nil, fmt.Errorf("no app in context")
 	}
@@ -98,15 +99,59 @@ func runRollUpLLM(ctx context.Context, periodLabel, analysesText string) (string
 	return content, &out, nil
 }
 
+func getEntriesWithAnalysisForRollup(ctx context.Context, start, end string, limit int) (analysesText string, sourceIDs []string, err error) {
+	withAnalyses, err := journal.GetEntriesWithAnalysisByDateRange(ctx, start, end, limit)
+	if err != nil {
+		return "", nil, err
+	}
+	var lines []string
+	var ids []string
+	for _, ew := range withAnalyses {
+		ids = append(ids, ew.Entry.UUID)
+		if ew.Analysis != nil {
+			lines = append(lines, fmt.Sprintf("Summary: %s | Mood: %s | Tags: %s",
+				ew.Analysis.Summary, ew.Analysis.Mood, strings.Join(ew.Analysis.Tags, ", ")))
+			for _, e := range ew.Analysis.Entities {
+				lines = append(lines, fmt.Sprintf("  Entity: %s (%s) %s", e.Name, e.Type, e.Status))
+			}
+			for _, o := range ew.Analysis.OpenLoops {
+				lines = append(lines, fmt.Sprintf("  Open loop: %s [%s]", o.Task, o.Priority))
+			}
+		}
+	}
+	return strings.Join(lines, "\n"), ids, nil
+}
+
+func getWeeklySummariesForRollup(ctx context.Context, startDate, endDate string, limit int) (contentText string, sourceIDs []string, err error) {
+	nodes, err := memory.GetWeeklySummaryNodesInRange(ctx, startDate, endDate, limit)
+	if err != nil {
+		return "", nil, err
+	}
+	var lines []string
+	var allSourceIDs []string
+	seenIDs := make(map[string]bool)
+	for _, n := range nodes {
+		lines = append(lines, n.Content)
+		for _, id := range n.JournalEntryIDs {
+			if !seenIDs[id] {
+				seenIDs[id] = true
+				allSourceIDs = append(allSourceIDs, id)
+			}
+		}
+	}
+	return strings.Join(lines, "\n\n"), allSourceIDs, nil
+}
+
 // RunWeeklyRollup synthesizes the last completed week's journal analyses into a weekly_summary knowledge node.
-func RunWeeklyRollup(ctx context.Context, env RollupEnv) (int, error) {
+func RunWeeklyRollup(ctx context.Context) (int, error) {
 	ctx, span := infra.StartSpan(ctx, "cron.weekly_rollup")
 	defer span.End()
 
+	app := infra.GetApp(ctx)
 	start, end := lastCompletedWeekStartEnd(time.Now())
 	periodLabel := fmt.Sprintf("Week of %s", start)
 
-	analysesText, sourceIDs, err := env.GetEntriesWithAnalysisForRollup(ctx, start, end, 500)
+	analysesText, sourceIDs, err := getEntriesWithAnalysisForRollup(ctx, start, end, 500)
 	if err != nil {
 		return 0, fmt.Errorf("weekly rollup get entries: %w", err)
 	}
@@ -118,12 +163,12 @@ func RunWeeklyRollup(ctx context.Context, env RollupEnv) (int, error) {
 		analysesText = utils.TruncateToMaxBytes(analysesText, 6000) + "\n... (truncated)"
 	}
 
-	content, _, err := runRollUpLLM(ctx, periodLabel, analysesText)
+	content, _, err := runRollUpLLM(ctx, app, periodLabel, analysesText)
 	if err != nil {
 		return 0, err
 	}
 
-	_, err = env.UpsertSemanticMemory(ctx, content, NodeTypeWeeklySummary, "thought", RollUpSignificance, nil, sourceIDs)
+	_, err = memory.UpsertSemanticMemory(ctx, content, NodeTypeWeeklySummary, "thought", RollUpSignificance, nil, sourceIDs)
 	if err != nil {
 		return 0, fmt.Errorf("weekly rollup upsert: %w", err)
 	}
@@ -133,10 +178,11 @@ func RunWeeklyRollup(ctx context.Context, env RollupEnv) (int, error) {
 }
 
 // RunMonthlyRollup synthesizes the last completed month's weekly summaries into a monthly_summary knowledge node.
-func RunMonthlyRollup(ctx context.Context, env RollupEnv) (int, error) {
+func RunMonthlyRollup(ctx context.Context) (int, error) {
 	ctx, span := infra.StartSpan(ctx, "cron.monthly_rollup")
 	defer span.End()
 
+	app := infra.GetApp(ctx)
 	now := time.Now()
 	year, month := lastCompletedMonth(now)
 	startDate := fmt.Sprintf("%04d-%02d-01", year, month)
@@ -144,7 +190,7 @@ func RunMonthlyRollup(ctx context.Context, env RollupEnv) (int, error) {
 	endDate := fmt.Sprintf("%04d-%02d-%02d", year, month, lastDay)
 	periodLabel := fmt.Sprintf("%04d-%02d", year, month)
 
-	contentText, allSourceIDs, err := env.GetWeeklySummariesForRollup(ctx, startDate, endDate, 10)
+	contentText, allSourceIDs, err := getWeeklySummariesForRollup(ctx, startDate, endDate, 10)
 	if err != nil {
 		return 0, fmt.Errorf("monthly rollup get weekly nodes: %w", err)
 	}
@@ -156,12 +202,12 @@ func RunMonthlyRollup(ctx context.Context, env RollupEnv) (int, error) {
 		contentText = utils.TruncateToMaxBytes(contentText, 6000) + "\n... (truncated)"
 	}
 
-	content, _, err := runRollUpLLM(ctx, "Month "+periodLabel, contentText)
+	content, _, err := runRollUpLLM(ctx, app, "Month "+periodLabel, contentText)
 	if err != nil {
 		return 0, err
 	}
 
-	_, err = env.UpsertSemanticMemory(ctx, content, NodeTypeMonthlySummary, "thought", RollUpSignificance, nil, allSourceIDs)
+	_, err = memory.UpsertSemanticMemory(ctx, content, NodeTypeMonthlySummary, "thought", RollUpSignificance, nil, allSourceIDs)
 	if err != nil {
 		return 0, fmt.Errorf("monthly rollup upsert: %w", err)
 	}

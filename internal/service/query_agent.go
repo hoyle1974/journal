@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/jackstrohm/jot/pkg/agent"
+	"github.com/jackstrohm/jot/pkg/infra"
 )
 
 const (
@@ -17,25 +18,26 @@ const (
 type QueryResult = agent.QueryResult
 
 // RunQuery runs a query against the journal using the agentic loop.
-// Debug logs are not collected; use tail.sh or LOG_LEVEL=debug for inspection.
-func RunQuery(ctx context.Context, question, source string) *QueryResult {
-	return RunQueryWithDebug(ctx, question, source, false)
+// app is the runtime app (Firestore, Gemini, pools); pass explicitly instead of from context.
+func RunQuery(ctx context.Context, app *infra.App, question, source string) *QueryResult {
+	return RunQueryWithDebug(ctx, app, question, source, false)
 }
 
 // RunQueryWithDebug runs a query with optional debug logging.
-func RunQueryWithDebug(ctx context.Context, question, source string, debug bool) *QueryResult {
-	return agent.RunQueryWithDebug(ctx, ServiceEnv{}, question, source, debug)
+func RunQueryWithDebug(ctx context.Context, app *infra.App, question, source string, debug bool) *QueryResult {
+	return agent.RunQueryWithDebug(ctx, app, question, source, debug)
 }
 
 // GetAnswer returns just the answer string (for sync compatibility).
-func GetAnswer(ctx context.Context, question, source string) string {
-	result := RunQuery(ctx, question, source)
+func GetAnswer(ctx context.Context, app *infra.App, question, source string) string {
+	result := RunQuery(ctx, app, question, source)
 	return result.Answer
 }
 
 // CreateAndSavePlan forces Gemini to decompose a goal into JSON, then saves it to the Knowledge Graph.
-func CreateAndSavePlan(ctx context.Context, goal string) (string, error) {
-	return agent.CreateAndSavePlan(ctx, ServiceEnv{}, goal)
+func CreateAndSavePlan(ctx context.Context, app *infra.App, goal string) (string, error) {
+	ctx = infra.WithApp(ctx, app)
+	return agent.CreateAndSavePlan(ctx, goal)
 }
 
 // looksLikeQuestion checks if the input looks like a question or information request (for tests and SMS routing).

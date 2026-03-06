@@ -293,7 +293,11 @@ func registerKnowledgeTools() {
 			if !ok {
 				return tools.MissingParam("goal")
 			}
-			result, err := service.CreateAndSavePlan(ctx, goal)
+			app := infra.GetApp(ctx)
+			if app == nil {
+				return tools.Fail("No app in context")
+			}
+			result, err := service.CreateAndSavePlan(ctx, app, goal)
 			if err != nil {
 				return tools.Fail("Error generating plan: %v", err)
 			}

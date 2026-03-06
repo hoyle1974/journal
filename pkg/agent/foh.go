@@ -51,12 +51,13 @@ type QueryResult struct {
 }
 
 // RunQuery runs a query against the journal using the agentic loop.
-func RunQuery(ctx context.Context, env FOHEnv, question, source string) *QueryResult {
-	return RunQueryWithDebug(ctx, env, question, source, true)
+func RunQuery(ctx context.Context, app *infra.App, question, source string) *QueryResult {
+	return RunQueryWithDebug(ctx, app, question, source, true)
 }
 
 // RunQueryWithDebug runs a query with optional debug logging.
-func RunQueryWithDebug(ctx context.Context, env FOHEnv, question, source string, debug bool) *QueryResult {
+func RunQueryWithDebug(ctx context.Context, app *infra.App, question, source string, debug bool) *QueryResult {
+	ctx = infra.WithApp(ctx, app)
 	var debugLogs []string
 	logDebug := func(msg string, args ...interface{}) {
 		if debug {
@@ -78,7 +79,6 @@ func RunQueryWithDebug(ctx context.Context, env FOHEnv, question, source string,
 		"source":       source,
 	})
 
-	app := infra.GetApp(ctx)
 	if app == nil {
 		infra.ErrorsTotal.Inc()
 		return &QueryResult{
@@ -89,7 +89,7 @@ func RunQueryWithDebug(ctx context.Context, env FOHEnv, question, source string,
 	}
 
 	infra.EntriesTotal.Inc()
-	entryUUID, err := env.AddEntryAndEnqueue(ctx, question, source, nil)
+	entryUUID, err := AddEntryAndEnqueue(ctx, question, source, nil)
 	if err != nil {
 		infra.LoggerFrom(ctx).Error("failed to log user input", "error", err)
 		infra.ErrorsTotal.Inc()
@@ -106,7 +106,7 @@ func RunQueryWithDebug(ctx context.Context, env FOHEnv, question, source string,
 
 	logDebug("[start] Question: %s", question)
 
-	systemPrompt := env.BuildSystemPrompt(ctx)
+	systemPrompt := BuildSystemPrompt(ctx)
 	infra.LoggerFrom(ctx).Debug("FOH: system prompt built", "prompt_len", len(systemPrompt), "reason", "inject date, contexts, recent history")
 	logDebug("[prompt] %s", systemPrompt)
 
@@ -159,7 +159,7 @@ func RunQueryWithDebug(ctx context.Context, env FOHEnv, question, source string,
 			if text != "" {
 				answer := strings.TrimSpace(text)
 
-				if pass, reason, err := runReflectionCheck(ctx, answer, question); err == nil && !pass {
+				if pass, reason, err := runReflectionCheck(ctx, app, answer, question); err == nil && !pass {
 					infra.LoggerFrom(ctx).Debug("FOH: reflection check failed", "reason", reason, "action", "revising answer against semantic memory")
 					logDebug("[reflect] failed: %s", reason)
 					revised := runReflectionRevision(ctx, session, question, answer, reason)
@@ -184,7 +184,7 @@ func RunQueryWithDebug(ctx context.Context, env FOHEnv, question, source string,
 				)
 
 				if !strings.HasPrefix(answer, "Error:") {
-					if err := env.EnqueueSaveQuery(ctx, question, answer, source, knowledgeGapDetected); err != nil {
+					if err := EnqueueSaveQuery(ctx, question, answer, source, knowledgeGapDetected); err != nil {
 						infra.LoggerFrom(ctx).Warn("failed to enqueue save-query task", "error", err)
 					}
 				}
@@ -434,7 +434,7 @@ func RunQueryWithDebug(ctx context.Context, env FOHEnv, question, source string,
 	if text != "" {
 		answer := strings.TrimSpace(text)
 		if !strings.HasPrefix(answer, "Error:") {
-			_ = env.EnqueueSaveQuery(ctx, question, answer, source, knowledgeGapDetected)
+			_ = EnqueueSaveQuery(ctx, question, answer, source, knowledgeGapDetected)
 		}
 		forcedToolNames := make([]string, 0, len(toolCalls))
 		for _, tc := range toolCalls {
@@ -472,7 +472,7 @@ func RunQueryWithDebug(ctx context.Context, env FOHEnv, question, source string,
 
 const memoryQueryTemplate = "Permanent facts about: {{.Input}}"
 
-func runReflectionCheck(ctx context.Context, answer, question string) (pass bool, reason string, err error) {
+func runReflectionCheck(ctx context.Context, app *infra.App, answer, question string) (pass bool, reason string, err error) {
 	// Use question (user intent) for the memory query, not the answer. Otherwise for
 	// short answers like "Logged." we search for "Permanent facts about: Logged."
 	// and pull irrelevant entries instead of facts relevant to what the user said.
@@ -493,7 +493,6 @@ func runReflectionCheck(ctx context.Context, answer, question string) (pass bool
 		semanticMemory = "(No semantic memory retrieved)"
 	}
 
-	app := infra.GetApp(ctx)
 	if app == nil {
 		return true, "", nil
 	}

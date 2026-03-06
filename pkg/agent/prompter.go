@@ -9,11 +9,19 @@ import (
 	"github.com/jackstrohm/jot/internal/prompts"
 	"github.com/jackstrohm/jot/pkg/infra"
 	"github.com/jackstrohm/jot/pkg/journal"
+	"github.com/jackstrohm/jot/pkg/memory"
 	"github.com/jackstrohm/jot/pkg/utils"
 )
 
+// ActiveContextItem is one context node for the system prompt (name, relevance, content).
+type ActiveContextItem struct {
+	ContextName string
+	Relevance   float64
+	Content     string
+}
+
 // BuildSystemPrompt creates the system prompt with current date context and recent history.
-func BuildSystemPrompt(ctx context.Context, env PrompterEnv) string {
+func BuildSystemPrompt(ctx context.Context) string {
 	now := time.Now()
 	today := now.Format("2006-01-02")
 	_, week := now.ISOWeek()
@@ -24,26 +32,40 @@ func BuildSystemPrompt(ctx context.Context, env PrompterEnv) string {
 	currentMonth := now.Format("2006-01")
 
 	activeContextsStr := ""
-	if items, err := env.GetActiveContexts(ctx, 5); err == nil && len(items) > 0 {
-		var lines []string
-		for _, item := range items {
-			if item.Relevance < 0.4 {
-				continue
+	nodes, metas, err := memory.GetActiveContexts(ctx, 5)
+	if err == nil && len(nodes) > 0 {
+		items := make([]ActiveContextItem, 0, len(nodes))
+		for i, n := range nodes {
+			if i >= len(metas) {
+				break
 			}
-			content := item.Content
-			if strings.EqualFold(item.ContextName, "user_profile") || strings.EqualFold(item.ContextName, "system_evolution") || item.Relevance > 0.75 {
-				lines = append(lines, fmt.Sprintf("[HIGH] %s: %s", item.ContextName, content))
-			} else {
-				tldr := utils.FirstSentence(content, 80)
-				lines = append(lines, fmt.Sprintf("[MED] %s: %s", item.ContextName, tldr))
-			}
+			items = append(items, ActiveContextItem{
+				ContextName: metas[i].ContextName,
+				Relevance:   metas[i].Relevance,
+				Content:     n.Content,
+			})
 		}
-		if len(lines) > 0 {
-			activeContextsStr = fmt.Sprintf(`
+		if len(items) > 0 {
+			var lines []string
+			for _, item := range items {
+				if item.Relevance < 0.4 {
+					continue
+				}
+				content := item.Content
+				if strings.EqualFold(item.ContextName, "user_profile") || strings.EqualFold(item.ContextName, "system_evolution") || item.Relevance > 0.75 {
+					lines = append(lines, fmt.Sprintf("[HIGH] %s: %s", item.ContextName, content))
+				} else {
+					tldr := utils.FirstSentence(content, 80)
+					lines = append(lines, fmt.Sprintf("[MED] %s: %s", item.ContextName, tldr))
+				}
+			}
+			if len(lines) > 0 {
+				activeContextsStr = fmt.Sprintf(`
 
 ACTIVE CONTEXTS (ongoing projects/plans the user is working on):
 %s
 Connect new entries to these contexts when relevant.`, utils.WrapAsUserData(strings.Join(lines, "\n")))
+			}
 		}
 	}
 
@@ -93,7 +115,7 @@ RECENT CONVERSATION (for pronoun resolution only - ALREADY SAVED, do NOT re-log 
 	}
 
 	proactiveSignals := ""
-	if signals, err := env.GetActiveSignals(ctx, 3); err == nil && signals != "" {
+	if signals, err := memory.GetActiveSignals(ctx, 3); err == nil && signals != "" {
 		proactiveSignals = fmt.Sprintf(`
 
 PROACTIVE ALERTS (Mention these if relevant to the current conversation):

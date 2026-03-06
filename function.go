@@ -54,7 +54,11 @@ func init() {
 		return
 	}
 	app, _ := infra.GetDefaultApp()
-	defaultServer = api.NewServer(app, defaultConfig, infra.Logger, service.NewAPIBackend(getConfig), api.Router)
+	journalSvc := service.NewJournalService()
+	memorySvc := service.NewMemoryService()
+	agentSvc := service.NewAgentService(app)
+	smsSvc := service.NewSMSService(getConfig)
+	defaultServer = api.NewServer(app, defaultConfig, infra.Logger, journalSvc, memorySvc, agentSvc, smsSvc, api.Router)
 }
 
 // JotAPI is the HTTP handler for the Cloud Function.

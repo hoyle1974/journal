@@ -10,6 +10,7 @@ import (
 	"github.com/jackstrohm/jot/internal/prompts"
 	"github.com/jackstrohm/jot/llmjson"
 	"github.com/jackstrohm/jot/pkg/infra"
+	"github.com/jackstrohm/jot/pkg/memory"
 	"github.com/jackstrohm/jot/pkg/utils"
 )
 
@@ -26,7 +27,7 @@ type GeneratedPlan struct {
 }
 
 // CreateAndSavePlan forces Gemini to decompose a goal into JSON, then saves it to the Knowledge Graph.
-func CreateAndSavePlan(ctx context.Context, env PlannerEnv, goal string) (string, error) {
+func CreateAndSavePlan(ctx context.Context, goal string) (string, error) {
 	ctx, span := infra.StartSpan(ctx, "plan.create_and_save")
 	defer span.End()
 
@@ -75,7 +76,7 @@ func CreateAndSavePlan(ctx context.Context, env PlannerEnv, goal string) (string
 		return "", err
 	}
 
-	parentID, err := env.UpsertKnowledge(ctx, goal, "goal", `{"status": "planning"}`, nil)
+	parentID, err := memory.UpsertKnowledge(ctx, goal, "goal", `{"status": "planning"}`, nil)
 	if err != nil {
 		span.RecordError(err)
 		return "", err
@@ -92,7 +93,7 @@ func CreateAndSavePlan(ctx context.Context, env PlannerEnv, goal string) (string
 			"status":       "pending",
 		}
 		metaBytes, _ := json.Marshal(metadataMeta)
-		phaseID, _ := env.UpsertKnowledge(ctx, fmt.Sprintf("%s: %s", phase.Title, phase.Description), "task", string(metaBytes), nil)
+		phaseID, _ := memory.UpsertKnowledge(ctx, fmt.Sprintf("%s: %s", phase.Title, phase.Description), "task", string(metaBytes), nil)
 		resultLines = append(resultLines, fmt.Sprintf("%d. %s (Task ID: %s)", i+1, phase.Title, phaseID))
 	}
 

@@ -6,11 +6,8 @@ import (
 	"context"
 	"flag"
 	"log"
-	"os"
 	"time"
 
-	"github.com/jackstrohm/jot/internal/config"
-	"github.com/jackstrohm/jot/internal/service"
 	"github.com/jackstrohm/jot/pkg/agent"
 	"github.com/jackstrohm/jot/pkg/infra"
 	"github.com/jackstrohm/jot/pkg/journal"
@@ -19,24 +16,13 @@ import (
 
 const distanceThreshold = 0.15
 
-func runBackfillLinks() {
-	args := os.Args[2:]
+func runBackfillLinks(ctx context.Context, app *infra.App, args []string) {
 	fs := flag.NewFlagSet("backfill-links", flag.ExitOnError)
 	limit := fs.Int("limit", 100, "Max journal entries to process (oldest first)")
 	dryRun := fs.Bool("dry-run", false, "Only log; do not create or update knowledge nodes")
 	_ = fs.Parse(args)
 
-	ctx := context.Background()
-	cfg, err := config.Load()
-	if err != nil {
-		log.Fatalf("config: %v", err)
-	}
-	app, err := infra.NewApp(ctx, cfg, nil, nil)
-	if err != nil {
-		log.Fatalf("init app: %v", err)
-	}
-	ctx = infra.WithApp(ctx, app)
-
+	cfg := app.Config()
 	entries, err := journal.GetEntriesAsc(ctx, *limit)
 	if err != nil {
 		log.Fatalf("get entries: %v", err)
@@ -45,7 +31,7 @@ func runBackfillLinks() {
 
 	linked, created, skipped, errors := 0, 0, 0, 0
 	for i, e := range entries {
-		extract, err := agent.RunEvaluatorExtract(ctx, service.ServiceEnv{}, e.Content)
+		extract, err := agent.RunEvaluatorExtract(ctx, e.Content)
 		if err != nil {
 			log.Printf("[%d/%d] %s extract error: %v", i+1, len(entries), e.UUID, err)
 			errors++

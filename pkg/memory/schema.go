@@ -19,8 +19,10 @@ const (
 	NodeTypeMilestone  = "milestone"
 	NodeTypePlace      = "place"
 	NodeTypeAsset      = "asset"
-	NodeTypeTool       = "tool"
-	NodeTypeGeneric    = "generic"
+	NodeTypeTool          = "tool"
+	NodeTypeGeneric       = "generic"
+	NodeTypeWeeklySummary = "weekly_summary"
+	NodeTypeMonthlySummary = "monthly_summary"
 )
 
 // Project/Goal status values (metadataStatus and existing code expect lowercase).

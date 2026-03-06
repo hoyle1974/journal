@@ -27,23 +27,29 @@ type AppLike interface {
 // RouterFunc is the function that routes requests to handlers. It receives the Server so handlers can use s.App and s.Config.
 type RouterFunc func(*Server, http.ResponseWriter, *http.Request)
 
-// Server holds app, config, logger, backend, and the router for struct-based dependency injection.
+// Server holds app, config, logger, domain services, and the router for struct-based dependency injection.
 type Server struct {
 	App     AppLike
 	Config  *config.Config
 	Logger  *slog.Logger
-	Backend Backend
+	Journal JournalService
+	Memory  MemoryService
+	Agent   AgentService
+	SMS     SMSService
 	router  RouterFunc
 }
 
 // NewServer builds a Server. The router is called after the request context has the app attached.
-// If backend is nil, handlers that need it will panic; pass a non-nil Backend from the root package.
-func NewServer(app AppLike, cfg *config.Config, logger *slog.Logger, backend Backend, router RouterFunc) *Server {
+// Domain services (Journal, Memory, Agent, SMS) must be non-nil for handlers that use them.
+func NewServer(app AppLike, cfg *config.Config, logger *slog.Logger, journal JournalService, memory MemoryService, agent AgentService, sms SMSService, router RouterFunc) *Server {
 	return &Server{
 		App:     app,
 		Config:  cfg,
 		Logger:  logger,
-		Backend: backend,
+		Journal: journal,
+		Memory:  memory,
+		Agent:   agent,
+		SMS:     sms,
 		router:  router,
 	}
 }

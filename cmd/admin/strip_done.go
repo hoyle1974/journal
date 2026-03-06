@@ -7,36 +7,23 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"os"
 	"strings"
 
 	"cloud.google.com/go/firestore"
 	"google.golang.org/api/iterator"
 
-	"github.com/jackstrohm/jot/internal/config"
 	"github.com/jackstrohm/jot/pkg/infra"
 	"github.com/jackstrohm/jot/pkg/journal"
 )
 
-func runStripDone() {
-	args := os.Args[2:]
+func runStripDone(ctx context.Context, app *infra.App, args []string) {
 	fs := flag.NewFlagSet("strip-done", flag.ExitOnError)
 	dryRun := fs.Bool("dry-run", false, "Only list entries that would be changed; do not update")
 	_ = fs.Parse(args)
 
-	ctx := context.Background()
-	cfg, err := config.Load()
+	client, err := app.Firestore(ctx)
 	if err != nil {
-		log.Fatalf("config: %v", err)
-	}
-	app, err := infra.NewApp(ctx, cfg, nil, nil)
-	if err != nil {
-		log.Fatal(err)
-	}
-	ctx = infra.WithApp(ctx, app)
-	client, err := infra.GetFirestoreClient(ctx)
-	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("Firestore: %v", err)
 	}
 
 	iter := client.Collection(journal.EntriesCollection).Documents(ctx)

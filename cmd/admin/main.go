@@ -8,8 +8,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"log"
 	"os"
+
+	"github.com/jackstrohm/jot/internal/config"
+	"github.com/jackstrohm/jot/pkg/infra"
 )
 
 func main() {
@@ -17,19 +22,33 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Usage: %s <backfill-links|clean-test|dedup|migrate-meta|strip-done> [flags]\n", os.Args[0])
 		os.Exit(1)
 	}
-	switch os.Args[1] {
+	subcommand := os.Args[1]
+	args := os.Args[2:]
+
+	ctx := context.Background()
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("config: %v", err)
+	}
+	app, err := infra.NewApp(ctx, cfg, nil, nil)
+	if err != nil {
+		log.Fatalf("NewApp: %v", err)
+	}
+	ctx = infra.WithApp(ctx, app)
+
+	switch subcommand {
 	case "backfill-links":
-		runBackfillLinks()
+		runBackfillLinks(ctx, app, args)
 	case "clean-test":
-		runCleanTest()
+		runCleanTest(ctx, app, args)
 	case "dedup":
-		runDedup()
+		runDedup(ctx, app, args)
 	case "migrate-meta":
-		runMigrateMeta()
+		runMigrateMeta(ctx, app, args)
 	case "strip-done":
-		runStripDone()
+		runStripDone(ctx, app, args)
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown subcommand %q\n", os.Args[1])
+		fmt.Fprintf(os.Stderr, "Unknown subcommand %q\n", subcommand)
 		os.Exit(1)
 	}
 }

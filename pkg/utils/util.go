@@ -4,12 +4,9 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
 	"math/rand"
-	"net/http"
 	"net/url"
 	"strings"
-	"time"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
@@ -71,75 +68,6 @@ func GenerateRandom(randType string, minVal, maxVal int, choices string) string 
 	default:
 		return fmt.Sprintf("Unknown random type: %s (use: number, uuid, pick, coin, dice)", randType)
 	}
-}
-
-// LookupWord fetches word definition from Free Dictionary API.
-func LookupWord(word string) (string, error) {
-	word = strings.ToLower(strings.TrimSpace(word))
-	apiURL := fmt.Sprintf("https://api.dictionaryapi.dev/api/v2/entries/en/%s", word)
-
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Get(apiURL)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == 404 {
-		return fmt.Sprintf("No definition found for '%s'", word), nil
-	}
-	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("dictionary API returned status %d", resp.StatusCode)
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-
-	var entries []struct {
-		Word     string `json:"word"`
-		Phonetic string `json:"phonetic"`
-		Meanings []struct {
-			PartOfSpeech string `json:"partOfSpeech"`
-			Definitions  []struct {
-				Definition string `json:"definition"`
-				Example    string `json:"example"`
-			} `json:"definitions"`
-		} `json:"meanings"`
-	}
-
-	if err := json.Unmarshal(body, &entries); err != nil {
-		return "", fmt.Errorf("failed to parse dictionary response: %v", err)
-	}
-
-	if len(entries) == 0 {
-		return fmt.Sprintf("No definition found for '%s'", word), nil
-	}
-
-	var result []string
-	entry := entries[0]
-	result = append(result, fmt.Sprintf("**%s**", entry.Word))
-	if entry.Phonetic != "" {
-		result = append(result, fmt.Sprintf("Pronunciation: %s", entry.Phonetic))
-	}
-	result = append(result, "")
-
-	for _, meaning := range entry.Meanings {
-		result = append(result, fmt.Sprintf("_%s_", meaning.PartOfSpeech))
-		for i, def := range meaning.Definitions {
-			if i >= 3 {
-				break
-			}
-			result = append(result, fmt.Sprintf("%d. %s", i+1, def.Definition))
-			if def.Example != "" {
-				result = append(result, fmt.Sprintf("   Example: \"%s\"", def.Example))
-			}
-		}
-		result = append(result, "")
-	}
-
-	return strings.Join(result, "\n"), nil
 }
 
 // EncodeDecodeText performs encoding/decoding operations.

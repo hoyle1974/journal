@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"cloud.google.com/go/firestore"
-	"github.com/jackstrohm/jot/pkg/agent"
 	"github.com/jackstrohm/jot/pkg/infra"
 )
 
@@ -24,7 +23,7 @@ func GetWeeklySummaryNodesInRange(ctx context.Context, startDate, endDate string
 		endDate = endDate + "T23:59:59"
 	}
 	query := client.Collection(KnowledgeCollection).
-		Where("node_type", "==", agent.NodeTypeWeeklySummary).
+		Where("node_type", "==", NodeTypeWeeklySummary).
 		Where("timestamp", ">=", startDate).
 		Where("timestamp", "<=", endDate).
 		OrderBy("timestamp", firestore.Asc).

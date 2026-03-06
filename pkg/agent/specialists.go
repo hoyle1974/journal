@@ -12,6 +12,7 @@ import (
 	"github.com/jackstrohm/jot/internal/prompts"
 	"github.com/jackstrohm/jot/llmjson"
 	"github.com/jackstrohm/jot/pkg/infra"
+	"github.com/jackstrohm/jot/pkg/memory"
 	"github.com/jackstrohm/jot/pkg/utils"
 	"golang.org/x/sync/errgroup"
 )
@@ -29,7 +30,7 @@ type EvaluatorExtract struct {
 }
 
 // RunEvaluatorExtract runs the evaluator LLM on content and returns significance, domain, and fact_to_store.
-func RunEvaluatorExtract(ctx context.Context, env SpecialistsEnv, content string) (*EvaluatorExtract, error) {
+func RunEvaluatorExtract(ctx context.Context, content string) (*EvaluatorExtract, error) {
 	if len(strings.TrimSpace(content)) < 10 {
 		return nil, nil
 	}
@@ -55,7 +56,9 @@ func RunEvaluatorExtract(ctx context.Context, env SpecialistsEnv, content string
 	systemPrompt := prompts.Evaluator() + prompts.DataSafety()
 	model.SystemInstruction = &genai.Content{Parts: []genai.Part{genai.Text(systemPrompt)}}
 	prompt := ""
-	if profile, err := env.FindContextContent(ctx, "user_profile"); err == nil && profile != "" {
+	node, _, err := memory.FindContextByName(ctx, "user_profile")
+	if err == nil && node != nil && node.Content != "" {
+		profile := node.Content
 		prompt = fmt.Sprintf("Relevant user preferences/facts (use when assigning domain and significance):\n%s\n\n",
 			utils.TruncateString(profile, 500))
 	}
@@ -97,11 +100,11 @@ func RunEvaluatorExtract(ctx context.Context, env SpecialistsEnv, content string
 }
 
 // RunEvaluator assigns significance to a new entry and optionally upserts high-value facts.
-func RunEvaluator(ctx context.Context, env SpecialistsEnv, content, entryUUID, timestamp string) {
+func RunEvaluator(ctx context.Context, app *infra.App, content, entryUUID, timestamp string) {
 	ctx, span := infra.StartSpan(ctx, "evaluator.run")
 	defer span.End()
 
-	parsed, err := RunEvaluatorExtract(ctx, env, content)
+	parsed, err := RunEvaluatorExtract(ctx, content)
 	if err != nil {
 		infra.LoggerFrom(ctx).Warn("evaluator skipped", "entry_uuid", entryUUID, "reason", "extract failed", "error", err)
 		return
@@ -121,7 +124,7 @@ func RunEvaluator(ctx context.Context, env SpecialistsEnv, content, entryUUID, t
 		}
 		bgCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
-		if _, err := env.UpsertSemanticMemory(bgCtx, parsed.FactToStore, nodeType, parsed.Domain, parsed.Significance, nil, []string{entryUUID}); err != nil {
+		if _, err := memory.UpsertSemanticMemory(bgCtx, parsed.FactToStore, nodeType, parsed.Domain, parsed.Significance, nil, []string{entryUUID}); err != nil {
 			infra.LoggerFrom(ctx).Warn("evaluator upsert failed", "error", err)
 		} else {
 			factStored = true
@@ -131,9 +134,8 @@ func RunEvaluator(ctx context.Context, env SpecialistsEnv, content, entryUUID, t
 	if parsed.Significance >= ProactiveAlertSignificanceThreshold {
 		status = "ALERT"
 		// Async: generate one follow-up question/observation and store as proactive signal for FOH.
-		app := infra.GetApp(ctx)
 		if app != nil && app.Config() != nil {
-			go runProactiveInsight(context.Background(), app, env, entryUUID, content)
+			go runProactiveInsight(context.Background(), app, entryUUID, content)
 		}
 	}
 	infra.LoggerFrom(ctx).Info("evaluator", "entry_uuid", entryUUID, "significance", parsed.Significance, "threshold_for_alert", ProactiveAlertSignificanceThreshold, "status", status, "domain", parsed.Domain, "fact_stored", factStored)
@@ -142,7 +144,7 @@ func RunEvaluator(ctx context.Context, env SpecialistsEnv, content, entryUUID, t
 
 const proactiveInsightPrompt = `Based on this highly significant journal entry, generate exactly one insightful follow-up question or brief observation. Output only that single question or observation—no preamble, no numbering.`
 
-func runProactiveInsight(ctx context.Context, app *infra.App, env SpecialistsEnv, entryUUID, entryContent string) {
+func runProactiveInsight(ctx context.Context, app *infra.App, entryUUID, entryContent string) {
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	ctx = infra.WithApp(ctx, app)
@@ -161,7 +163,7 @@ func runProactiveInsight(ctx context.Context, app *infra.App, env SpecialistsEnv
 	bgCtx, cancel2 := context.WithTimeout(context.Background(), 15*time.Second)
 	bgCtx = infra.WithApp(bgCtx, app)
 	defer cancel2()
-	if _, err := env.UpsertSemanticMemory(bgCtx, strings.TrimSpace(summary), "thought", "selfmodel", 0.9, nil, []string{entryUUID}); err != nil {
+	if _, err := memory.UpsertSemanticMemory(bgCtx, strings.TrimSpace(summary), "thought", "selfmodel", 0.9, nil, []string{entryUUID}); err != nil {
 		infra.LoggerFrom(ctx).Debug("proactive insight upsert failed", "entry_uuid", entryUUID, "error", err)
 		return
 	}

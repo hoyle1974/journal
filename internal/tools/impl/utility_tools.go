@@ -2,9 +2,12 @@ package impl
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"github.com/jackstrohm/jot/pkg/utils"
 	"github.com/jackstrohm/jot/tools"
+	"github.com/martinlindhe/unit"
 )
 
 func init() {
@@ -100,7 +103,7 @@ func registerUtilityTools() {
 			if !ok {
 				return tools.MissingParam("to_unit")
 			}
-			result, err := utils.ConvertUnits(value, fromUnit, toUnit)
+			result, err := convertUnits(value, fromUnit, toUnit)
 			if err != nil {
 				return tools.Fail("Conversion error: %v", err)
 			}
@@ -186,4 +189,170 @@ func registerUtilityTools() {
 			return tools.OK("%s", result)
 		},
 	})
+}
+
+// convertUnits converts between common units: temp, length, mass, data (tool: convert_units).
+func convertUnits(value float64, fromUnit, toUnit string) (string, error) {
+	fromUnit = strings.ToLower(strings.TrimSpace(fromUnit))
+	toUnit = strings.ToLower(strings.TrimSpace(toUnit))
+
+	if result, err := convertTemperature(value, fromUnit, toUnit); err == nil {
+		return fmt.Sprintf("%.2f %s = %.2f %s", value, fromUnit, result, toUnit), nil
+	}
+	if result, err := convertLength(value, fromUnit, toUnit); err == nil {
+		return fmt.Sprintf("%.4g %s = %.4g %s", value, fromUnit, result, toUnit), nil
+	}
+	if result, err := convertMass(value, fromUnit, toUnit); err == nil {
+		return fmt.Sprintf("%.4g %s = %.4g %s", value, fromUnit, result, toUnit), nil
+	}
+	if result, err := convertDatasize(value, fromUnit, toUnit); err == nil {
+		return fmt.Sprintf("%.4g %s = %.4g %s", value, fromUnit, result, toUnit), nil
+	}
+	return "", fmt.Errorf("unknown unit conversion: %s to %s", fromUnit, toUnit)
+}
+
+func convertTemperature(value float64, from, to string) (float64, error) {
+	from = normTemp(from)
+	to = normTemp(to)
+	var t unit.Temperature
+	switch from {
+	case "c":
+		t = unit.FromCelsius(value)
+	case "f":
+		t = unit.FromFahrenheit(value)
+	case "k":
+		t = unit.FromKelvin(value)
+	default:
+		return 0, fmt.Errorf("unknown temp unit: %s", from)
+	}
+	switch to {
+	case "c":
+		return t.Celsius(), nil
+	case "f":
+		return t.Fahrenheit(), nil
+	case "k":
+		return t.Kelvin(), nil
+	default:
+		return 0, fmt.Errorf("unknown temp unit: %s", to)
+	}
+}
+
+func normTemp(s string) string {
+	switch s {
+	case "celsius":
+		return "c"
+	case "fahrenheit":
+		return "f"
+	case "kelvin":
+		return "k"
+	}
+	return s
+}
+
+func convertLength(value float64, from, to string) (float64, error) {
+	var L unit.Length
+	switch from {
+	case "m", "meter", "meters":
+		L = unit.Length(value) * unit.Meter
+	case "cm", "centimeter", "centimeters":
+		L = unit.Length(value) * unit.Centimeter
+	case "mm", "millimeter", "millimeters":
+		L = unit.Length(value) * unit.Millimeter
+	case "km", "kilometer", "kilometers":
+		L = unit.Length(value) * unit.Kilometer
+	case "in", "inch", "inches":
+		L = unit.Length(value) * unit.Inch
+	case "ft", "foot", "feet":
+		L = unit.Length(value) * unit.Foot
+	case "yd", "yard", "yards":
+		L = unit.Length(value) * unit.Yard
+	case "mi", "mile", "miles":
+		L = unit.Length(value) * unit.Mile
+	default:
+		return 0, fmt.Errorf("unknown length unit: %s", from)
+	}
+	switch to {
+	case "m", "meter", "meters":
+		return L.Meters(), nil
+	case "cm", "centimeter", "centimeters":
+		return L.Centimeters(), nil
+	case "mm", "millimeter", "millimeters":
+		return L.Millimeters(), nil
+	case "km", "kilometer", "kilometers":
+		return L.Kilometers(), nil
+	case "in", "inch", "inches":
+		return L.Inches(), nil
+	case "ft", "foot", "feet":
+		return L.Feet(), nil
+	case "yd", "yard", "yards":
+		return L.Yards(), nil
+	case "mi", "mile", "miles":
+		return L.Miles(), nil
+	default:
+		return 0, fmt.Errorf("unknown length unit: %s", to)
+	}
+}
+
+func convertMass(value float64, from, to string) (float64, error) {
+	var M unit.Mass
+	switch from {
+	case "g", "gram", "grams":
+		M = unit.Mass(value) * unit.Gram
+	case "kg", "kilogram", "kilograms":
+		M = unit.Mass(value) * unit.Kilogram
+	case "mg", "milligram", "milligrams":
+		M = unit.Mass(value) * unit.Milligram
+	case "lb", "pound", "pounds":
+		M = unit.Mass(value) * unit.AvoirdupoisPound
+	case "oz", "ounce", "ounces":
+		M = unit.Mass(value) * unit.AvoirdupoisOunce
+	default:
+		return 0, fmt.Errorf("unknown mass unit: %s", from)
+	}
+	switch to {
+	case "g", "gram", "grams":
+		return M.Grams(), nil
+	case "kg", "kilogram", "kilograms":
+		return M.Kilograms(), nil
+	case "mg", "milligram", "milligrams":
+		return M.Milligrams(), nil
+	case "lb", "pound", "pounds":
+		return M.AvoirdupoisPounds(), nil
+	case "oz", "ounce", "ounces":
+		return M.AvoirdupoisOunces(), nil
+	default:
+		return 0, fmt.Errorf("unknown mass unit: %s", to)
+	}
+}
+
+func convertDatasize(value float64, from, to string) (float64, error) {
+	var D unit.Datasize
+	switch from {
+	case "b", "byte", "bytes":
+		D = unit.Datasize(value) * unit.Byte
+	case "kb", "kilobyte", "kilobytes":
+		D = unit.Datasize(value) * unit.Kibibyte
+	case "mb", "megabyte", "megabytes":
+		D = unit.Datasize(value) * unit.Mebibyte
+	case "gb", "gigabyte", "gigabytes":
+		D = unit.Datasize(value) * unit.Gibibyte
+	case "tb", "terabyte", "terabytes":
+		D = unit.Datasize(value) * unit.Tebibyte
+	default:
+		return 0, fmt.Errorf("unknown data unit: %s", from)
+	}
+	switch to {
+	case "b", "byte", "bytes":
+		return D.Bytes(), nil
+	case "kb", "kilobyte", "kilobytes":
+		return D.Kibibytes(), nil
+	case "mb", "megabyte", "megabytes":
+		return D.Mebibytes(), nil
+	case "gb", "gigabyte", "gigabytes":
+		return D.Gibibytes(), nil
+	case "tb", "terabyte", "terabytes":
+		return D.Tebibytes(), nil
+	default:
+		return 0, fmt.Errorf("unknown data unit: %s", to)
+	}
 }

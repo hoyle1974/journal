@@ -120,7 +120,7 @@ func TestConvertUnitsTool(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		result, err := utils.ConvertUnits(tc.value, tc.from, tc.to)
+		result, err := convertUnits(tc.value, tc.from, tc.to)
 		if err != nil {
 			t.Errorf("ConvertUnits(%v, %q, %q) error: %v", tc.value, tc.from, tc.to, err)
 			continue

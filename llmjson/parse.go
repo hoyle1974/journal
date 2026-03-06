@@ -235,7 +235,8 @@ func extractString(s string) json.RawMessage {
 		}
 		i++
 	}
-	return nil
+	// Truncated LLM output: string never closed. Return best-effort valid JSON string.
+	return json.RawMessage(s + `"`)
 }
 
 func extractNumber(s string) json.RawMessage {
@@ -306,7 +307,9 @@ func extractObject(s string) json.RawMessage {
 		}
 		i++
 	}
-	return nil
+	// Truncated LLM output: object never closed. Strip trailing comma/whitespace and close.
+	tail := strings.TrimRight(s, " \t\n\r,")
+	return json.RawMessage(tail + "}")
 }
 
 func extractArray(s string) json.RawMessage {
@@ -353,5 +356,7 @@ func extractArray(s string) json.RawMessage {
 		}
 		i++
 	}
-	return nil
+	// Truncated LLM output: array never closed. Strip trailing comma/whitespace and close.
+	tail := strings.TrimRight(s, " \t\n\r,")
+	return json.RawMessage(tail + "]")
 }

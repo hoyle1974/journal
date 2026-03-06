@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 
 	"cloud.google.com/go/firestore"
@@ -19,14 +18,16 @@ import (
 type ConfigGetter func() *config.Config
 
 // APIBackend implements api.Backend by delegating to service, journal, memory, and infra.
+// App is passed explicitly so handlers do not rely on context for dependencies.
 type APIBackend struct {
 	getConfig ConfigGetter
+	app      *infra.App
 }
 
 // NewAPIBackend returns an api.Backend implementation for use with api.NewServer.
-// getConfig is called for config-dependent operations (e.g. Twilio); pass a func that returns the active config (e.g. for tests, a getter that returns test override).
-func NewAPIBackend(getConfig ConfigGetter) *APIBackend {
-	return &APIBackend{getConfig: getConfig}
+// getConfig is called for config-dependent operations (e.g. Twilio). app is the runtime app (Firestore, Gemini, pools).
+func NewAPIBackend(getConfig ConfigGetter, app *infra.App) *APIBackend {
+	return &APIBackend{getConfig: getConfig, app: app}
 }
 
 func (b *APIBackend) cfg() *config.Config {
@@ -38,7 +39,8 @@ func (b *APIBackend) cfg() *config.Config {
 
 func (b *APIBackend) AddEntry(ctx context.Context, content, source string, timestamp *string) (string, error) {
 	infra.LoggerFrom(ctx).Info("function call", "fn", "AddEntry", "source", source, "content_length", len(content))
-	entryUUID, err := (ServiceEnv{}).AddEntryAndEnqueue(ctx, content, source, timestamp)
+	ctx = infra.WithApp(ctx, b.app)
+	entryUUID, err := agent.AddEntryAndEnqueue(ctx, content, source, timestamp)
 	if err != nil {
 		infra.LoggerFrom(ctx).Error("function result", "fn", "AddEntry", "error", err.Error())
 		return "", err
@@ -49,14 +51,14 @@ func (b *APIBackend) AddEntry(ctx context.Context, content, source string, times
 
 func (b *APIBackend) RunQuery(ctx context.Context, question, source string) *agent.QueryResult {
 	infra.LoggerFrom(ctx).Info("function call", "fn", "RunQuery", "source", source, "question_preview", utils.TruncateString(question, 80))
-	result := RunQuery(ctx, question, source)
+	result := RunQuery(ctx, b.app, question, source)
 	infra.LoggerFrom(ctx).Info("function result", "fn", "RunQuery", "error", result.Error, "iterations", result.Iterations, "tool_call_count", len(result.ToolCalls), "answer_preview", utils.TruncateString(result.Answer, 100))
 	return result
 }
 
 func (b *APIBackend) CreateAndSavePlan(ctx context.Context, goal string) (string, error) {
 	infra.LoggerFrom(ctx).Info("function call", "fn", "CreateAndSavePlan", "goal_preview", utils.TruncateString(goal, 80))
-	plan, err := CreateAndSavePlan(ctx, goal)
+	plan, err := CreateAndSavePlan(ctx, b.app, goal) // CreateAndSavePlan sets app on ctx
 	if err != nil {
 		infra.LoggerFrom(ctx).Error("function result", "fn", "CreateAndSavePlan", "error", err.Error())
 		return "", err
@@ -76,7 +78,7 @@ func (b *APIBackend) ProcessEntry(ctx context.Context, entryUUID, content, times
 		}
 	}
 	infra.LoggerFrom(ctx).Info("function call", attrs...)
-	breakdown, err := ProcessEntry(ctx, entryUUID, content, timestamp, source)
+	breakdown, err := agent.ProcessEntry(ctx, b.app, entryUUID, content, timestamp, source)
 	if err != nil {
 		infra.LoggerFrom(ctx).Error("function result", "fn", "ProcessEntry", "uuid", entryUUID, "error", err.Error())
 		return breakdown, err
@@ -168,7 +170,7 @@ func (b *APIBackend) DeleteEntries(ctx context.Context, uuids []string) error {
 
 func (b *APIBackend) RunDreamer(ctx context.Context) (*agent.DreamerResult, error) {
 	infra.LoggerFrom(ctx).Info("function call", "fn", "RunDreamer")
-	result, err := RunDreamer(ctx)
+	result, err := RunDreamer(ctx, b.app)
 	if err != nil {
 		infra.LoggerFrom(ctx).Error("function result", "fn", "RunDreamer", "error", err.Error())
 		return nil, err
@@ -227,6 +229,7 @@ func (b *APIBackend) GetUnresolvedPendingQuestions(ctx context.Context, limit in
 
 func (b *APIBackend) RunWeeklyRollup(ctx context.Context) (int, error) {
 	infra.LoggerFrom(ctx).Info("function call", "fn", "RunWeeklyRollup")
+	ctx = infra.WithApp(ctx, b.app)
 	n, err := RunWeeklyRollup(ctx)
 	if err != nil {
 		infra.LoggerFrom(ctx).Error("function result", "fn", "RunWeeklyRollup", "error", err.Error())
@@ -238,6 +241,7 @@ func (b *APIBackend) RunWeeklyRollup(ctx context.Context) (int, error) {
 
 func (b *APIBackend) RunMonthlyRollup(ctx context.Context) (int, error) {
 	infra.LoggerFrom(ctx).Info("function call", "fn", "RunMonthlyRollup")
+	ctx = infra.WithApp(ctx, b.app)
 	n, err := RunMonthlyRollup(ctx)
 	if err != nil {
 		infra.LoggerFrom(ctx).Error("function result", "fn", "RunMonthlyRollup", "error", err.Error())
@@ -247,63 +251,13 @@ func (b *APIBackend) RunMonthlyRollup(ctx context.Context) (int, error) {
 	return n, nil
 }
 
-func (b *APIBackend) GetDraftTools(ctx context.Context) ([]memory.KnowledgeNode, error) {
-	infra.LoggerFrom(ctx).Info("function call", "fn", "GetDraftTools")
-	drafts, err := memory.GetDraftTools(ctx)
-	if err != nil {
-		infra.LoggerFrom(ctx).Error("function result", "fn", "GetDraftTools", "error", err.Error())
-		return nil, err
-	}
-	infra.LoggerFrom(ctx).Info("function result", "fn", "GetDraftTools", "count", len(drafts))
-	return drafts, nil
-}
-
-func (b *APIBackend) MarkToolDraftApplied(ctx context.Context, uuid string) error {
-	infra.LoggerFrom(ctx).Info("function call", "fn", "MarkToolDraftApplied", "uuid", uuid)
-	err := memory.MarkToolDraftApplied(ctx, uuid)
-	if err != nil {
-		infra.LoggerFrom(ctx).Error("function result", "fn", "MarkToolDraftApplied", "uuid", uuid, "error", err.Error())
-		return err
-	}
-	infra.LoggerFrom(ctx).Info("function result", "fn", "MarkToolDraftApplied", "uuid", uuid)
-	return nil
-}
-
 func (b *APIBackend) ResolvePendingQuestion(ctx context.Context, id, answer string) error {
 	infra.LoggerFrom(ctx).Info("function call", "fn", "ResolvePendingQuestion", "id", id, "answer_length", len(answer))
-	q, err := memory.GetPendingQuestion(ctx, id)
-	if err != nil {
-		infra.LoggerFrom(ctx).Warn("could not fetch pending question for resolution side-effects", "error", err)
-	}
-
 	if err := memory.ResolvePendingQuestion(ctx, id, answer); err != nil {
 		infra.LoggerFrom(ctx).Error("function result", "fn", "ResolvePendingQuestion", "id", id, "error", err.Error())
 		return err
 	}
 	infra.LoggerFrom(ctx).Info("function result", "fn", "ResolvePendingQuestion", "id", id)
-
-	if q != nil && q.Kind == "tool_request" {
-		app := infra.GetApp(ctx)
-		if app != nil {
-			b.SubmitAsync(ctx, func() {
-				bgCtx := infra.WithApp(context.Background(), app)
-				code, genErr := agent.GenerateToolCode(bgCtx, ServiceEnv{}, q.Question, answer)
-				if genErr != nil {
-					infra.LoggerFrom(bgCtx).Error("tool code generation failed", "error", genErr)
-					return
-				}
-				if code == "REJECTED" {
-					infra.LoggerFrom(bgCtx).Info("tool generation rejected by user")
-					return
-				}
-				meta := fmt.Sprintf(`{"status":"draft", "tool_request_id":"%s"}`, id)
-				title := fmt.Sprintf("Drafted Code for Tool Request: %s\n\n```go\n%s\n```", q.Question, code)
-				_, _ = memory.UpsertKnowledge(bgCtx, title, "tool_code", meta, nil)
-				infra.LoggerFrom(bgCtx).Info("tool code generated and saved to knowledge graph")
-			})
-		}
-	}
-
 	return nil
 }
 
@@ -335,8 +289,8 @@ func (b *APIBackend) GetFirestoreClient(ctx context.Context) (*firestore.Client,
 }
 
 func (b *APIBackend) SubmitAsync(ctx context.Context, task func()) {
-	if app := infra.GetApp(ctx); app != nil {
-		app.SubmitAsync(task)
+	if b.app != nil {
+		b.app.SubmitAsync(task)
 	}
 }
 

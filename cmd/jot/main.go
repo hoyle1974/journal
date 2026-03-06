@@ -209,66 +209,6 @@ var api = &apiClient{}
 // COMMANDS
 // =============================================================================
 
-func cmdApplyTool() {
-	fmt.Println("Fetching drafted tools...")
-	result, _, err := api.Do("GET", "/tools/drafts", nil, RequestTimeout)
-	if err != nil {
-		fmt.Printf("Error: %v\n", err)
-		os.Exit(1)
-	}
-	draftsRaw, ok := result["drafts"].([]interface{})
-	if !ok || len(draftsRaw) == 0 {
-		fmt.Println("No pending tool drafts found.")
-		return
-	}
-	fmt.Printf("Found %d drafted tools.\n", len(draftsRaw))
-	reader := bufio.NewReader(os.Stdin)
-	for i, dRaw := range draftsRaw {
-		draft, ok := dRaw.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		content := jsonStr(draft, "content")
-		uuid := jsonStr(draft, "uuid")
-		preview := content
-		if len([]rune(preview)) > 150 {
-			preview = string([]rune(preview)[:150]) + "..."
-		}
-		fmt.Printf("\n--- Draft %d ---\n%s\n------------------\n", i+1, preview)
-		fmt.Print("Apply this tool? (y/n/q): ")
-		ans, _ := reader.ReadString('\n')
-		ans = strings.TrimSpace(strings.ToLower(ans))
-		if ans == "q" {
-			return
-		}
-		if ans != "y" {
-			continue
-		}
-		code := content
-		if strings.Contains(content, "```go") {
-			parts := strings.Split(content, "```go")
-			if len(parts) > 1 {
-				code = strings.Split(parts[1], "```")[0]
-			}
-		}
-		code = strings.TrimSpace(code)
-		fmt.Print("Enter filename to save (e.g. gmail_tools.go): ")
-		filename, _ := reader.ReadString('\n')
-		filename = strings.TrimSpace(filename)
-		if filename == "" {
-			fmt.Println("Skipping.")
-			continue
-		}
-		path := fmt.Sprintf("internal/tools/impl/%s", filename)
-		if err := os.WriteFile(path, []byte(code), 0644); err != nil {
-			fmt.Printf("Failed to write file: %v\n", err)
-			continue
-		}
-		api.DoOrExit("POST", "/tools/drafts/apply", map[string]string{"uuid": uuid}, RequestTimeout)
-		fmt.Printf("Success! Wrote %s. Don't forget to review it, and make sure init() registers it!\n", path)
-	}
-}
-
 func cmdLog(content string) {
 	source := fmt.Sprintf("cli:%s", MachineName)
 	api.DoOrExit("POST", "/log", map[string]string{"content": content, "source": source}, RequestTimeout)
@@ -658,7 +598,7 @@ Commands (optional):
   edit [limit]         Interactive entry editor
   entries [limit]      List recent entries
   dream, janitor       Run Dreamer (daily) or Janitor (weekly) cron
-  apply-tool           Fetch drafted tools from cloud, apply to internal/tools/impl/
+  recall               Show last night's dream narrative (morning readout)
   help [topic]         Show help
 
 Run 'jot help <topic>' for detailed help.
@@ -681,8 +621,9 @@ func main() {
 
 	cmd := strings.ToLower(args[0])
 
-	// Before starting a journal/query session, check for pending clarification questions
+	// Before starting a journal/query session, show unread dream narrative then pending clarification questions
 	if cmd == "log" || cmd == "l" || cmd == "query" || cmd == "q" {
+		maybeFetchUnreadDream()
 		maybePromptPendingQuestions()
 	}
 
@@ -739,6 +680,8 @@ func main() {
 		cmdJanitor()
 	case "rollup":
 		cmdRollup()
+	case "recall", "awake":
+		cmdRecall()
 
 	case "plan", "p":
 		if len(args) < 2 {
@@ -755,14 +698,61 @@ func main() {
 		}
 		cmdHelp(topic)
 
-	case "apply-tool":
-		cmdApplyTool()
-
 	default:
 		maybePromptPendingQuestions()
 		input := strings.Join(args, " ")
 		cmdQuery(input)
 	}
+}
+
+// maybeFetchUnreadDream fetches GET /dream/latest; if unread, prints the narrative and marks it read in the background.
+func maybeFetchUnreadDream() {
+	if APIBaseURL == "" {
+		return
+	}
+	result, err := apiRequest("GET", "/dream/latest", nil, RequestTimeout)
+	if err != nil || result == nil {
+		return
+	}
+	unread, _ := result["unread"].(bool)
+	if !unread {
+		return
+	}
+	narrative, _ := result["narrative"].(string)
+	if narrative == "" {
+		return
+	}
+	fmt.Printf("\n[From Last Night's Dreamer]:\n%s\n---\n", narrative)
+	go func() {
+		_, _ = apiRequest("GET", "/dream/latest?mark_read=true", nil, RequestTimeout)
+	}()
+}
+
+// cmdRecall fetches and prints the latest dream narrative (read or unread).
+func cmdRecall() {
+	if APIBaseURL == "" {
+		fmt.Println("Error: JOT_API_URL is not set")
+		os.Exit(1)
+	}
+	result, _, err := api.Do("GET", "/dream/latest", nil, RequestTimeout)
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		os.Exit(1)
+	}
+	if result == nil {
+		fmt.Println("Error: No response from API")
+		os.Exit(1)
+	}
+	narrative, _ := result["narrative"].(string)
+	timestamp, _ := result["timestamp"].(string)
+	if narrative == "" {
+		fmt.Println("No dream narrative found. Run the dreamer (e.g. via cron) to generate one.")
+		return
+	}
+	if timestamp != "" {
+		fmt.Printf("Dream from %s:\n\n", timestamp)
+	}
+	fmt.Println(narrative)
 }
 
 // maybePromptPendingQuestions fetches unresolved pending questions and prompts the user to answer or skip.

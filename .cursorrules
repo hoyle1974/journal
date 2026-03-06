@@ -3,8 +3,9 @@
 ## Architecture & Dependency Injection
 
 - **Rule:** Never initialize Firestore, Gemini, or Loggers directly.
-- **Requirement:** Always use `app := jot.GetApp(ctx)` to retrieve shared resources.
-- **Pattern:** `app := GetApp(ctx)` then `client, err := app.Firestore(ctx)`.
+- **Requirement:** Prefer passing `*infra.App` (or specific clients) explicitly as a struct field, method receiver, or function parameter so signatures are honest about dependencies. Avoid hiding app in `context.Context` except at the outermost request boundary (e.g. router attaches app to ctx; handlers then obtain app and pass it down).
+- **Pattern:** At entry points (HTTP backend, cron, admin CLI), get app once (e.g. from `infra.GetApp(ctx)` or from a backend struct that holds it), then pass it explicitly: `env := service.NewServiceEnv(app)` and call `agent.RunQueryWithDebug(ctx, env, question, source, debug)`. Agent and service layers take `FOHEnv`/`PlannerEnv`/etc. or `*infra.App`; they do not call `GetApp(ctx)`.
+- **Legacy:** Code that still uses `infra.GetApp(ctx)` (e.g. some tools, pkg/memory, pkg/journal) is acceptable where refactoring would be large; new code should pass app explicitly.
 
 ## Structured Logging
 

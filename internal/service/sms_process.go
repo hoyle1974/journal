@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/jackstrohm/jot/pkg/agent"
 	"github.com/jackstrohm/jot/pkg/infra"
 )
 
@@ -38,7 +39,11 @@ func processQuerySMS(ctx context.Context, query, from string) string {
 	ctx, span := infra.StartSpan(ctx, "twilio.process_query")
 	defer span.End()
 
-	result := RunQuery(ctx, query, "sms")
+	app := infra.GetApp(ctx)
+	if app == nil {
+		return "Service unavailable. Please try again later."
+	}
+	result := RunQuery(ctx, app, query, "sms")
 	if result.Error {
 		infra.LoggerFrom(ctx).Error("query failed", "answer", result.Answer)
 		return "Sorry, I couldn't process your query. Please try again."
@@ -52,7 +57,13 @@ func processEntrySMS(ctx context.Context, text, from string) string {
 
 	infra.EntriesTotal.Inc()
 
-	id, err := (ServiceEnv{}).AddEntryAndEnqueue(ctx, text, "sms", nil)
+	app := infra.GetApp(ctx)
+	if app == nil {
+		infra.LoggerFrom(ctx).Error("no app in context for SMS entry")
+		return "Service unavailable. Please try again later."
+	}
+	ctx = infra.WithApp(ctx, app)
+	id, err := agent.AddEntryAndEnqueue(ctx, text, "sms", nil)
 	if err != nil {
 		infra.LoggerFrom(ctx).Error("failed to store entry", "error", err)
 		infra.ErrorsTotal.Inc()
