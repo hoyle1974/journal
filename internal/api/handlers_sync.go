@@ -101,25 +101,111 @@ func syncIdentityForLog(cfg *config.Config) string {
 	return "Application Default Credentials (share the Google Doc with the Cloud Run service account email from GCP Console > Cloud Run > jot-api-go > Security)"
 }
 
-func findSyncDoneTrigger(doc *docs.Document) (elem *docs.TextRun, startIndex, endIndex int64) {
-	if doc.Body == nil {
+// findSyncDoneTriggerInElements finds the first non-bold line that is "done." or "done" (any case).
+// Recurses into table cells. The "done." phrase is used only as the trigger and is not included in the processed block.
+func findSyncDoneTriggerInElements(ctx context.Context, content []*docs.StructuralElement) (elem *docs.TextRun, startIndex, endIndex int64) {
+	if content == nil {
 		return nil, 0, 0
 	}
-	for _, element := range doc.Body.Content {
-		if element.Paragraph == nil {
+	for i, element := range content {
+		if element.Paragraph != nil {
+			for j, e := range element.Paragraph.Elements {
+				if e.TextRun == nil {
+					continue
+				}
+				raw := e.TextRun.Content
+				text := strings.TrimSpace(strings.ToLower(raw))
+				isBold := e.TextRun.TextStyle != nil && e.TextRun.TextStyle.Bold
+				isMatch := (text == "done." || text == "done") && !isBold
+				infra.LoggerFrom(ctx).Debug("sync trigger scan",
+					"element", i, "run", j,
+					"text_preview", utils.TruncateString(text, 60),
+					"text_len", len(text), "bold", isBold, "is_match", isMatch)
+				if isMatch {
+					infra.LoggerFrom(ctx).Debug("sync trigger found", "start_index", e.StartIndex, "end_index", e.EndIndex)
+					return e.TextRun, e.StartIndex, e.EndIndex
+				}
+			}
 			continue
 		}
-		for _, e := range element.Paragraph.Elements {
-			if e.TextRun == nil {
-				continue
+		if element.Table != nil {
+			rows := len(element.Table.TableRows)
+			cells := 0
+			for _, row := range element.Table.TableRows {
+				if row != nil {
+					cells += len(row.TableCells)
+				}
 			}
-			text := strings.TrimSpace(strings.ToLower(e.TextRun.Content))
-			if (text == "done." || text == "done") && (e.TextRun.TextStyle == nil || !e.TextRun.TextStyle.Bold) {
-				return e.TextRun, e.StartIndex, e.EndIndex
+			infra.LoggerFrom(ctx).Debug("sync trigger scan", "element", i, "type", "table", "rows", rows, "cells", cells)
+			for _, row := range element.Table.TableRows {
+				if row == nil {
+					continue
+				}
+				for _, cell := range row.TableCells {
+					if cell == nil || len(cell.Content) == 0 {
+						continue
+					}
+					if run, s, e := findSyncDoneTriggerInElements(ctx, cell.Content); run != nil {
+						return run, s, e
+					}
+				}
 			}
 		}
 	}
 	return nil, 0, 0
+}
+
+func findSyncDoneTrigger(ctx context.Context, doc *docs.Document) (elem *docs.TextRun, startIndex, endIndex int64) {
+	if doc.Body == nil {
+		return nil, 0, 0
+	}
+	content := doc.Body.Content
+	infra.LoggerFrom(ctx).Debug("sync trigger scan start", "body_elements", len(content))
+	return findSyncDoneTriggerInElements(ctx, content)
+}
+
+func collectSyncLinesFromElements(content []*docs.StructuralElement, beforeEndIndex int64, lines *[]syncLine) {
+	if content == nil || lines == nil {
+		return
+	}
+	for _, element := range content {
+		if element.Paragraph != nil {
+			for _, e := range element.Paragraph.Elements {
+				if e.TextRun == nil || e.StartIndex >= beforeEndIndex {
+					continue
+				}
+				textContent := e.TextRun.Content
+				if textContent == "" {
+					continue
+				}
+				text := strings.TrimSpace(textContent)
+				if text == "" || (e.TextRun.TextStyle != nil && e.TextRun.TextStyle.Bold) {
+					continue
+				}
+				kind := 0
+				if strings.HasPrefix(text, "?") {
+					kind = 1
+				} else if strings.HasPrefix(text, "!") {
+					kind = 2
+				}
+				*lines = append(*lines, syncLine{elem: e, text: text, kind: kind})
+			}
+			continue
+		}
+		if element.Table != nil {
+			for _, row := range element.Table.TableRows {
+				if row == nil {
+					continue
+				}
+				for _, cell := range row.TableCells {
+					if cell == nil || len(cell.Content) == 0 {
+						continue
+					}
+					collectSyncLinesFromElements(cell.Content, beforeEndIndex, lines)
+				}
+			}
+		}
+	}
 }
 
 func collectSyncBlock(doc *docs.Document, beforeEndIndex int64) *syncBlock {
@@ -127,31 +213,7 @@ func collectSyncBlock(doc *docs.Document, beforeEndIndex int64) *syncBlock {
 	if doc.Body == nil {
 		return nil
 	}
-	for _, element := range doc.Body.Content {
-		if element.Paragraph == nil {
-			continue
-		}
-		for _, e := range element.Paragraph.Elements {
-			if e.TextRun == nil || e.StartIndex >= beforeEndIndex {
-				continue
-			}
-			textContent := e.TextRun.Content
-			if textContent == "" {
-				continue
-			}
-			text := strings.TrimSpace(textContent)
-			if text == "" || (e.TextRun.TextStyle != nil && e.TextRun.TextStyle.Bold) {
-				continue
-			}
-			kind := 0
-			if strings.HasPrefix(text, "?") {
-				kind = 1
-			} else if strings.HasPrefix(text, "!") {
-				kind = 2
-			}
-			lines = append(lines, syncLine{elem: e, text: text, kind: kind})
-		}
-	}
+	collectSyncLinesFromElements(doc.Body.Content, beforeEndIndex, &lines)
 	if len(lines) == 0 {
 		return nil
 	}
@@ -208,7 +270,7 @@ func buildSyncRequests(ctx context.Context, s *Server, doneStartIndex, doneEndIn
 		if question != "" {
 			infra.LoggerFrom(ctx).Info("processing question", "question", utils.TruncateString(question, 80))
 			queryStart := time.Now()
-			answer := s.Backend.RunQuery(ctx, question, source).Answer
+			answer := s.Agent.RunQuery(ctx, question, source).Answer
 			infra.LoggerFrom(ctx).Info("question answered", "duration_ms", time.Since(queryStart).Milliseconds())
 			inserted := "\n" + sanitizeResponseForDoc(answer)
 			requests = append(requests,
@@ -224,7 +286,7 @@ func buildSyncRequests(ctx context.Context, s *Server, doneStartIndex, doneEndIn
 		if action != "" {
 			infra.LoggerFrom(ctx).Info("processing action", "action", utils.TruncateString(action, 80))
 			actionStart := time.Now()
-			result := s.Backend.RunQuery(ctx, "Execute this action and confirm what you did: "+action, source).Answer
+			result := s.Agent.RunQuery(ctx, "Execute this action and confirm what you did: "+action, source).Answer
 			infra.LoggerFrom(ctx).Info("action executed", "duration_ms", time.Since(actionStart).Milliseconds())
 			inserted := "\n✓ " + sanitizeResponseForDoc(result)
 			requests = append(requests,
@@ -237,7 +299,7 @@ func buildSyncRequests(ctx context.Context, s *Server, doneStartIndex, doneEndIn
 	default:
 		infra.LoggerFrom(ctx).Info("processing input", "text", utils.TruncateString(text, 80))
 		processStart := time.Now()
-		response := s.Backend.RunQuery(ctx, text, source).Answer
+		response := s.Agent.RunQuery(ctx, text, source).Answer
 		infra.LoggerFrom(ctx).Info("input processed", "duration_ms", time.Since(processStart).Milliseconds())
 		inserted := "\n→ " + sanitizeResponseForDoc(response)
 		requests = append(requests,
@@ -257,13 +319,12 @@ func syncApplyBatchUpdate(docsService *docs.Service, documentID string, requests
 	return err
 }
 
-func acquireSyncLock(ctx context.Context, backend Backend) (bool, error) {
-	client, err := backend.GetFirestoreClient(ctx)
+func acquireSyncLock(ctx context.Context, s *Server) (bool, error) {
+	client, err := s.App.Firestore(ctx)
 	if err != nil || client == nil {
 		return true, nil
 	}
-	coll := backend.SystemCollection()
-	lockRef := client.Collection(coll).Doc(syncLockDocument)
+	lockRef := client.Collection(infra.SystemCollection).Doc(syncLockDocument)
 	err = client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
 		doc, err := tx.Get(lockRef)
 		now := time.Now()
@@ -295,12 +356,12 @@ func acquireSyncLock(ctx context.Context, backend Backend) (bool, error) {
 	return true, nil
 }
 
-func releaseSyncLock(ctx context.Context, backend Backend) {
-	client, err := backend.GetFirestoreClient(ctx)
+func releaseSyncLock(ctx context.Context, s *Server) {
+	client, err := s.App.Firestore(ctx)
 	if err != nil || client == nil {
 		return
 	}
-	lockRef := client.Collection(backend.SystemCollection()).Doc(syncLockDocument)
+	lockRef := client.Collection(infra.SystemCollection).Doc(syncLockDocument)
 	_, err = lockRef.Delete(ctx)
 	if err != nil {
 		infra.LoggerFrom(ctx).Error("failed to release sync lock", "error", err)
@@ -312,7 +373,7 @@ func handleSync(s *Server, w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	path := pathForLog(r.URL.Path)
 	LogHandlerRequest(ctx, r.Method, path)
-	ctx = s.Backend.WithSyncInProgress(ctx)
+	ctx = infra.WithSyncInProgress(ctx)
 
 	ctx, span := infra.StartSpan(ctx, "sync.gdoc")
 	defer span.End()
@@ -338,7 +399,7 @@ func handleSync(s *Server, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	lockAcquired, lockErr := acquireSyncLock(ctx, s.Backend)
+	lockAcquired, lockErr := acquireSyncLock(ctx, s)
 	if lockErr != nil {
 		infra.LoggerFrom(ctx).Error("failed to check sync lock", "error", lockErr)
 		LogHandlerResponse(ctx, r.Method, path, http.StatusInternalServerError, "error", "Failed to check sync lock")
@@ -351,7 +412,7 @@ func handleSync(s *Server, w http.ResponseWriter, r *http.Request) {
 		WriteJSON(w, http.StatusConflict, map[string]string{"error": "Another sync is already in progress. Please wait and try again."})
 		return
 	}
-	defer releaseSyncLock(ctx, s.Backend)
+	defer releaseSyncLock(ctx, s)
 
 	docsService, err := syncCreateDocsService(ctx, s.Config)
 	if err != nil {
@@ -377,7 +438,18 @@ func handleSync(s *Server, w http.ResponseWriter, r *http.Request) {
 		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": msg})
 		return
 	}
-	infra.LoggerFrom(ctx).Debug("doc fetched", "duration_ms", time.Since(docFetchStart).Milliseconds())
+	infra.LoggerFrom(ctx).Debug("doc fetched", "duration_ms", time.Since(docFetchStart).Milliseconds(),
+		"body_elements", len(doc.Body.Content))
+
+	// Triage: log doc identity so we can confirm server is reading the same doc and version as the user sees.
+	docURL := "https://docs.google.com/document/d/" + documentID + "/edit"
+	infra.LoggerFrom(ctx).Info("sync doc triage",
+		"document_id_requested", documentID,
+		"document_id_from_api", doc.DocumentId,
+		"title", doc.Title,
+		"revision_id", doc.RevisionId,
+		"doc_url", docURL,
+		"body_elements", len(doc.Body.Content))
 
 	if doc.Body == nil || len(doc.Body.Content) == 0 {
 		infra.LoggerFrom(ctx).Info("sync skipped", "reason", "document has no body")
@@ -389,8 +461,9 @@ func handleSync(s *Server, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	doneElem, doneStartIndex, doneEndIndex := findSyncDoneTrigger(doc)
+	doneElem, doneStartIndex, doneEndIndex := findSyncDoneTrigger(ctx, doc)
 	if doneElem == nil {
+		infra.LoggerFrom(ctx).Debug("sync trigger scan complete", "found", false)
 		infra.LoggerFrom(ctx).Info("sync skipped", "reason", "no done. trigger")
 		LogHandlerResponse(ctx, r.Method, path, http.StatusOK, "processed", 0, "reason", "no done trigger")
 		WriteJSON(w, http.StatusOK, map[string]interface{}{
@@ -400,17 +473,23 @@ func handleSync(s *Server, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	infra.LoggerFrom(ctx).Debug("sync trigger scan complete", "found", true, "start_index", doneStartIndex, "end_index", doneEndIndex)
 	infra.LoggerFrom(ctx).Info("found 'done.' trigger, processing document")
 
 	// Collect only content before "done." so the trigger text is not included in the parsed block.
 	block := collectSyncBlock(doc, doneStartIndex)
+	if block != nil {
+		infra.LoggerFrom(ctx).Debug("sync block collected", "block_preview", utils.TruncateString(block.text, 120), "start_index", block.startIndex, "end_index", block.endIndex)
+	} else {
+		infra.LoggerFrom(ctx).Debug("sync block collected", "has_block", false)
+	}
 	blockToProcess := block
 	if block != nil && strings.TrimSpace(block.text) != "" {
 		h := sha256.Sum256([]byte(block.text))
 		blockHash := hex.EncodeToString(h[:])
-		fsClient, err := s.Backend.GetFirestoreClient(ctx)
+		fsClient, err := s.App.Firestore(ctx)
 		if err == nil && fsClient != nil {
-			stateRef := fsClient.Collection(s.Backend.SystemCollection()).Doc(syncStateDocument)
+			stateRef := fsClient.Collection(infra.SystemCollection).Doc(syncStateDocument)
 			stateDoc, err := stateRef.Get(ctx)
 			if err == nil && stateDoc.Exists() {
 				if lastHash, ok := stateDoc.Data()["last_block_hash"].(string); ok && lastHash == blockHash {
@@ -436,9 +515,9 @@ func handleSync(s *Server, w http.ResponseWriter, r *http.Request) {
 		if blockToProcess != nil && strings.TrimSpace(blockToProcess.text) != "" {
 			h := sha256.Sum256([]byte(blockToProcess.text))
 			blockHash := hex.EncodeToString(h[:])
-			fsClient, err := s.Backend.GetFirestoreClient(ctx)
+			fsClient, err := s.App.Firestore(ctx)
 			if err == nil && fsClient != nil {
-				_, err = fsClient.Collection(s.Backend.SystemCollection()).Doc(syncStateDocument).Set(ctx, map[string]interface{}{
+				_, err = fsClient.Collection(infra.SystemCollection).Doc(syncStateDocument).Set(ctx, map[string]interface{}{
 					"last_block_hash":   blockHash,
 					"last_processed_at": time.Now(),
 				})
