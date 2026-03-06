@@ -402,7 +402,8 @@ func handleSync(s *Server, w http.ResponseWriter, r *http.Request) {
 
 	infra.LoggerFrom(ctx).Info("found 'done.' trigger, processing document")
 
-	block := collectSyncBlock(doc, doneEndIndex)
+	// Collect only content before "done." so the trigger text is not included in the parsed block.
+	block := collectSyncBlock(doc, doneStartIndex)
 	blockToProcess := block
 	if block != nil && strings.TrimSpace(block.text) != "" {
 		h := sha256.Sum256([]byte(block.text))
