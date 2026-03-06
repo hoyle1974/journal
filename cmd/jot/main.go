@@ -302,31 +302,12 @@ func cmdQuery(question string) {
 		os.Exit(1)
 	}
 	if errFlag, ok := result["error"].(bool); ok && errFlag {
-		if debugLogs, ok := result["debug_logs"].([]interface{}); ok && len(debugLogs) > 0 {
-			fmt.Println("--- Debug Logs ---")
-			for _, log := range debugLogs {
-				if logStr, ok := log.(string); ok {
-					fmt.Println(logStr)
-				}
-			}
-			fmt.Println("------------------")
-		}
 		if answer := jsonStr(result, "answer"); answer != "" {
 			fmt.Printf("%s\n", answer)
 		} else {
 			fmt.Println("Error: Query failed")
 		}
 		os.Exit(1)
-	}
-
-	if debugLogs, ok := result["debug_logs"].([]interface{}); ok && len(debugLogs) > 0 {
-		fmt.Println("--- Debug Logs ---")
-		for _, log := range debugLogs {
-			if logStr, ok := log.(string); ok {
-				fmt.Println(logStr)
-			}
-		}
-		fmt.Println("------------------")
 	}
 
 	if answer := jsonStr(result, "answer"); answer != "" {

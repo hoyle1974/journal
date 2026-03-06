@@ -17,8 +17,9 @@ const (
 type QueryResult = agent.QueryResult
 
 // RunQuery runs a query against the journal using the agentic loop.
+// Debug logs are not collected; use tail.sh or LOG_LEVEL=debug for inspection.
 func RunQuery(ctx context.Context, question, source string) *QueryResult {
-	return RunQueryWithDebug(ctx, question, source, true)
+	return RunQueryWithDebug(ctx, question, source, false)
 }
 
 // RunQueryWithDebug runs a query with optional debug logging.
