@@ -106,14 +106,15 @@ func initLogger(cfg *config.Config) {
 	levelStr := os.Getenv("LOG_LEVEL")
 	var level slog.Level
 	switch levelStr {
-	case "debug", "DEBUG":
-		level = slog.LevelDebug
+	case "info", "INFO":
+		level = slog.LevelInfo
 	case "warn", "WARN":
 		level = slog.LevelWarn
 	case "error", "ERROR":
 		level = slog.LevelError
 	default:
-		level = slog.LevelInfo
+		// Default to debug so calls can be traced and the story of what/why is visible in logs.
+		level = slog.LevelDebug
 	}
 
 	var handler slog.Handler

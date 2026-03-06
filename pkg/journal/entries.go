@@ -9,6 +9,7 @@ import (
 
 	"cloud.google.com/go/firestore"
 	"github.com/jackstrohm/jot/pkg/infra"
+	"github.com/jackstrohm/jot/pkg/utils"
 	"google.golang.org/api/iterator"
 )
 
@@ -52,6 +53,7 @@ func AddEntry(ctx context.Context, content, source string, timestamp *string) (s
 		return "", err
 	}
 
+	infra.LoggerFrom(ctx).Debug("entry written to Firestore", "uuid", entryUUID, "source", source, "content_preview", utils.TruncateString(content, 50))
 	return entryUUID, nil
 }
 

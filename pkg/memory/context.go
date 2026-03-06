@@ -254,6 +254,7 @@ func (b byRelevanceDesc) Swap(i, j int) {
 func GetActiveContexts(ctx context.Context, limit int) ([]KnowledgeNode, []ContextMetadata, error) {
 	ctx, span := infra.StartSpan(ctx, "context.get_active")
 	defer span.End()
+	infra.LoggerFrom(ctx).Debug("get active contexts", "limit", limit, "reason", "for system prompt and context-aware answers")
 
 	client, err := infra.GetFirestoreClient(ctx)
 	if err != nil {

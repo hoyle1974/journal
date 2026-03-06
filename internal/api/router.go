@@ -33,6 +33,7 @@ func Router(s *Server, w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimSuffix(r.URL.Path, "/")
 	method := r.Method
 	span.SetAttributes(map[string]string{"http.method": method, "http.path": path})
+	infra.LoggerFrom(ctx).Debug("request started", "method", method, "path", path, "trace_id", span.TraceID())
 	if !PublicRoutes[path] {
 		if code, msg := CheckAuth(s, r); code != 0 {
 			infra.LogRequest(ctx, method, path, code, time.Since(startTime))

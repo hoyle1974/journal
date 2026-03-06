@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jackstrohm/jot/internal/prompts"
+	"github.com/jackstrohm/jot/pkg/infra"
 	"github.com/jackstrohm/jot/pkg/journal"
 	"github.com/jackstrohm/jot/pkg/utils"
 )
@@ -114,5 +115,7 @@ PROACTIVE ALERTS (Mention these if relevant to the current conversation):
 		knowledgeGapBlock = prompts.FormatKnowledgeGap(utils.WrapAsUserData(strings.Join(gapLines, "\n")))
 	}
 
-	return fmt.Sprintf(prompts.SystemPromptTemplate(), utils.UserDataDelimOpen, utils.UserDataDelimClose, today, currentWeek, lastWeekStr, currentMonth, activeContextsStr, recentContext, recentConversation, proactiveSignals, knowledgeGapBlock, sourceCodeBlock)
+	prompt := fmt.Sprintf(prompts.SystemPromptTemplate(), utils.UserDataDelimOpen, utils.UserDataDelimClose, today, currentWeek, lastWeekStr, currentMonth, activeContextsStr, recentContext, recentConversation, proactiveSignals, knowledgeGapBlock, sourceCodeBlock)
+	infra.LoggerFrom(ctx).Debug("system prompt built", "prompt_len", len(prompt), "reason", "inject date, active contexts, recent history, signals, gap block")
+	return prompt
 }

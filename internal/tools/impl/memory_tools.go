@@ -11,6 +11,7 @@ import (
 	"github.com/jackstrohm/jot/pkg/infra"
 	"github.com/jackstrohm/jot/pkg/journal"
 	"github.com/jackstrohm/jot/pkg/memory"
+	"github.com/jackstrohm/jot/pkg/utils"
 	"github.com/jackstrohm/jot/tools"
 )
 
@@ -65,6 +66,7 @@ func registerKnowledgeTools() {
 				return tools.MissingParam("query")
 			}
 			limit := args.IntBounded("limit", 10, 1, 20)
+			infra.LoggerFrom(ctx).Debug("semantic_search: starting", "query_preview", utils.TruncateString(query, 80), "limit", limit, "reason", "vector+keyword search over knowledge and entries")
 			app := infra.GetApp(ctx)
 			if app == nil || app.Config() == nil {
 				return tools.Fail("Error: no app in context")

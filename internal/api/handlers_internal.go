@@ -12,6 +12,8 @@ import (
 )
 
 func handleProcessEntry(s *Server, w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	infra.LoggerFrom(ctx).Debug("process-entry handler: request received", "method", r.Method)
 	if r.Method != http.MethodPost {
 		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
 		return
@@ -30,17 +32,20 @@ func handleProcessEntry(s *Server, w http.ResponseWriter, r *http.Request) {
 		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "uuid, content, and source are required"})
 		return
 	}
-	ctx := r.Context()
+	infra.LoggerFrom(ctx).Debug("process-entry handler: invoking ProcessEntry", "uuid", data.UUID, "source", data.Source, "content_preview", utils.TruncateString(data.Content, 50))
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 	if err := s.Backend.ProcessEntry(ctx, data.UUID, data.Content, data.Timestamp, data.Source); err != nil {
 		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	infra.LoggerFrom(ctx).Debug("process-entry handler: done", "uuid", data.UUID)
 	WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 func handleSaveQuery(s *Server, w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	infra.LoggerFrom(ctx).Debug("save-query handler: request received", "method", r.Method)
 	if r.Method != http.MethodPost {
 		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
 		return
@@ -59,7 +64,7 @@ func handleSaveQuery(s *Server, w http.ResponseWriter, r *http.Request) {
 		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "question and source are required"})
 		return
 	}
-	ctx := r.Context()
+	infra.LoggerFrom(ctx).Debug("save-query handler: saving to queries collection", "question_preview", utils.TruncateString(data.Question, 60), "is_gap", data.IsGap)
 	if _, err := s.Backend.SaveQuery(ctx, data.Question, data.Answer, data.Source, data.IsGap); err != nil {
 		infra.LoggerFrom(ctx).Error("save-query failed", "error", err)
 		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})

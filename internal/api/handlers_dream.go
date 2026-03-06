@@ -16,6 +16,7 @@ func handleDream(s *Server, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
+	infra.LoggerFrom(ctx).Debug("dream handler: request received", "reason", "nightly consolidation of last 24h into semantic memory")
 	infra.LoggerFrom(ctx).Info("dream started")
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
@@ -57,6 +58,7 @@ func handleJanitor(s *Server, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
+	infra.LoggerFrom(ctx).Debug("janitor handler: request received", "reason", "garbage collect low-significance knowledge not recalled in 30+ days")
 	infra.LoggerFrom(ctx).Info("janitor started")
 	deleted, err := s.Backend.RunJanitor(ctx)
 	if err != nil {
@@ -96,6 +98,7 @@ func handleRollup(s *Server, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
+	infra.LoggerFrom(ctx).Debug("rollup handler: request received", "reason", "weekly and monthly summary rollups")
 	infra.LoggerFrom(ctx).Info("rollup started")
 	weeklyEntries, err := s.Backend.RunWeeklyRollup(ctx)
 	if err != nil {

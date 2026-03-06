@@ -36,11 +36,14 @@ func (ServiceEnv) AddEntryAndEnqueue(ctx context.Context, content, source string
 	app := infra.GetApp(ctx)
 	if app != nil {
 		if err := app.EnqueueTask(ctx, "/internal/process-entry", payload); err != nil {
+			infra.LoggerFrom(ctx).Debug("process-entry enqueue failed, running inline", "entry_uuid", entryUUID, "reason", "Cloud Tasks unavailable; processing in background goroutine")
 			infra.LoggerFrom(ctx).Warn("failed to enqueue process-entry task, running inline", "entry_uuid", entryUUID, "error", err)
 			app.SubmitAsync(func() {
 				bgCtx := infra.WithApp(context.Background(), app)
 				_ = ProcessEntry(bgCtx, entryUUID, content, ts, source)
 			})
+		} else {
+			infra.LoggerFrom(ctx).Debug("process-entry enqueued", "entry_uuid", entryUUID, "reason", "async processing for evaluator, context links, analysis, embedding")
 		}
 	}
 	return entryUUID, nil

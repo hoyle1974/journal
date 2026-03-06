@@ -68,6 +68,7 @@ func RunQueryWithDebug(ctx context.Context, env FOHEnv, question, source string,
 
 	startTime := time.Now()
 	infra.QueriesTotal.Inc()
+	infra.LoggerFrom(ctx).Debug("FOH: query started", "question_preview", utils.TruncateString(question, 80), "source", source, "reason", "user request")
 
 	span.SetAttributes(map[string]string{
 		"question_len": fmt.Sprintf("%d", len(question)),
@@ -98,10 +99,12 @@ func RunQueryWithDebug(ctx context.Context, env FOHEnv, question, source string,
 		}
 	}
 	ctx = withCurrentEntryUUID(ctx, entryUUID)
+	infra.LoggerFrom(ctx).Debug("FOH: user input logged as entry", "entry_uuid", entryUUID, "reason", "input is persisted before LLM runs")
 
 	logDebug("[start] Question: %s", question)
 
 	systemPrompt := env.BuildSystemPrompt(ctx)
+	infra.LoggerFrom(ctx).Debug("FOH: system prompt built", "prompt_len", len(systemPrompt), "reason", "inject date, contexts, recent history")
 	logDebug("[prompt] %s", systemPrompt)
 
 	toolDefs := tools.GetDefinitions()
@@ -117,6 +120,7 @@ func RunQueryWithDebug(ctx context.Context, env FOHEnv, question, source string,
 		}
 	}
 	logDebug("[init] Chat session created with %d tools", len(toolDefs))
+	infra.LoggerFrom(ctx).Debug("FOH: sending question to LLM", "tool_count", len(toolDefs), "reason", "first turn")
 
 	iteration := 0
 	emptyContentRetries := 0
@@ -140,10 +144,12 @@ func RunQueryWithDebug(ctx context.Context, env FOHEnv, question, source string,
 	iteration++
 	infra.GeminiCallsTotal.Inc()
 	logDebug("[iter %d] Sent question to LLM", iteration)
+	infra.LoggerFrom(ctx).Debug("FOH: iteration 1 response received", "reason", "initial LLM turn")
 
 	for iteration < MaxIterations {
 		hasCalls := infra.HasFunctionCalls(resp)
 		logDebug("[iter %d] LLM response: has_function_calls=%v", iteration, hasCalls)
+		infra.LoggerFrom(ctx).Debug("FOH: iteration decision", "iter", iteration, "has_function_calls", hasCalls, "reason", "decompose: LLM either answers or calls tools")
 
 		if !hasCalls {
 			text := infra.ExtractTextFromResponse(resp)
@@ -151,6 +157,7 @@ func RunQueryWithDebug(ctx context.Context, env FOHEnv, question, source string,
 				answer := strings.TrimSpace(text)
 
 				if pass, reason, err := runReflectionCheck(ctx, answer, question); err == nil && !pass {
+					infra.LoggerFrom(ctx).Debug("FOH: reflection check failed", "reason", reason, "action", "revising answer against semantic memory")
 					logDebug("[reflect] failed: %s", reason)
 					revised := runReflectionRevision(ctx, session, question, answer, reason)
 					if revised != "" {
@@ -159,6 +166,7 @@ func RunQueryWithDebug(ctx context.Context, env FOHEnv, question, source string,
 					}
 				}
 
+				infra.LoggerFrom(ctx).Debug("FOH: returning final answer", "iterations", iteration, "tool_calls", len(toolCalls), "reason", "LLM produced text and no tool calls")
 				infra.LoggerFrom(ctx).Info("query completed",
 					"iterations", iteration,
 					"tool_calls", len(toolCalls),
@@ -240,15 +248,19 @@ func RunQueryWithDebug(ctx context.Context, env FOHEnv, question, source string,
 			}
 		}
 
+		toolNames := make([]string, 0, len(functionCalls))
 		var sigParts []string
 		for _, fc := range functionCalls {
+			toolNames = append(toolNames, fc.Name)
 			argsJSON, _ := json.Marshal(fc.Args)
 			sigParts = append(sigParts, fmt.Sprintf("%s:%s", fc.Name, string(argsJSON)))
 			logDebug("[iter %d] tool_call: %s(%s)", iteration, fc.Name, string(argsJSON))
 		}
+		infra.LoggerFrom(ctx).Debug("FOH: executing tools", "iter", iteration, "tools", toolNames, "reason", "execute: run tools in parallel then send results back to LLM")
 		currentSignature := strings.Join(sigParts, "|")
 
 		if currentSignature == lastToolCallSignature && lastToolCallSignature != "" {
+			infra.LoggerFrom(ctx).Debug("FOH: breaking loop", "reason", "same tool call signature repeated; forcing conclusion")
 			logDebug("[warning] Detected tool call loop, forcing conclusion")
 			infra.LoggerFrom(ctx).Warn("detected tool call loop", "signature", utils.TruncateString(currentSignature, 100))
 			break
@@ -391,9 +403,11 @@ func RunQueryWithDebug(ctx context.Context, env FOHEnv, question, source string,
 		iteration++
 		infra.GeminiCallsTotal.Inc()
 		session.TrimHistory(MaxMessagePairs)
+		infra.LoggerFrom(ctx).Debug("FOH: tool results sent to LLM", "iter", iteration, "reason", "reflect: next turn may answer or call more tools")
 	}
 
 	logDebug("[warning] Reached max iterations (%d), forcing conclusion", MaxIterations)
+	infra.LoggerFrom(ctx).Debug("FOH: forcing conclusion", "iterations", MaxIterations, "reason", "max iterations reached; asking LLM for best answer so far")
 	infra.LoggerFrom(ctx).Warn("query reached max iterations", "max", MaxIterations)
 
 	resp, err = session.SendMessage(ctx, genai.Text("Please provide your best answer based on the information gathered so far."))
@@ -415,6 +429,7 @@ func RunQueryWithDebug(ctx context.Context, env FOHEnv, question, source string,
 		if !strings.HasPrefix(answer, "Error:") {
 			_ = env.EnqueueSaveQuery(ctx, question, answer, source, knowledgeGapDetected)
 		}
+		infra.LoggerFrom(ctx).Debug("FOH: forced conclusion returned", "iterations", iteration, "answer_len", len(answer))
 		span.SetAttributes(map[string]string{
 			"iterations":        fmt.Sprintf("%d", iteration),
 			"forced_conclusion": "true",

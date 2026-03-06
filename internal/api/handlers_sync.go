@@ -310,6 +310,7 @@ func releaseSyncLock(ctx context.Context, backend Backend) {
 func handleSync(s *Server, w http.ResponseWriter, r *http.Request) {
 	startTime := time.Now()
 	ctx := r.Context()
+	infra.LoggerFrom(ctx).Debug("sync handler: request received", "reason", "process Google Doc entries, questions, actions")
 	ctx = s.Backend.WithSyncInProgress(ctx)
 
 	ctx, span := infra.StartSpan(ctx, "sync.gdoc")

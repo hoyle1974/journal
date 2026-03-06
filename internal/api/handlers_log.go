@@ -12,6 +12,7 @@ import (
 
 func handleLog(s *Server, w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	infra.LoggerFrom(ctx).Debug("log handler: request received", "method", r.Method)
 	if r.Method != http.MethodPost {
 		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
 		return
@@ -35,6 +36,7 @@ func handleLog(s *Server, w http.ResponseWriter, r *http.Request) {
 		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "content is required"})
 		return
 	}
+	infra.LoggerFrom(ctx).Debug("log handler: adding entry", "source", source, "content_preview", utils.TruncateString(content, 60))
 	infra.EntriesTotal.Inc()
 	entryUUID, err := s.Backend.AddEntry(ctx, content, source, data.Timestamp)
 	if err != nil {
@@ -44,10 +46,13 @@ func handleLog(s *Server, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	infra.LoggerFrom(ctx).Info("entry logged", "uuid", entryUUID, "source", source, "content", utils.TruncateString(content, 50))
+	infra.LoggerFrom(ctx).Debug("log handler: done", "uuid", entryUUID, "reason", "entry saved to Firestore")
 	WriteJSON(w, http.StatusOK, map[string]interface{}{"success": true, "uuid": entryUUID, "message": "Entry logged successfully"})
 }
 
 func handleQuery(s *Server, w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	infra.LoggerFrom(ctx).Debug("query handler: request received", "method", r.Method)
 	if r.Method != http.MethodPost {
 		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
 		return
@@ -69,13 +74,15 @@ func handleQuery(s *Server, w http.ResponseWriter, r *http.Request) {
 		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "question is required"})
 		return
 	}
-	ctx := r.Context()
 	infra.LoggerFrom(ctx).Info("query", "question", utils.TruncateString(question, 80), "source", source)
+	infra.LoggerFrom(ctx).Debug("query handler: invoking FOH agent", "question_preview", utils.TruncateString(question, 100))
 	result := s.Backend.RunQuery(ctx, question, source)
 	if result.Error {
 		infra.LoggerFrom(ctx).Error("query error", "answer", result.Answer)
+		infra.LoggerFrom(ctx).Debug("query handler: done with error", "iterations", result.Iterations, "tool_calls", len(result.ToolCalls))
 	} else {
 		infra.LoggerFrom(ctx).Info("query done", "answer", utils.TruncateString(result.Answer, 120))
+		infra.LoggerFrom(ctx).Debug("query handler: done successfully", "iterations", result.Iterations, "tool_calls", len(result.ToolCalls), "forced_conclusion", result.ForcedConclusion)
 	}
 	WriteJSON(w, http.StatusOK, result)
 }
@@ -99,6 +106,7 @@ func handlePlan(s *Server, w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	infra.LoggerFrom(ctx).Info("plan started", "goal", utils.TruncateString(goal, 60))
+	infra.LoggerFrom(ctx).Debug("plan handler: invoking CreateAndSavePlan", "goal_preview", utils.TruncateString(goal, 80))
 	result, err := s.Backend.CreateAndSavePlan(ctx, goal)
 	if err != nil {
 		infra.ErrorsTotal.Inc()
