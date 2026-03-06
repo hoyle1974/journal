@@ -164,9 +164,10 @@ var specialistSystemPrompts = map[Domain]string{
 
 // EvolutionAuditOutput is the Cognitive Engineer's nightly analysis.
 type EvolutionAuditOutput struct {
-	Summary  string   `json:"summary"`
-	Facts    []string `json:"facts"`
-	Entities []string `json:"entities"`
+	Summary           string   `json:"summary"`
+	Facts             []string `json:"facts"`
+	Entities          []string `json:"entities"`
+	EngineerQuestions []string `json:"engineer_questions"`
 }
 
 // RunEvolutionAudit runs the Cognitive Engineer on recent queries.
@@ -188,9 +189,10 @@ func RunEvolutionAudit(ctx context.Context, queriesText, journalSummary string) 
 	model.ResponseSchema = &genai.Schema{
 		Type: genai.TypeObject,
 		Properties: map[string]*genai.Schema{
-			"summary":  {Type: genai.TypeString, Description: "Architectural health check: 1-3 sentences on overall system friction."},
-			"facts":    {Type: genai.TypeArray, Items: &genai.Schema{Type: genai.TypeString}, Description: "Specific tool or knowledge gaps observed."},
-			"entities": {Type: genai.TypeArray, Items: &genai.Schema{Type: genai.TypeString}, Description: "Proposals for new tools or code changes (Go-style)."},
+			"summary":            {Type: genai.TypeString, Description: "Architectural health check: 1-3 sentences on overall system friction."},
+			"facts":              {Type: genai.TypeArray, Items: &genai.Schema{Type: genai.TypeString}, Description: "Specific tool or knowledge gaps observed."},
+			"entities":           {Type: genai.TypeArray, Items: &genai.Schema{Type: genai.TypeString}, Description: "Proposals for new tools or code changes (Go-style)."},
+			"engineer_questions": {Type: genai.TypeArray, Items: &genai.Schema{Type: genai.TypeString}, Description: "Direct, actionable questions to ask the system engineer about building new tools or filling system capability gaps."},
 		},
 	}
 	systemPrompt := specialistSystemPrompts[DomainEvolution] + prompts.DataSafety()
@@ -212,7 +214,7 @@ func RunEvolutionAudit(ctx context.Context, queriesText, journalSummary string) 
 	}
 
 	text := infra.ExtractTextFromResponse(resp)
-	out, parseErr := llmjson.ParseLLMResponse[EvolutionAuditOutput](text, []string{"summary", "facts", "entities"})
+	out, parseErr := llmjson.ParseLLMResponse[EvolutionAuditOutput](text, []string{"summary", "facts", "entities", "engineer_questions"})
 	if out == nil {
 		if parseErr == nil {
 			parseErr = errors.New("parse failed")
@@ -220,7 +222,7 @@ func RunEvolutionAudit(ctx context.Context, queriesText, journalSummary string) 
 		infra.LoggerFrom(ctx).Warn("evolution_audit parse failed", "error", parseErr, "raw", utils.TruncateString(text, 400))
 		return nil, fmt.Errorf("evolution audit JSON parse failed: %w", parseErr)
 	}
-	infra.LoggerFrom(ctx).Info("evolution_audit done", "summary_len", len(out.Summary), "facts", len(out.Facts), "entities", len(out.Entities))
+	infra.LoggerFrom(ctx).Info("evolution_audit done", "summary_len", len(out.Summary), "facts", len(out.Facts), "entities", len(out.Entities), "engineer_questions", len(out.EngineerQuestions))
 	return out, nil
 }
 

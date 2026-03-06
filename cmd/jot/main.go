@@ -209,6 +209,66 @@ var api = &apiClient{}
 // COMMANDS
 // =============================================================================
 
+func cmdApplyTool() {
+	fmt.Println("Fetching drafted tools...")
+	result, _, err := api.Do("GET", "/tools/drafts", nil, RequestTimeout)
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		os.Exit(1)
+	}
+	draftsRaw, ok := result["drafts"].([]interface{})
+	if !ok || len(draftsRaw) == 0 {
+		fmt.Println("No pending tool drafts found.")
+		return
+	}
+	fmt.Printf("Found %d drafted tools.\n", len(draftsRaw))
+	reader := bufio.NewReader(os.Stdin)
+	for i, dRaw := range draftsRaw {
+		draft, ok := dRaw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		content := jsonStr(draft, "content")
+		uuid := jsonStr(draft, "uuid")
+		preview := content
+		if len([]rune(preview)) > 150 {
+			preview = string([]rune(preview)[:150]) + "..."
+		}
+		fmt.Printf("\n--- Draft %d ---\n%s\n------------------\n", i+1, preview)
+		fmt.Print("Apply this tool? (y/n/q): ")
+		ans, _ := reader.ReadString('\n')
+		ans = strings.TrimSpace(strings.ToLower(ans))
+		if ans == "q" {
+			return
+		}
+		if ans != "y" {
+			continue
+		}
+		code := content
+		if strings.Contains(content, "```go") {
+			parts := strings.Split(content, "```go")
+			if len(parts) > 1 {
+				code = strings.Split(parts[1], "```")[0]
+			}
+		}
+		code = strings.TrimSpace(code)
+		fmt.Print("Enter filename to save (e.g. gmail_tools.go): ")
+		filename, _ := reader.ReadString('\n')
+		filename = strings.TrimSpace(filename)
+		if filename == "" {
+			fmt.Println("Skipping.")
+			continue
+		}
+		path := fmt.Sprintf("internal/tools/impl/%s", filename)
+		if err := os.WriteFile(path, []byte(code), 0644); err != nil {
+			fmt.Printf("Failed to write file: %v\n", err)
+			continue
+		}
+		api.DoOrExit("POST", "/tools/drafts/apply", map[string]string{"uuid": uuid}, RequestTimeout)
+		fmt.Printf("Success! Wrote %s. Don't forget to review it, and make sure init() registers it!\n", path)
+	}
+}
+
 func cmdLog(content string) {
 	source := fmt.Sprintf("cli:%s", MachineName)
 	api.DoOrExit("POST", "/log", map[string]string{"content": content, "source": source}, RequestTimeout)
@@ -617,6 +677,7 @@ Commands (optional):
   edit [limit]         Interactive entry editor
   entries [limit]      List recent entries
   dream, janitor       Run Dreamer (daily) or Janitor (weekly) cron
+  apply-tool           Fetch drafted tools from cloud, apply to internal/tools/impl/
   help [topic]         Show help
 
 Run 'jot help <topic>' for detailed help.
@@ -712,6 +773,9 @@ func main() {
 			topic = args[1]
 		}
 		cmdHelp(topic)
+
+	case "apply-tool":
+		cmdApplyTool()
 
 	default:
 		maybePromptPendingQuestions()

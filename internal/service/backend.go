@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 
 	"cloud.google.com/go/firestore"
@@ -125,8 +126,47 @@ func (b *APIBackend) RunMonthlyRollup(ctx context.Context) (int, error) {
 	return RunMonthlyRollup(ctx)
 }
 
+func (b *APIBackend) GetDraftTools(ctx context.Context) ([]memory.KnowledgeNode, error) {
+	return memory.GetDraftTools(ctx)
+}
+
+func (b *APIBackend) MarkToolDraftApplied(ctx context.Context, uuid string) error {
+	return memory.MarkToolDraftApplied(ctx, uuid)
+}
+
 func (b *APIBackend) ResolvePendingQuestion(ctx context.Context, id, answer string) error {
-	return memory.ResolvePendingQuestion(ctx, id, answer)
+	q, err := memory.GetPendingQuestion(ctx, id)
+	if err != nil {
+		infra.LoggerFrom(ctx).Warn("could not fetch pending question for resolution side-effects", "error", err)
+	}
+
+	if err := memory.ResolvePendingQuestion(ctx, id, answer); err != nil {
+		return err
+	}
+
+	if q != nil && q.Kind == "tool_request" {
+		app := infra.GetApp(ctx)
+		if app != nil {
+			b.SubmitAsync(ctx, func() {
+				bgCtx := infra.WithApp(context.Background(), app)
+				code, genErr := agent.GenerateToolCode(bgCtx, ServiceEnv{}, q.Question, answer)
+				if genErr != nil {
+					infra.LoggerFrom(bgCtx).Error("tool code generation failed", "error", genErr)
+					return
+				}
+				if code == "REJECTED" {
+					infra.LoggerFrom(bgCtx).Info("tool generation rejected by user")
+					return
+				}
+				meta := fmt.Sprintf(`{"status":"draft", "tool_request_id":"%s"}`, id)
+				title := fmt.Sprintf("Drafted Code for Tool Request: %s\n\n```go\n%s\n```", q.Question, code)
+				_, _ = memory.UpsertKnowledge(bgCtx, title, "tool_code", meta, nil)
+				infra.LoggerFrom(bgCtx).Info("tool code generated and saved to knowledge graph")
+			})
+		}
+	}
+
+	return nil
 }
 
 func (b *APIBackend) ValidateTwilioSignature(r *http.Request, webhookURL string) bool {

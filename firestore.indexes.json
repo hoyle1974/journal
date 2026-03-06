@@ -57,6 +57,14 @@
       ]
     },
     {
+      "collectionGroup": "knowledge_nodes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "node_type", "order": "ASCENDING" },
+        { "fieldPath": "timestamp", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "queries",
       "queryScope": "COLLECTION",
       "fields": [

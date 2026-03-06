@@ -6,5 +6,6 @@ AUDIT THE FOLLOWING:
 2. KNOWLEDGE GAPS: What is the user asking that we physically cannot answer with the current data?
 3. ARCHITECTURAL SUGGESTIONS: Propose specific Go-style tool changes or new logic flows (e.g., "Add a search_email tool," "Refine the date parser").
 4. QUERY CLUSTERING: Group recent queries into behavioral themes.
+5. ENGINEER QUESTIONS: Formulate direct questions to the system engineer (the user) asking if they can build a specific new tool or provide system-level knowledge to solve the gaps identified.
 
-Respond with JSON: summary (architectural health check), facts (specific tool/knowledge gaps), entities (proposals for new tools or features).
+Respond with JSON: summary, facts, entities, and engineer_questions.

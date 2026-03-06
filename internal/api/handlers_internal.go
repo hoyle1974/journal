@@ -68,3 +68,35 @@ func handleSaveQuery(s *Server, w http.ResponseWriter, r *http.Request) {
 	infra.LoggerFrom(ctx).Info("save-query", "question", utils.TruncateString(data.Question, 50))
 	WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
+
+func handleDraftTools(s *Server, w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
+		return
+	}
+	drafts, err := s.Backend.GetDraftTools(r.Context())
+	if err != nil {
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	WriteJSON(w, http.StatusOK, map[string]interface{}{"drafts": drafts})
+}
+
+func handleDraftToolApply(s *Server, w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
+		return
+	}
+	var data struct {
+		UUID string `json:"uuid"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON"})
+		return
+	}
+	if err := s.Backend.MarkToolDraftApplied(r.Context(), data.UUID); err != nil {
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}

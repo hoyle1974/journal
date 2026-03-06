@@ -289,6 +289,62 @@ func AppendJournalEntryIDsToNode(ctx context.Context, nodeUUID string, entryIDs 
 	return err
 }
 
+// GetDraftTools returns unapplied tool_code nodes (status draft), newest first.
+func GetDraftTools(ctx context.Context) ([]KnowledgeNode, error) {
+	client, err := infra.GetFirestoreClient(ctx)
+	if err != nil {
+		return nil, err
+	}
+	query := client.Collection(KnowledgeCollection).
+		Where("node_type", "==", "tool_code").
+		OrderBy("timestamp", firestore.Desc).
+		Limit(10)
+	nodes, err := infra.QueryDocuments(ctx, query, func(doc *firestore.DocumentSnapshot) (KnowledgeNode, error) {
+		data := doc.Data()
+		metaStr := infra.GetStringField(data, "metadata")
+		if !strings.Contains(metaStr, `"status":"draft"`) {
+			return KnowledgeNode{}, fmt.Errorf("skip: not draft")
+		}
+		return KnowledgeNode{
+			UUID:      doc.Ref.ID,
+			Content:   infra.GetStringField(data, "content"),
+			NodeType:  infra.GetStringField(data, "node_type"),
+			Metadata:  metaStr,
+			Timestamp: infra.GetStringField(data, "timestamp"),
+		}, nil
+	})
+	if err != nil {
+		return nil, infra.WrapFirestoreIndexError(err)
+	}
+	return nodes, nil
+}
+
+// MarkToolDraftApplied updates the metadata status to "applied" for the given tool_code node.
+func MarkToolDraftApplied(ctx context.Context, uuid string) error {
+	client, err := infra.GetFirestoreClient(ctx)
+	if err != nil {
+		return err
+	}
+	doc, err := client.Collection(KnowledgeCollection).Doc(uuid).Get(ctx)
+	if err != nil {
+		return err
+	}
+	metaStr := infra.GetStringField(doc.Data(), "metadata")
+	var meta map[string]interface{}
+	if metaStr != "" {
+		_ = json.Unmarshal([]byte(metaStr), &meta)
+	}
+	if meta == nil {
+		meta = make(map[string]interface{})
+	}
+	meta["status"] = "applied"
+	newMeta, _ := json.Marshal(meta)
+	_, err = client.Collection(KnowledgeCollection).Doc(uuid).Update(ctx, []firestore.Update{
+		{Path: "metadata", Value: string(newMeta)},
+	})
+	return err
+}
+
 // QuerySimilarNodes performs a KNN vector search in Firestore.
 func QuerySimilarNodes(ctx context.Context, queryVector []float32, limit int) ([]KnowledgeNode, error) {
 	ctx, span := infra.StartSpan(ctx, "knowledge.query_similar")

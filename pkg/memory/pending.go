@@ -58,6 +58,24 @@ func InsertPendingQuestions(ctx context.Context, questions []PendingQuestion) er
 	return nil
 }
 
+// GetPendingQuestion fetches a single pending question by its UUID.
+func GetPendingQuestion(ctx context.Context, uuid string) (*PendingQuestion, error) {
+	client, err := infra.GetFirestoreClient(ctx)
+	if err != nil {
+		return nil, err
+	}
+	doc, err := client.Collection(PendingQuestionsCollection).Doc(uuid).Get(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var q PendingQuestion
+	if err := doc.DataTo(&q); err != nil {
+		return nil, err
+	}
+	q.UUID = doc.Ref.ID
+	return &q, nil
+}
+
 // GetUnresolvedPendingQuestions returns pending questions that have not been resolved, newest first.
 func GetUnresolvedPendingQuestions(ctx context.Context, limit int) ([]PendingQuestion, error) {
 	client, err := infra.GetFirestoreClient(ctx)

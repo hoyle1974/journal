@@ -206,6 +206,20 @@ func RunEvolutionSynthesis(ctx context.Context, journalSummary string) error {
 		return err
 	}
 
+	if len(audit.EngineerQuestions) > 0 {
+		var pqs []memory.PendingQuestion
+		for _, q := range audit.EngineerQuestions {
+			pqs = append(pqs, memory.PendingQuestion{
+				Question: q,
+				Kind:     "tool_request",
+				Context:  "Cognitive Engineer identified a system limitation based on recent queries.",
+			})
+		}
+		if err := memory.InsertPendingQuestions(ctx, pqs); err != nil {
+			infra.LoggerFrom(ctx).Warn("failed to insert engineer questions", "error", err)
+		}
+	}
+
 	node, _, err := memory.FindContextByName(ctx, "system_evolution")
 	if err != nil || node == nil {
 		return fmt.Errorf("system_evolution context not found: %w", err)

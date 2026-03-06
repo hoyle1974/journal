@@ -91,6 +91,10 @@ func Router(s *Server, w http.ResponseWriter, r *http.Request) {
 		handleDecayContexts(s, rw, reqWithCtx)
 	case path == "/backfill-embeddings":
 		handleBackfillEmbeddings(s, rw, reqWithCtx)
+	case path == "/tools/drafts":
+		handleDraftTools(s, rw, reqWithCtx)
+	case path == "/tools/drafts/apply":
+		handleDraftToolApply(s, rw, reqWithCtx)
 	case path == "/internal/process-entry":
 		handleProcessEntry(s, rw, reqWithCtx)
 	case path == "/internal/save-query":
@@ -103,6 +107,7 @@ func Router(s *Server, w http.ResponseWriter, r *http.Request) {
 				"POST /log", "POST /query", "POST /plan", "GET  /entries", "POST /sync", "POST /dream",
 				"POST /janitor", "POST /rollup", "POST /webhook", "POST /sms", "POST /decay-contexts",
 				"POST /backfill-embeddings", "GET  /pending-questions", "POST /pending-questions/:id/resolve",
+				"GET  /tools/drafts", "POST /tools/drafts/apply",
 			},
 		})
 	}
