@@ -16,6 +16,11 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+// ProactiveAlertSignificanceThreshold is the minimum significance for an entry to be
+// considered for a proactive alert (e.g. selfmodel thought). Logged so you can see
+// how close low-scoring entries came (e.g. "I feel dizzy" at 0.2 → tune evaluator for health).
+const ProactiveAlertSignificanceThreshold = 0.8
+
 // EvaluatorExtract holds the result of running the evaluator LLM on an entry (no storage).
 type EvaluatorExtract struct {
 	Significance float64
@@ -122,7 +127,11 @@ func RunEvaluator(ctx context.Context, env SpecialistsEnv, content, entryUUID, t
 			factStored = true
 		}
 	}
-	infra.LoggerFrom(ctx).Info("evaluator", "entry_uuid", entryUUID, "significance", parsed.Significance, "domain", parsed.Domain, "fact_stored", factStored)
+	status := "IGNORE_PROACTIVE"
+	if parsed.Significance >= ProactiveAlertSignificanceThreshold {
+		status = "ALERT"
+	}
+	infra.LoggerFrom(ctx).Info("evaluator", "entry_uuid", entryUUID, "significance", parsed.Significance, "threshold_for_alert", ProactiveAlertSignificanceThreshold, "status", status, "domain", parsed.Domain, "fact_stored", factStored)
 	_ = timestamp
 }
 

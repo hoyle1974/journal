@@ -12,6 +12,7 @@ import (
 	"github.com/jackstrohm/jot/pkg/infra"
 	"github.com/jackstrohm/jot/pkg/journal"
 	"github.com/jackstrohm/jot/pkg/memory"
+	"github.com/jackstrohm/jot/pkg/utils"
 )
 
 // ConfigGetter returns the current config (allows tests to override).
@@ -36,23 +37,63 @@ func (b *APIBackend) cfg() *config.Config {
 }
 
 func (b *APIBackend) AddEntry(ctx context.Context, content, source string, timestamp *string) (string, error) {
-	return (ServiceEnv{}).AddEntryAndEnqueue(ctx, content, source, timestamp)
+	infra.LoggerFrom(ctx).Info("function call", "fn", "AddEntry", "source", source, "content_length", len(content))
+	entryUUID, err := (ServiceEnv{}).AddEntryAndEnqueue(ctx, content, source, timestamp)
+	if err != nil {
+		infra.LoggerFrom(ctx).Error("function result", "fn", "AddEntry", "error", err.Error())
+		return "", err
+	}
+	infra.LoggerFrom(ctx).Info("function result", "fn", "AddEntry", "uuid", entryUUID)
+	return entryUUID, nil
 }
 
 func (b *APIBackend) RunQuery(ctx context.Context, question, source string) *agent.QueryResult {
-	return RunQuery(ctx, question, source)
+	infra.LoggerFrom(ctx).Info("function call", "fn", "RunQuery", "source", source, "question_preview", utils.TruncateString(question, 80))
+	result := RunQuery(ctx, question, source)
+	infra.LoggerFrom(ctx).Info("function result", "fn", "RunQuery", "error", result.Error, "iterations", result.Iterations, "tool_call_count", len(result.ToolCalls), "answer_preview", utils.TruncateString(result.Answer, 100))
+	return result
 }
 
 func (b *APIBackend) CreateAndSavePlan(ctx context.Context, goal string) (string, error) {
-	return CreateAndSavePlan(ctx, goal)
+	infra.LoggerFrom(ctx).Info("function call", "fn", "CreateAndSavePlan", "goal_preview", utils.TruncateString(goal, 80))
+	plan, err := CreateAndSavePlan(ctx, goal)
+	if err != nil {
+		infra.LoggerFrom(ctx).Error("function result", "fn", "CreateAndSavePlan", "error", err.Error())
+		return "", err
+	}
+	infra.LoggerFrom(ctx).Info("function result", "fn", "CreateAndSavePlan", "plan_length", len(plan))
+	return plan, nil
 }
 
-func (b *APIBackend) ProcessEntry(ctx context.Context, entryUUID, content, timestamp, source string) error {
-	return ProcessEntry(ctx, entryUUID, content, timestamp, source)
+func (b *APIBackend) ProcessEntry(ctx context.Context, entryUUID, content, timestamp, source string) (*infra.LatencyBreakdown, error) {
+	attrs := []any{"fn", "ProcessEntry", "uuid", entryUUID, "source", source, "content_length", len(content)}
+	if corr := infra.CorrelationFromContext(ctx); corr != nil {
+		if corr.TaskID != "" {
+			attrs = append(attrs, "task_id", corr.TaskID)
+		}
+		if corr.ParentTraceID != "" {
+			attrs = append(attrs, "parent_trace_id", corr.ParentTraceID)
+		}
+	}
+	infra.LoggerFrom(ctx).Info("function call", attrs...)
+	breakdown, err := ProcessEntry(ctx, entryUUID, content, timestamp, source)
+	if err != nil {
+		infra.LoggerFrom(ctx).Error("function result", "fn", "ProcessEntry", "uuid", entryUUID, "error", err.Error())
+		return breakdown, err
+	}
+	infra.LoggerFrom(ctx).Info("function result", "fn", "ProcessEntry", "uuid", entryUUID)
+	return breakdown, nil
 }
 
 func (b *APIBackend) SaveQuery(ctx context.Context, question, answer, source string, isGap bool) (string, error) {
-	return journal.SaveQuery(ctx, question, answer, source, isGap)
+	infra.LoggerFrom(ctx).Info("function call", "fn", "SaveQuery", "source", source, "is_gap", isGap, "question_preview", utils.TruncateString(question, 60))
+	id, err := journal.SaveQuery(ctx, question, answer, source, isGap)
+	if err != nil {
+		infra.LoggerFrom(ctx).Error("function result", "fn", "SaveQuery", "error", err.Error())
+		return "", err
+	}
+	infra.LoggerFrom(ctx).Info("function result", "fn", "SaveQuery", "id", id)
+	return id, nil
 }
 
 func (b *APIBackend) InitializePermanentContexts(ctx context.Context) error {
@@ -60,48 +101,113 @@ func (b *APIBackend) InitializePermanentContexts(ctx context.Context) error {
 }
 
 func (b *APIBackend) DecayContexts(ctx context.Context) (int, error) {
-	return memory.DecayContexts(ctx)
+	infra.LoggerFrom(ctx).Info("function call", "fn", "DecayContexts")
+	count, err := memory.DecayContexts(ctx)
+	if err != nil {
+		infra.LoggerFrom(ctx).Error("function result", "fn", "DecayContexts", "error", err.Error())
+		return 0, err
+	}
+	infra.LoggerFrom(ctx).Info("function result", "fn", "DecayContexts", "decayed_count", count)
+	return count, nil
 }
 
 func (b *APIBackend) BackfillEntryEmbeddings(ctx context.Context, limit int) (int, error) {
-	return journal.BackfillEntryEmbeddings(ctx, limit)
+	infra.LoggerFrom(ctx).Info("function call", "fn", "BackfillEntryEmbeddings", "limit", limit)
+	processed, err := journal.BackfillEntryEmbeddings(ctx, limit)
+	if err != nil {
+		infra.LoggerFrom(ctx).Error("function result", "fn", "BackfillEntryEmbeddings", "error", err.Error())
+		return 0, err
+	}
+	infra.LoggerFrom(ctx).Info("function result", "fn", "BackfillEntryEmbeddings", "processed", processed)
+	return processed, nil
 }
 
 func (b *APIBackend) GetEntry(ctx context.Context, uuid string) (*journal.Entry, error) {
-	return journal.GetEntry(ctx, uuid)
+	infra.LoggerFrom(ctx).Info("function call", "fn", "GetEntry", "uuid", uuid)
+	entry, err := journal.GetEntry(ctx, uuid)
+	if err != nil {
+		infra.LoggerFrom(ctx).Warn("function result", "fn", "GetEntry", "uuid", uuid, "error", err.Error())
+		return nil, err
+	}
+	infra.LoggerFrom(ctx).Info("function result", "fn", "GetEntry", "uuid", uuid, "found", true)
+	return entry, nil
 }
 
 func (b *APIBackend) GetEntries(ctx context.Context, limit int) ([]journal.Entry, error) {
-	return journal.GetEntries(ctx, limit)
+	infra.LoggerFrom(ctx).Info("function call", "fn", "GetEntries", "limit", limit)
+	entries, err := journal.GetEntries(ctx, limit)
+	if err != nil {
+		infra.LoggerFrom(ctx).Error("function result", "fn", "GetEntries", "error", err.Error())
+		return nil, err
+	}
+	infra.LoggerFrom(ctx).Info("function result", "fn", "GetEntries", "count", len(entries))
+	return entries, nil
 }
 
 func (b *APIBackend) UpdateEntry(ctx context.Context, uuid, content string) error {
-	return journal.UpdateEntry(ctx, uuid, content)
+	infra.LoggerFrom(ctx).Info("function call", "fn", "UpdateEntry", "uuid", uuid, "content_length", len(content))
+	err := journal.UpdateEntry(ctx, uuid, content)
+	if err != nil {
+		infra.LoggerFrom(ctx).Error("function result", "fn", "UpdateEntry", "uuid", uuid, "error", err.Error())
+		return err
+	}
+	infra.LoggerFrom(ctx).Info("function result", "fn", "UpdateEntry", "uuid", uuid)
+	return nil
 }
 
 func (b *APIBackend) DeleteEntries(ctx context.Context, uuids []string) error {
-	return journal.DeleteEntries(ctx, uuids)
+	infra.LoggerFrom(ctx).Info("function call", "fn", "DeleteEntries", "uuid_count", len(uuids))
+	err := journal.DeleteEntries(ctx, uuids)
+	if err != nil {
+		infra.LoggerFrom(ctx).Error("function result", "fn", "DeleteEntries", "error", err.Error())
+		return err
+	}
+	infra.LoggerFrom(ctx).Info("function result", "fn", "DeleteEntries", "deleted", len(uuids))
+	return nil
 }
 
 func (b *APIBackend) RunDreamer(ctx context.Context) (*agent.DreamerResult, error) {
-	return RunDreamer(ctx)
+	infra.LoggerFrom(ctx).Info("function call", "fn", "RunDreamer")
+	result, err := RunDreamer(ctx)
+	if err != nil {
+		infra.LoggerFrom(ctx).Error("function result", "fn", "RunDreamer", "error", err.Error())
+		return nil, err
+	}
+	infra.LoggerFrom(ctx).Info("function result", "fn", "RunDreamer", "entries_processed", result.EntriesProcessed, "facts_extracted", result.FactsExtracted, "facts_written", result.FactsWritten)
+	return result, nil
 }
 
 func (b *APIBackend) RunPulseAudit(ctx context.Context) (*api.PulseResult, error) {
+	infra.LoggerFrom(ctx).Info("function call", "fn", "RunPulseAudit")
 	r, err := RunPulseAudit(ctx)
 	if err != nil || r == nil {
+		if err != nil {
+			infra.LoggerFrom(ctx).Warn("function result", "fn", "RunPulseAudit", "error", err.Error())
+		} else {
+			infra.LoggerFrom(ctx).Warn("function result", "fn", "RunPulseAudit", "result", "nil")
+		}
 		return nil, err
 	}
+	infra.LoggerFrom(ctx).Info("function result", "fn", "RunPulseAudit", "signals", r.Signals, "stale_nodes", len(r.StaleNodes))
 	return &api.PulseResult{StaleNodes: r.StaleNodes, Signals: r.Signals}, nil
 }
 
 func (b *APIBackend) RunJanitor(ctx context.Context) (int, error) {
-	return RunJanitor(ctx)
+	infra.LoggerFrom(ctx).Info("function call", "fn", "RunJanitor")
+	deleted, err := RunJanitor(ctx)
+	if err != nil {
+		infra.LoggerFrom(ctx).Error("function result", "fn", "RunJanitor", "error", err.Error())
+		return 0, err
+	}
+	infra.LoggerFrom(ctx).Info("function result", "fn", "RunJanitor", "deleted", deleted)
+	return deleted, nil
 }
 
 func (b *APIBackend) GetUnresolvedPendingQuestions(ctx context.Context, limit int) ([]api.PendingQuestion, error) {
+	infra.LoggerFrom(ctx).Info("function call", "fn", "GetUnresolvedPendingQuestions", "limit", limit)
 	qs, err := memory.GetUnresolvedPendingQuestions(ctx, limit)
 	if err != nil {
+		infra.LoggerFrom(ctx).Error("function result", "fn", "GetUnresolvedPendingQuestions", "error", err.Error())
 		return nil, err
 	}
 	out := make([]api.PendingQuestion, len(qs))
@@ -115,34 +221,66 @@ func (b *APIBackend) GetUnresolvedPendingQuestions(ctx context.Context, limit in
 			CreatedAt:      qs[i].CreatedAt,
 		}
 	}
+	infra.LoggerFrom(ctx).Info("function result", "fn", "GetUnresolvedPendingQuestions", "count", len(out))
 	return out, nil
 }
 
 func (b *APIBackend) RunWeeklyRollup(ctx context.Context) (int, error) {
-	return RunWeeklyRollup(ctx)
+	infra.LoggerFrom(ctx).Info("function call", "fn", "RunWeeklyRollup")
+	n, err := RunWeeklyRollup(ctx)
+	if err != nil {
+		infra.LoggerFrom(ctx).Error("function result", "fn", "RunWeeklyRollup", "error", err.Error())
+		return 0, err
+	}
+	infra.LoggerFrom(ctx).Info("function result", "fn", "RunWeeklyRollup", "weekly_entries", n)
+	return n, nil
 }
 
 func (b *APIBackend) RunMonthlyRollup(ctx context.Context) (int, error) {
-	return RunMonthlyRollup(ctx)
+	infra.LoggerFrom(ctx).Info("function call", "fn", "RunMonthlyRollup")
+	n, err := RunMonthlyRollup(ctx)
+	if err != nil {
+		infra.LoggerFrom(ctx).Error("function result", "fn", "RunMonthlyRollup", "error", err.Error())
+		return 0, err
+	}
+	infra.LoggerFrom(ctx).Info("function result", "fn", "RunMonthlyRollup", "monthly_weekly_nodes", n)
+	return n, nil
 }
 
 func (b *APIBackend) GetDraftTools(ctx context.Context) ([]memory.KnowledgeNode, error) {
-	return memory.GetDraftTools(ctx)
+	infra.LoggerFrom(ctx).Info("function call", "fn", "GetDraftTools")
+	drafts, err := memory.GetDraftTools(ctx)
+	if err != nil {
+		infra.LoggerFrom(ctx).Error("function result", "fn", "GetDraftTools", "error", err.Error())
+		return nil, err
+	}
+	infra.LoggerFrom(ctx).Info("function result", "fn", "GetDraftTools", "count", len(drafts))
+	return drafts, nil
 }
 
 func (b *APIBackend) MarkToolDraftApplied(ctx context.Context, uuid string) error {
-	return memory.MarkToolDraftApplied(ctx, uuid)
+	infra.LoggerFrom(ctx).Info("function call", "fn", "MarkToolDraftApplied", "uuid", uuid)
+	err := memory.MarkToolDraftApplied(ctx, uuid)
+	if err != nil {
+		infra.LoggerFrom(ctx).Error("function result", "fn", "MarkToolDraftApplied", "uuid", uuid, "error", err.Error())
+		return err
+	}
+	infra.LoggerFrom(ctx).Info("function result", "fn", "MarkToolDraftApplied", "uuid", uuid)
+	return nil
 }
 
 func (b *APIBackend) ResolvePendingQuestion(ctx context.Context, id, answer string) error {
+	infra.LoggerFrom(ctx).Info("function call", "fn", "ResolvePendingQuestion", "id", id, "answer_length", len(answer))
 	q, err := memory.GetPendingQuestion(ctx, id)
 	if err != nil {
 		infra.LoggerFrom(ctx).Warn("could not fetch pending question for resolution side-effects", "error", err)
 	}
 
 	if err := memory.ResolvePendingQuestion(ctx, id, answer); err != nil {
+		infra.LoggerFrom(ctx).Error("function result", "fn", "ResolvePendingQuestion", "id", id, "error", err.Error())
 		return err
 	}
+	infra.LoggerFrom(ctx).Info("function result", "fn", "ResolvePendingQuestion", "id", id)
 
 	if q != nil && q.Kind == "tool_request" {
 		app := infra.GetApp(ctx)

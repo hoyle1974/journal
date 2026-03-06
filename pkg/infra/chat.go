@@ -80,9 +80,10 @@ func EmptyResponseReason(resp *genai.GenerateContentResponse) string {
 
 // ChatSession manages a multi-turn conversation with Gemini.
 type ChatSession struct {
-	model   *genai.GenerativeModel
-	session *genai.ChatSession
-	ctx     context.Context
+	model     *genai.GenerativeModel
+	session   *genai.ChatSession
+	ctx       context.Context
+	modelName string
 }
 
 // NewChatSession creates a new chat session with tools enabled.
@@ -124,9 +125,10 @@ func NewChatSession(ctx context.Context, systemPrompt string, tools []*genai.Fun
 	)
 
 	return &ChatSession{
-		model:   model,
-		session: session,
-		ctx:     ctx,
+		model:     model,
+		session:   session,
+		ctx:       ctx,
+		modelName: modelName,
 	}, nil
 }
 
@@ -159,13 +161,36 @@ func (cs *ChatSession) SendMessage(ctx context.Context, parts ...genai.Part) (*g
 	defer span.End()
 
 	sanitized := sanitizeParts(parts)
+	inputSizeBytes := estimatePartsSize(parts)
 	resp, err := cs.session.SendMessage(ctx, sanitized...)
 	if err != nil {
 		span.RecordError(err)
 		LoggerFrom(ctx).Error("chat message failed", "error", err)
 		return nil, fmt.Errorf("Gemini chat error: %w", err)
 	}
+	LogLLMMetrics(ctx, cs.modelName, resp, inputSizeBytes)
 	return resp, nil
+}
+
+// estimatePartsSize returns approximate byte size of parts for metrics when usage metadata is missing.
+func estimatePartsSize(parts []genai.Part) int {
+	var n int
+	for _, p := range parts {
+		switch part := p.(type) {
+		case genai.Text:
+			n += len(part)
+		case genai.FunctionResponse:
+			for k, v := range part.Response {
+				n += len(k)
+				if s, ok := v.(string); ok {
+					n += len(s)
+				}
+			}
+		default:
+			// ignore
+		}
+	}
+	return n
 }
 
 // AddFunctionResponse adds a function response to the conversation history.

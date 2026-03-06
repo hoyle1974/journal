@@ -358,19 +358,23 @@ func QuerySimilarNodes(ctx context.Context, queryVector []float32, limit int) ([
 
 	infra.LoggerFrom(ctx).Debug("vector search starting", "collection", KnowledgeCollection, "vector_dims", len(queryVector), "limit", limit)
 
+	// Request distance in result so we can log similarity score (1 - cosine distance).
+	const distanceResultField = "_vector_distance"
+	opts := &firestore.FindNearestOptions{DistanceResultField: distanceResultField}
 	vectorQuery := client.Collection(KnowledgeCollection).
-		FindNearest("embedding", firestore.Vector32(queryVector), limit, firestore.DistanceMeasureCosine, nil)
+		FindNearest("embedding", firestore.Vector32(queryVector), limit, firestore.DistanceMeasureCosine, opts)
 	iter := vectorQuery.Documents(ctx)
 	defer iter.Stop()
 
 	var nodes []KnowledgeNode
+	var scores []float64
 	for {
 		doc, err := iter.Next()
 		if err == iterator.Done {
 			break
 		}
 		if err != nil {
-			infra.LoggerFrom(ctx).Error("vector search iteration error", "error", err)
+			infra.LogVectorSearchFailed(ctx, KnowledgeCollection, err, 0)
 			span.RecordError(err)
 			return nil, err
 		}
@@ -384,9 +388,31 @@ func QuerySimilarNodes(ctx context.Context, queryVector []float32, limit int) ([
 			JournalEntryIDs: infra.GetStringSliceField(data, "journal_entry_ids"),
 		}
 		nodes = append(nodes, n)
-		infra.LoggerFrom(ctx).Debug("found node", "uuid", n.UUID, "content", truncateForLog(n.Content, 50))
+		// Cosine distance: 0 = identical, 2 = opposite. Score = 1 - distance, capped to [0, 1].
+		score := 0.0
+		if v, ok := data[distanceResultField]; ok {
+			var d float64
+			switch x := v.(type) {
+			case float64:
+				d = x
+			case float32:
+				d = float64(x)
+			default:
+				d = 0
+			}
+			score = 1 - d
+			if score < 0 {
+				score = 0
+			}
+			if score > 1 {
+				score = 1
+			}
+		}
+		scores = append(scores, score)
+		infra.LogFoundNode(ctx, n.UUID, score, truncateForLog(n.Content, 50))
 	}
 
+	infra.LogRAGQuality(ctx, limit, scores)
 	span.SetAttributes(map[string]string{"results_count": fmt.Sprintf("%d", len(nodes))})
 	return nodes, nil
 }

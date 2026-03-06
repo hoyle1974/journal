@@ -33,7 +33,7 @@ func Router(s *Server, w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimSuffix(r.URL.Path, "/")
 	method := r.Method
 	span.SetAttributes(map[string]string{"http.method": method, "http.path": path})
-	infra.LoggerFrom(ctx).Debug("request started", "method", method, "path", path, "trace_id", span.TraceID())
+	infra.LoggerFrom(ctx).Debug("request started", "event", "request_start", "method", method, "path", path, "trace_id", span.TraceID())
 	if !PublicRoutes[path] {
 		if code, msg := CheckAuth(s, r); code != 0 {
 			infra.LogRequest(ctx, method, path, code, time.Since(startTime))
@@ -101,6 +101,7 @@ func Router(s *Server, w http.ResponseWriter, r *http.Request) {
 	case path == "/internal/save-query":
 		handleSaveQuery(s, rw, reqWithCtx)
 	default:
+		infra.LoggerFrom(ctx).Info("handler response", "event", "http_response", "method", method, "path", path, "status", http.StatusNotFound, "error", "Not found")
 		WriteJSON(rw, http.StatusNotFound, map[string]interface{}{
 			"error": "Not found", "path": path,
 			"available_routes": []string{
@@ -111,6 +112,9 @@ func Router(s *Server, w http.ResponseWriter, r *http.Request) {
 				"GET  /tools/drafts", "POST /tools/drafts/apply",
 			},
 		})
+	}
+	if rw.latencyBreakdown != nil {
+		ctx = infra.WithLatencyBreakdown(ctx, rw.latencyBreakdown)
 	}
 	infra.LogRequest(ctx, method, path, rw.statusCode, time.Since(startTime))
 	span.SetAttributes(map[string]string{"http.status_code": fmt.Sprintf("%d", rw.statusCode)})
@@ -135,7 +139,13 @@ func parsePendingQuestionPath(path string) (id, suffix string, ok bool) {
 
 type responseWriter struct {
 	http.ResponseWriter
-	statusCode int
+	statusCode       int
+	latencyBreakdown *infra.LatencyBreakdown
+}
+
+// SetLatencyBreakdown stores a latency breakdown so the router can include it in "request completed" logs.
+func (rw *responseWriter) SetLatencyBreakdown(b *infra.LatencyBreakdown) {
+	rw.latencyBreakdown = b
 }
 
 func (rw *responseWriter) WriteHeader(code int) {

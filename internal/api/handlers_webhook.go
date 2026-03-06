@@ -15,29 +15,34 @@ import (
 func handleWebhook(s *Server, w http.ResponseWriter, r *http.Request) {
 	startTime := time.Now()
 	ctx := r.Context()
+	path := pathForLog(r.URL.Path)
+	resourceState := r.Header.Get("X-Goog-Resource-State")
+	LogHandlerRequest(ctx, r.Method, path, "resource_state", resourceState)
 	ctx, span := infra.StartSpan(ctx, "webhook.gdrive")
 	defer span.End()
-	if r.Header.Get("X-Goog-Resource-State") == "sync" {
-		infra.LoggerFrom(ctx).Info("webhook", "event", "Drive sync verification (ack)")
+	if resourceState == "sync" {
+		LogHandlerResponse(ctx, r.Method, path, http.StatusOK, "status", "sync acknowledged")
 		WriteJSON(w, http.StatusOK, map[string]string{"status": "sync acknowledged"})
 		return
 	}
-	resourceState := r.Header.Get("X-Goog-Resource-State")
 	span.SetAttributes(map[string]string{"resource_state": resourceState})
 	if resourceState != "change" && resourceState != "update" {
 		infra.LoggerFrom(ctx).Info("webhook ignored", "resource_state", resourceState)
+		LogHandlerResponse(ctx, r.Method, path, http.StatusOK, "status", "ignored", "reason", "resource_state")
 		WriteJSON(w, http.StatusOK, map[string]interface{}{
 			"status": "ignored", "reason": fmt.Sprintf("resource_state=%s", resourceState),
 		})
 		return
 	}
 	if s.Config.SyncGDocURL == "" {
+		LogHandlerResponse(ctx, r.Method, path, http.StatusInternalServerError, "error", "SYNC_GDOC_URL not configured")
 		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "SYNC_GDOC_URL not configured"})
 		return
 	}
 	debounceSeconds := 5
 	tasksClient, err := cloudtasks.NewClient(ctx)
 	if err != nil {
+		LogHandlerResponse(ctx, r.Method, path, http.StatusInternalServerError, "error", err.Error())
 		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("Failed to create Tasks client: %v", err)})
 		return
 	}
@@ -45,6 +50,7 @@ func handleWebhook(s *Server, w http.ResponseWriter, r *http.Request) {
 	parent := fmt.Sprintf("projects/%s/locations/%s/queues/%s", s.Config.GoogleCloudProject, s.Config.CloudTasksLocation, s.Config.CloudTasksQueue)
 	fsClient, err := s.Backend.GetFirestoreClient(ctx)
 	if err != nil {
+		LogHandlerResponse(ctx, r.Method, path, http.StatusInternalServerError, "error", err.Error())
 		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("Failed to get Firestore client: %v", err)})
 		return
 	}
@@ -77,10 +83,12 @@ func handleWebhook(s *Server, w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		span.RecordError(err)
 		infra.LoggerFrom(ctx).Error("webhook failed to schedule sync", "error", err)
+		LogHandlerResponse(ctx, r.Method, path, http.StatusInternalServerError, "error", err.Error())
 		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("Failed to create task: %v", err)})
 		return
 	}
 	infra.LoggerFrom(ctx).Info("webhook", "event", "Drive change, sync scheduled", "delay_seconds", debounceSeconds, "task_id", taskID)
+	LogHandlerResponse(ctx, r.Method, path, http.StatusOK, "status", "scheduled", "task_id", taskID, "delay_seconds", debounceSeconds)
 	s.Backend.SubmitAsync(ctx, func() {
 		if _, err := debounceRef.Set(ctx, map[string]interface{}{
 			"task_name": taskName, "scheduled_time": scheduleTime.Format(time.RFC3339),

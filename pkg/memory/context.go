@@ -553,7 +553,7 @@ func MatchEntryToContexts(ctx context.Context, entryContent string, threshold fl
 			break
 		}
 		if err != nil {
-			infra.LoggerFrom(ctx).Debug("vector search error (may not be supported)", "error", err)
+			infra.LogVectorSearchFailed(ctx, KnowledgeCollection, err, 0)
 			break
 		}
 

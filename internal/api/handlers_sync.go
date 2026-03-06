@@ -310,26 +310,28 @@ func releaseSyncLock(ctx context.Context, backend Backend) {
 func handleSync(s *Server, w http.ResponseWriter, r *http.Request) {
 	startTime := time.Now()
 	ctx := r.Context()
-	infra.LoggerFrom(ctx).Debug("sync handler: request received", "reason", "process Google Doc entries, questions, actions")
+	path := pathForLog(r.URL.Path)
+	LogHandlerRequest(ctx, r.Method, path)
 	ctx = s.Backend.WithSyncInProgress(ctx)
 
 	ctx, span := infra.StartSpan(ctx, "sync.gdoc")
 	defer span.End()
 
-	infra.LoggerFrom(ctx).Info("sync started")
-
 	if r.Method != http.MethodPost {
+		LogHandlerResponse(ctx, r.Method, path, http.StatusMethodNotAllowed, "error", "Method not allowed")
 		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
 		return
 	}
 
 	if s.Config.DocumentID == "" {
+		LogHandlerResponse(ctx, r.Method, path, http.StatusInternalServerError, "error", "DOCUMENT_ID not configured")
 		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "DOCUMENT_ID not configured"})
 		return
 	}
 	documentID := strings.TrimSpace(s.Config.DocumentID)
 	if !googleDocIDRe.MatchString(documentID) {
 		infra.LoggerFrom(ctx).Error("sync failed", "stage", "Config", "reason", "invalid DOCUMENT_ID format")
+		LogHandlerResponse(ctx, r.Method, path, http.StatusBadRequest, "error", "invalid DOCUMENT_ID format")
 		WriteJSON(w, http.StatusBadRequest, map[string]string{
 			"error": "DOCUMENT_ID must be the document ID only (e.g. from docs.google.com/document/d/ID/edit), not a full URL or path.",
 		})
@@ -339,11 +341,13 @@ func handleSync(s *Server, w http.ResponseWriter, r *http.Request) {
 	lockAcquired, lockErr := acquireSyncLock(ctx, s.Backend)
 	if lockErr != nil {
 		infra.LoggerFrom(ctx).Error("failed to check sync lock", "error", lockErr)
+		LogHandlerResponse(ctx, r.Method, path, http.StatusInternalServerError, "error", "Failed to check sync lock")
 		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to check sync lock"})
 		return
 	}
 	if !lockAcquired {
 		infra.LoggerFrom(ctx).Info("sync skipped", "reason", "already in progress")
+		LogHandlerResponse(ctx, r.Method, path, http.StatusConflict, "error", "sync already in progress")
 		WriteJSON(w, http.StatusConflict, map[string]string{"error": "Another sync is already in progress. Please wait and try again."})
 		return
 	}
@@ -353,6 +357,7 @@ func handleSync(s *Server, w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		span.RecordError(err)
 		infra.LoggerFrom(ctx).Error("sync failed", "stage", "DocsService", "error", err)
+		LogHandlerResponse(ctx, r.Method, path, http.StatusInternalServerError, "error", err.Error())
 		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("Failed to create Docs service: %v", err)})
 		return
 	}
@@ -368,6 +373,7 @@ func handleSync(s *Server, w http.ResponseWriter, r *http.Request) {
 			infra.LoggerFrom(ctx).Info("sync fetch hint", "hint", hint)
 			msg = hint
 		}
+		LogHandlerResponse(ctx, r.Method, path, http.StatusInternalServerError, "error", msg)
 		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": msg})
 		return
 	}
@@ -375,6 +381,7 @@ func handleSync(s *Server, w http.ResponseWriter, r *http.Request) {
 
 	if doc.Body == nil || len(doc.Body.Content) == 0 {
 		infra.LoggerFrom(ctx).Info("sync skipped", "reason", "document has no body")
+		LogHandlerResponse(ctx, r.Method, path, http.StatusOK, "processed", 0, "reason", "no body")
 		WriteJSON(w, http.StatusOK, map[string]interface{}{
 			"message":   "Document has no body",
 			"processed": 0,
@@ -385,6 +392,7 @@ func handleSync(s *Server, w http.ResponseWriter, r *http.Request) {
 	doneElem, doneStartIndex, doneEndIndex := findSyncDoneTrigger(doc)
 	if doneElem == nil {
 		infra.LoggerFrom(ctx).Info("sync skipped", "reason", "no done. trigger")
+		LogHandlerResponse(ctx, r.Method, path, http.StatusOK, "processed", 0, "reason", "no done trigger")
 		WriteJSON(w, http.StatusOK, map[string]interface{}{
 			"message":   "No 'done.' trigger found",
 			"processed": 0,
@@ -419,6 +427,7 @@ func handleSync(s *Server, w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			infra.LoggerFrom(ctx).Error("doc update failed", "error", err)
 			span.RecordError(err)
+			LogHandlerResponse(ctx, r.Method, path, http.StatusInternalServerError, "error", err.Error())
 			WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("Failed to update document: %v", err)})
 			return
 		}
@@ -441,10 +450,12 @@ func handleSync(s *Server, w http.ResponseWriter, r *http.Request) {
 
 	totalTime := time.Since(startTime)
 	totalProcessed := entriesAdded + questionsAnswered + actionsExecuted
-	infra.LoggerFrom(ctx).Info("sync completed",
+	LogHandlerResponse(ctx, r.Method, path, http.StatusOK,
+		"success", true,
 		"entries_added", entriesAdded,
 		"questions_answered", questionsAnswered,
 		"actions_executed", actionsExecuted,
+		"total_processed", totalProcessed,
 		"duration_ms", totalTime.Milliseconds(),
 	)
 

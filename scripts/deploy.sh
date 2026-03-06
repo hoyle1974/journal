@@ -130,7 +130,10 @@ case "$MODE" in
     echo ""
 
     echo -e "${YELLOW}Cross-compiling server for Linux...${NC}"
-    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o server ./cmd/server
+    VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
+    COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "none")
+    LDFLAGS="-s -w -X github.com/jackstrohm/jot/pkg/infra.Version=$VERSION -X github.com/jackstrohm/jot/pkg/infra.Commit=$COMMIT"
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="$LDFLAGS" -o server ./cmd/server
 
     # Copy ca-certificates for the container
     if [ ! -f ca-certificates.crt ]; then

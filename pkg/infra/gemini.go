@@ -23,7 +23,11 @@ import (
 // DefaultGeminiFactory creates a Gemini client using the built-in implementation.
 // Used by NewApp when no GeminiFactory is provided.
 func DefaultGeminiFactory(ctx context.Context, cfg *config.Config) (*genai.Client, string, string, error) {
-	return newGeminiClientForApp(ctx, cfg, Logger)
+	log := Logger
+	if log == nil {
+		log = slog.Default()
+	}
+	return newGeminiClientForApp(ctx, cfg, log)
 }
 
 func supportsGenerateContent(m *genai.ModelInfo) bool {
@@ -250,6 +254,7 @@ func GenerateContentSimple(ctx context.Context, systemPrompt, userPrompt string,
 		return "", WrapLLMError(fmt.Errorf("Gemini API error: %w", err))
 	}
 
+	LogLLMMetrics(ctx, effectiveModel, resp, len(systemPrompt)+len(userPrompt))
 	text := extractTextFromResponse(resp)
 	span.SetAttributes(map[string]string{"response_len": fmt.Sprintf("%d", len(text))})
 
@@ -351,6 +356,7 @@ func GenerateEmbedding(ctx context.Context, projectID string, text string, taskT
 	req.Header.Set("Authorization", "Bearer "+token.AccessToken)
 
 	client := &http.Client{Timeout: 30 * time.Second}
+	embedStart := time.Now()
 	resp, err := client.Do(req)
 	if err != nil {
 		span.RecordError(err)
@@ -358,6 +364,7 @@ func GenerateEmbedding(ctx context.Context, projectID string, text string, taskT
 		return nil, fmt.Errorf("Embedding API error: %w", err)
 	}
 	defer resp.Body.Close()
+	embedLatency := time.Since(embedStart)
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -382,5 +389,6 @@ func GenerateEmbedding(ctx context.Context, projectID string, text string, taskT
 		return nil, fmt.Errorf("no embedding returned")
 	}
 	LoggerFrom(ctx).Debug("embedding generated", "dimensions", len(result.Predictions[0].Embeddings.Values))
+	LogEmbeddingStats(ctx, len(result.Predictions[0].Embeddings.Values), embedLatency)
 	return result.Predictions[0].Embeddings.Values, nil
 }

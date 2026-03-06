@@ -60,7 +60,10 @@ func RunQueryWithDebug(ctx context.Context, env FOHEnv, question, source string,
 	var debugLogs []string
 	logDebug := func(msg string, args ...interface{}) {
 		if debug {
-			debugLogs = append(debugLogs, fmt.Sprintf(msg, args...))
+			line := fmt.Sprintf(msg, args...)
+			debugLogs = append(debugLogs, line)
+			// Mirror to server (no truncation) so a log session can be turned into a story with queryable details.
+			infra.LoggerFrom(ctx).Debug(line)
 		}
 	}
 	ctx, span := infra.StartSpan(ctx, "query.run")
@@ -68,7 +71,7 @@ func RunQueryWithDebug(ctx context.Context, env FOHEnv, question, source string,
 
 	startTime := time.Now()
 	infra.QueriesTotal.Inc()
-	infra.LoggerFrom(ctx).Debug("FOH: query started", "question_preview", utils.TruncateString(question, 80), "source", source, "reason", "user request")
+	infra.LoggerFrom(ctx).Debug("FOH: query started", "question", question, "source", source)
 
 	span.SetAttributes(map[string]string{
 		"question_len": fmt.Sprintf("%d", len(question)),
@@ -99,7 +102,7 @@ func RunQueryWithDebug(ctx context.Context, env FOHEnv, question, source string,
 		}
 	}
 	ctx = withCurrentEntryUUID(ctx, entryUUID)
-	infra.LoggerFrom(ctx).Debug("FOH: user input logged as entry", "entry_uuid", entryUUID, "reason", "input is persisted before LLM runs")
+	infra.LoggerFrom(ctx).Debug("FOH: user input logged as entry", "event", "query_start", "question", question, "entry_uuid", entryUUID, "source", source)
 
 	logDebug("[start] Question: %s", question)
 
@@ -166,7 +169,14 @@ func RunQueryWithDebug(ctx context.Context, env FOHEnv, question, source string,
 					}
 				}
 
-				infra.LoggerFrom(ctx).Debug("FOH: returning final answer", "iterations", iteration, "tool_calls", len(toolCalls), "reason", "LLM produced text and no tool calls")
+				toolNamesFromCalls := make([]string, 0, len(toolCalls))
+				for _, tc := range toolCalls {
+					if t, ok := tc["tool"].(string); ok {
+						toolNamesFromCalls = append(toolNamesFromCalls, t)
+					}
+				}
+				infra.LogAssistantEfficiency(ctx, len(systemPrompt)+len(question), len(answer), iteration)
+				infra.LoggerFrom(ctx).Debug("FOH: final answer", "event", "query_complete", "question", question, "answer", answer, "iterations", iteration, "tool_call_count", len(toolCalls), "tool_names", strings.Join(toolNamesFromCalls, ","), "duration_ms", time.Since(startTime).Milliseconds())
 				infra.LoggerFrom(ctx).Info("query completed",
 					"iterations", iteration,
 					"tool_calls", len(toolCalls),
@@ -185,7 +195,7 @@ func RunQueryWithDebug(ctx context.Context, env FOHEnv, question, source string,
 					"answer_len": fmt.Sprintf("%d", len(answer)),
 				})
 
-				logDebug("[done] Final answer (%d chars) after %d iterations", len(answer), iteration)
+				logDebug("[DEBUG] LLM Final Response: %q (%d chars) after %d iterations", answer, len(answer), iteration)
 				return &QueryResult{
 					Answer:     answer,
 					Iterations: iteration,
@@ -255,6 +265,7 @@ func RunQueryWithDebug(ctx context.Context, env FOHEnv, question, source string,
 			argsJSON, _ := json.Marshal(fc.Args)
 			sigParts = append(sigParts, fmt.Sprintf("%s:%s", fc.Name, string(argsJSON)))
 			logDebug("[iter %d] tool_call: %s(%s)", iteration, fc.Name, string(argsJSON))
+			infra.LoggerFrom(ctx).Debug("FOH: tool call", "event", "tool_call", "iter", iteration, "tool", fc.Name, "args", string(argsJSON))
 		}
 		infra.LoggerFrom(ctx).Debug("FOH: executing tools", "iter", iteration, "tools", toolNames, "reason", "execute: run tools in parallel then send results back to LLM")
 		currentSignature := strings.Join(sigParts, "|")
@@ -307,11 +318,7 @@ func RunQueryWithDebug(ctx context.Context, env FOHEnv, question, source string,
 				results[idx] = toolExecResult{index: idx, fcName: fcName, args: args, result: toolResult}
 				mu.Unlock()
 
-				infra.LoggerFrom(ctx).Debug("tool executed",
-					"tool", fcName,
-					"success", toolResult.Success,
-					"result_len", len(toolResult.Result),
-				)
+				infra.LoggerFrom(ctx).Debug("tool executed", "event", "tool_result", "iter", iteration, "tool", fcName, "success", toolResult.Success, "result", toolResult.Result)
 				resultPreview := toolResult.Result
 				if len(resultPreview) > 500 {
 					resultPreview = resultPreview[:500] + "..."
@@ -429,7 +436,14 @@ func RunQueryWithDebug(ctx context.Context, env FOHEnv, question, source string,
 		if !strings.HasPrefix(answer, "Error:") {
 			_ = env.EnqueueSaveQuery(ctx, question, answer, source, knowledgeGapDetected)
 		}
-		infra.LoggerFrom(ctx).Debug("FOH: forced conclusion returned", "iterations", iteration, "answer_len", len(answer))
+		forcedToolNames := make([]string, 0, len(toolCalls))
+		for _, tc := range toolCalls {
+			if t, ok := tc["tool"].(string); ok {
+				forcedToolNames = append(forcedToolNames, t)
+			}
+		}
+		infra.LogAssistantEfficiency(ctx, len(systemPrompt)+len(question), len(answer), iteration)
+		infra.LoggerFrom(ctx).Debug("FOH: forced conclusion", "event", "query_complete", "question", question, "answer", answer, "iterations", iteration, "tool_call_count", len(toolCalls), "tool_names", strings.Join(forcedToolNames, ","), "duration_ms", time.Since(startTime).Milliseconds(), "forced_conclusion", true)
 		span.SetAttributes(map[string]string{
 			"iterations":        fmt.Sprintf("%d", iteration),
 			"forced_conclusion": "true",
@@ -456,16 +470,23 @@ func RunQueryWithDebug(ctx context.Context, env FOHEnv, question, source string,
 	}
 }
 
+const memoryQueryTemplate = "Permanent facts about: {{.Input}}"
+
 func runReflectionCheck(ctx context.Context, answer, question string) (pass bool, reason string, err error) {
+	// Use question (user intent) for the memory query, not the answer. Otherwise for
+	// short answers like "Logged." we search for "Permanent facts about: Logged."
+	// and pull irrelevant entries instead of facts relevant to what the user said.
 	memoryQuery := "Permanent facts about: "
-	if len(answer) > 200 {
-		memoryQuery += answer[:200]
+	if len(question) > 200 {
+		memoryQuery += question[:200]
 	} else {
-		memoryQuery += answer
+		memoryQuery += question
 	}
 	searchResult := tools.Execute(ctx, "semantic_search", map[string]interface{}{
-		"query": memoryQuery,
-		"limit": 5,
+		"query":       memoryQuery,
+		"limit":       5,
+		"source_text": question,
+		"template":    memoryQueryTemplate,
 	})
 	semanticMemory := searchResult.Result
 	if !searchResult.Success || semanticMemory == "" {

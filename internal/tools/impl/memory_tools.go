@@ -59,6 +59,8 @@ func registerKnowledgeTools() {
 		Params: []tools.Param{
 			tools.RequiredStringParam("query", "The natural language query to search for"),
 			tools.LimitParam(10, 20),
+			tools.OptionalStringParam("source_text", "For debugging: the raw input used to build the query (set by code, not by assistant)"),
+			tools.OptionalStringParam("template", "For debugging: the template used to build the query (e.g. 'Permanent facts about: {{.Input}}')"),
 		},
 		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
 			query, ok := args.RequiredString("query")
@@ -66,7 +68,16 @@ func registerKnowledgeTools() {
 				return tools.MissingParam("query")
 			}
 			limit := args.IntBounded("limit", 10, 1, 20)
-			infra.LoggerFrom(ctx).Debug("semantic_search: starting", "query_preview", utils.TruncateString(query, 80), "limit", limit, "reason", "vector+keyword search over knowledge and entries")
+			sourceText := args.String("source_text", "")
+			template := args.String("template", "")
+			logArgs := []interface{}{"query_preview", utils.TruncateString(query, 80), "limit", limit, "reason", "vector+keyword search over knowledge and entries"}
+			if sourceText != "" {
+				logArgs = append(logArgs, "source_text", utils.TruncateString(sourceText, 80))
+			}
+			if template != "" {
+				logArgs = append(logArgs, "template", template)
+			}
+			infra.LoggerFrom(ctx).Debug("semantic_search: starting", logArgs...)
 			app := infra.GetApp(ctx)
 			if app == nil || app.Config() == nil {
 				return tools.Fail("Error: no app in context")
@@ -108,6 +119,7 @@ func registerKnowledgeTools() {
 			wg.Wait()
 
 			if nodeVecErr != nil {
+				infra.LogVectorSearchFailed(ctx, "knowledge_nodes", nodeVecErr, 0)
 				vectorNodes = nil
 			}
 			if nodeKwErr != nil {
@@ -117,6 +129,7 @@ func registerKnowledgeTools() {
 				return tools.Fail("Error: knowledge search failed (vector: %v; keyword: %v)", nodeVecErr, nodeKwErr)
 			}
 			if entryVecErr != nil {
+				infra.LogVectorSearchFailed(ctx, "entries", entryVecErr, 0)
 				vectorEntries = nil
 			}
 			if entryKwErr != nil {

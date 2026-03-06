@@ -48,7 +48,7 @@ func RerankNodes(ctx context.Context, query string, nodes []KnowledgeNode, topN 
 	if err := llmjson.RepairAndUnmarshal(jsonText, &indices); err != nil {
 		var floats []float64
 		if err2 := llmjson.RepairAndUnmarshal(jsonText, &floats); err2 != nil {
-			infra.LoggerFrom(ctx).Warn("rerank parse failed, using first topN", "error", err, "error2", err2)
+			infra.LoggerFrom(ctx).Warn("rerank parse failed, using first topN", "raw_llm_output", jsonText, "error", err, "error2", err2)
 			return firstN(nodes, topN), nil
 		}
 		indices = make([]int, 0, len(floats))

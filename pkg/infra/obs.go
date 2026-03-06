@@ -3,6 +3,7 @@ package infra
 import (
 	"bufio"
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -101,6 +102,11 @@ func InitObservability(cfg *config.Config) {
 	observabilityOnce.Do(func() {
 		initLogger(cfg)
 		initTracing(cfg)
+		env := "development"
+		if cfg != nil && cfg.Env != "" {
+			env = cfg.Env
+		}
+		Logger.Info("system_init", "version", Version, "commit", Commit, "env", env)
 	})
 }
 
@@ -124,22 +130,63 @@ func initLogger(cfg *config.Config) {
 	if os.Getenv("K_SERVICE") != "" {
 		logWriter = &flushAfterWriteWriter{w: bufio.NewWriter(os.Stdout)}
 	}
-	var handler slog.Handler
+	var baseHandler slog.Handler
 	if os.Getenv("K_SERVICE") != "" {
-		handler = slog.NewJSONHandler(logWriter, &slog.HandlerOptions{Level: level, AddSource: true})
+		baseHandler = slog.NewJSONHandler(logWriter, &slog.HandlerOptions{Level: level, AddSource: true})
 	} else {
-		handler = slog.NewTextHandler(logWriter, &slog.HandlerOptions{Level: level, AddSource: false})
+		baseHandler = slog.NewTextHandler(logWriter, &slog.HandlerOptions{Level: level, AddSource: false})
 	}
-
+	// Enrich the log message with all key=value attrs so viewers that only show "message" still show the full line.
+	var handler slog.Handler = &messageWithAttrsHandler{inner: baseHandler}
 	if os.Getenv("K_SERVICE") != "" && cfg != nil && cfg.DocumentID != "" {
 		handler = &gdocForwardingHandler{inner: handler}
 	}
 
+	env := "development"
+	if cfg != nil && cfg.Env != "" {
+		env = cfg.Env
+	}
 	Logger = slog.New(handler).With(
 		slog.String("service", "jot-api"),
-		slog.String("version", "1.0.0"),
+		slog.String("version", Version),
+		slog.String("commit", Commit),
+		slog.String("env", env),
 	)
 	slog.SetDefault(Logger)
+}
+
+// messageWithAttrsHandler wraps a handler and inlines all attributes into the log message
+// so that the message string contains "msg k1=v1 k2=v2 ...". Structured attrs are preserved
+// for JSON output so log viewers can still filter by field.
+type messageWithAttrsHandler struct {
+	inner slog.Handler
+}
+
+func (h *messageWithAttrsHandler) Enabled(ctx context.Context, level slog.Level) bool {
+	return h.inner.Enabled(ctx, level)
+}
+
+func (h *messageWithAttrsHandler) Handle(ctx context.Context, r slog.Record) error {
+	var b strings.Builder
+	b.WriteString(r.Message)
+	r.Attrs(func(a slog.Attr) bool {
+		b.WriteString(" ")
+		b.WriteString(a.Key)
+		b.WriteString("=")
+		b.WriteString(a.Value.String())
+		return true
+	})
+	// Pass only the enriched message so the inner handler doesn't print attrs again.
+	enriched := slog.NewRecord(r.Time, r.Level, b.String(), 0)
+	return h.inner.Handle(ctx, enriched)
+}
+
+func (h *messageWithAttrsHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return &messageWithAttrsHandler{inner: h.inner.WithAttrs(attrs)}
+}
+
+func (h *messageWithAttrsHandler) WithGroup(name string) slog.Handler {
+	return &messageWithAttrsHandler{inner: h.inner.WithGroup(name)}
 }
 
 // flushAfterWriteWriter wraps a *bufio.Writer and flushes after each Write so Cloud Run sees each log line promptly.
@@ -215,7 +262,7 @@ func initTracing(cfg *config.Config) {
 	res := resource.NewWithAttributes(
 		semconv.SchemaURL,
 		semconv.ServiceName("jot-api"),
-		semconv.ServiceVersion("1.0.0"),
+		semconv.ServiceVersion(Version),
 	)
 
 	if os.Getenv("K_SERVICE") != "" && cfg != nil && cfg.GoogleCloudProject != "" {
@@ -225,13 +272,17 @@ func initTracing(cfg *config.Config) {
 			tp = sdktrace.NewTracerProvider(sdktrace.WithResource(res))
 		} else {
 			defaultSampler := sdktrace.TraceIDRatioBased(0.1)
+			env := cfg.Env
+			if env == "" {
+				env = "production"
+			}
 			tp = sdktrace.NewTracerProvider(
 				sdktrace.WithBatcher(exporter),
 				sdktrace.WithResource(resource.NewWithAttributes(
 					semconv.SchemaURL,
 					semconv.ServiceName("jot-api"),
-					semconv.ServiceVersion("1.0.0"),
-					semconv.DeploymentEnvironment("production"),
+					semconv.ServiceVersion(Version),
+					semconv.DeploymentEnvironment(env),
 					attribute.String("cloud.project_id", cfg.GoogleCloudProject),
 				)),
 				sdktrace.WithSampler(&forceTraceSampler{defaultSampler: defaultSampler}),
@@ -245,13 +296,17 @@ func initTracing(cfg *config.Config) {
 				Logger.Error("failed to create stdout trace exporter", "error", err)
 				tp = sdktrace.NewTracerProvider(sdktrace.WithResource(res))
 			} else {
+				env := "development"
+				if cfg != nil && cfg.Env != "" {
+					env = cfg.Env
+				}
 				tp = sdktrace.NewTracerProvider(
 					sdktrace.WithBatcher(exporter),
 					sdktrace.WithResource(resource.NewWithAttributes(
 						semconv.SchemaURL,
 						semconv.ServiceName("jot-api"),
-						semconv.ServiceVersion("1.0.0"),
-						semconv.DeploymentEnvironment("development"),
+						semconv.ServiceVersion(Version),
+						semconv.DeploymentEnvironment(env),
 					)),
 					sdktrace.WithSampler(sdktrace.AlwaysSample()),
 				)
@@ -301,6 +356,79 @@ func (s *Span) TraceID() string {
 	return s.span.SpanContext().TraceID().String()
 }
 
+// TraceIDFromContext returns the trace ID of the current span in ctx, or "" if none.
+func TraceIDFromContext(ctx context.Context) string {
+	span := trace.SpanFromContext(ctx)
+	if !span.SpanContext().TraceID().IsValid() {
+		return ""
+	}
+	return span.SpanContext().TraceID().String()
+}
+
+// correlationKey holds task_id and parent_trace_id for async sub-tasks (e.g. process-entry).
+type correlationKeyType struct{}
+
+var correlationKey = &correlationKeyType{}
+
+// Correlation holds optional IDs linking an async task to its parent request.
+type Correlation struct {
+	TaskID        string // ID of this async task (e.g. process-entry-abc123)
+	ParentTraceID string // Trace ID of the request that enqueued this task
+}
+
+// WithCorrelation returns a context that carries the given correlation IDs for logging.
+func WithCorrelation(ctx context.Context, taskID, parentTraceID string) context.Context {
+	return context.WithValue(ctx, correlationKey, &Correlation{TaskID: taskID, ParentTraceID: parentTraceID})
+}
+
+// CorrelationFromContext returns the correlation from ctx, or nil if not set.
+func CorrelationFromContext(ctx context.Context) *Correlation {
+	c, _ := ctx.Value(correlationKey).(*Correlation)
+	return c
+}
+
+// LatencyBreakdown holds per-phase durations for process-entry (and similar) requests.
+type LatencyBreakdown struct {
+	LLM            time.Duration
+	Embedding      time.Duration
+	FirestoreWrite time.Duration
+	Overhead       time.Duration
+}
+
+// LogAttrs returns slog attributes for logging (e.g. on "request completed").
+func (b *LatencyBreakdown) LogAttrs() []any {
+	return []any{
+		slog.String("latency_breakdown", b.String()),
+		slog.Duration("latency_llm", b.LLM),
+		slog.Duration("latency_embedding", b.Embedding),
+		slog.Duration("latency_firestore_write", b.FirestoreWrite),
+		slog.Duration("latency_overhead", b.Overhead),
+	}
+}
+
+// String returns a short summary for logs, e.g. "llm=4.2s, embedding=0.3s, firestore_write=3.1s, overhead=2.1s".
+func (b *LatencyBreakdown) String() string {
+	return fmt.Sprintf("llm=%s, embedding=%s, firestore_write=%s, overhead=%s",
+		b.LLM.Round(time.Millisecond), b.Embedding.Round(time.Millisecond),
+		b.FirestoreWrite.Round(time.Millisecond), b.Overhead.Round(time.Millisecond))
+}
+
+type latencyBreakdownKey struct{}
+
+// WithLatencyBreakdown attaches a latency breakdown to ctx so LogRequest can include it.
+func WithLatencyBreakdown(ctx context.Context, b *LatencyBreakdown) context.Context {
+	if b == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, &latencyBreakdownKey{}, b)
+}
+
+// LatencyBreakdownFromContext returns the latency breakdown from ctx, or nil.
+func LatencyBreakdownFromContext(ctx context.Context) *LatencyBreakdown {
+	b, _ := ctx.Value(&latencyBreakdownKey{}).(*LatencyBreakdown)
+	return b
+}
+
 // RecordError records an error on the span.
 func (s *Span) RecordError(err error) {
 	if err != nil {
@@ -320,12 +448,16 @@ func (s *Span) SetStatus(code codes.Code, description string) {
 }
 
 // LogRequest logs an incoming HTTP request with structured fields.
+// If ctx contains a LatencyBreakdown (e.g. from process-entry), it is included as latency_breakdown and per-phase durations.
 func LogRequest(ctx context.Context, method, path string, statusCode int, duration time.Duration, attrs ...any) {
 	args := []any{
 		slog.String("method", method),
 		slog.String("path", path),
 		slog.Int("status", statusCode),
 		slog.Duration("duration", duration),
+	}
+	if b := LatencyBreakdownFromContext(ctx); b != nil {
+		args = append(args, b.LogAttrs()...)
 	}
 	args = append(args, attrs...)
 	if statusCode >= 500 {

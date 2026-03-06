@@ -77,30 +77,56 @@ func QuerySimilarEntries(ctx context.Context, queryVector []float32, limit int) 
 		return nil, err
 	}
 
+	const distanceResultField = "_vector_distance"
+	opts := &firestore.FindNearestOptions{DistanceResultField: distanceResultField}
 	vectorQuery := client.Collection(EntriesCollection).
-		FindNearest("embedding", firestore.Vector32(queryVector), limit, firestore.DistanceMeasureCosine, nil)
+		FindNearest("embedding", firestore.Vector32(queryVector), limit, firestore.DistanceMeasureCosine, opts)
 	iter := vectorQuery.Documents(ctx)
 	defer iter.Stop()
 
 	var entries []Entry
+	var scores []float64
 	for {
 		doc, err := iter.Next()
 		if err == iterator.Done {
 			break
 		}
 		if err != nil {
-			infra.LoggerFrom(ctx).Error("entry vector search error", "error", err)
+			infra.LogVectorSearchFailed(ctx, EntriesCollection, err, 0)
 			span.RecordError(err)
 			return nil, err
 		}
 		data := doc.Data()
+		content := infra.GetStringField(data, "content")
 		entries = append(entries, Entry{
 			UUID:      doc.Ref.ID,
-			Content:   infra.GetStringField(data, "content"),
+			Content:   content,
 			Source:    infra.GetStringField(data, "source"),
 			Timestamp: infra.GetStringField(data, "timestamp"),
 		})
+		score := 0.0
+		if v, ok := data[distanceResultField]; ok {
+			switch x := v.(type) {
+			case float64:
+				score = 1 - x
+			case float32:
+				score = 1 - float64(x)
+			}
+			if score < 0 {
+				score = 0
+			}
+			if score > 1 {
+				score = 1
+			}
+		}
+		scores = append(scores, score)
+		textPreview := content
+		if len(textPreview) > 50 {
+			textPreview = textPreview[:47] + "..."
+		}
+		infra.LogFoundEntry(ctx, doc.Ref.ID, score, textPreview)
 	}
+	infra.LogRAGQuality(ctx, limit, scores)
 	span.SetAttributes(map[string]string{"results_count": fmt.Sprintf("%d", len(entries))})
 	return entries, nil
 }

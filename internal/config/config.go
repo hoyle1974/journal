@@ -31,6 +31,9 @@ type Config struct {
 	TwilioAuthToken    string
 	TwilioPhoneNumber  string
 	AllowedPhoneNumber string
+
+	// Env is the deployment environment (e.g. production, staging, development). Set via JOT_ENV or GO_ENV; defaults to "production" when K_SERVICE is set, else "development".
+	Env string
 }
 
 // Load reads environment and Secret Manager into a Config. Call once at startup.
@@ -55,6 +58,15 @@ func Load() (*Config, error) {
 	cfg.TwilioAuthToken = loadSecret(cfg.GoogleCloudProject, "TWILIO_AUTH_TOKEN")
 	cfg.TwilioPhoneNumber = loadSecretWithDefault(cfg.GoogleCloudProject, "TWILIO_PHONE_NUMBER", "")
 	cfg.AllowedPhoneNumber = loadSecretWithDefault(cfg.GoogleCloudProject, "ALLOWED_PHONE_NUMBER", "")
+
+	cfg.Env = loadEnv("JOT_ENV", loadEnv("GO_ENV", ""))
+	if cfg.Env == "" {
+		if os.Getenv("K_SERVICE") != "" {
+			cfg.Env = "production"
+		} else {
+			cfg.Env = "development"
+		}
+	}
 
 	return cfg, nil
 }

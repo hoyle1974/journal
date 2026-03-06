@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackstrohm/jot/pkg/agent"
 	"github.com/jackstrohm/jot/pkg/infra"
 	"github.com/jackstrohm/jot/pkg/journal"
@@ -30,20 +31,24 @@ func (ServiceEnv) AddEntryAndEnqueue(ctx context.Context, content, source string
 	if timestamp != nil && *timestamp != "" {
 		ts = *timestamp
 	}
+	taskID := "process-entry-" + uuid.New().String()[:8]
+	parentTraceID := infra.TraceIDFromContext(ctx)
 	payload := map[string]interface{}{
 		"uuid": entryUUID, "content": content, "timestamp": ts, "source": source,
+		"task_id": taskID, "parent_trace_id": parentTraceID,
 	}
 	app := infra.GetApp(ctx)
 	if app != nil {
 		if err := app.EnqueueTask(ctx, "/internal/process-entry", payload); err != nil {
-			infra.LoggerFrom(ctx).Debug("process-entry enqueue failed, running inline", "entry_uuid", entryUUID, "reason", "Cloud Tasks unavailable; processing in background goroutine")
-			infra.LoggerFrom(ctx).Warn("failed to enqueue process-entry task, running inline", "entry_uuid", entryUUID, "error", err)
+			infra.LoggerFrom(ctx).Debug("process-entry enqueue failed, running inline", "entry_uuid", entryUUID, "task_id", taskID, "parent_trace_id", parentTraceID, "reason", "Cloud Tasks unavailable; processing in background goroutine")
+			infra.LoggerFrom(ctx).Warn("failed to enqueue process-entry task, running inline", "entry_uuid", entryUUID, "task_id", taskID, "parent_trace_id", parentTraceID, "error", err)
 			app.SubmitAsync(func() {
 				bgCtx := infra.WithApp(context.Background(), app)
-				_ = ProcessEntry(bgCtx, entryUUID, content, ts, source)
+				bgCtx = infra.WithCorrelation(bgCtx, taskID, parentTraceID)
+				_, _ = ProcessEntry(bgCtx, entryUUID, content, ts, source)
 			})
 		} else {
-			infra.LoggerFrom(ctx).Debug("process-entry enqueued", "entry_uuid", entryUUID, "reason", "async processing for evaluator, context links, analysis, embedding")
+			infra.LoggerFrom(ctx).Debug("triggering async task", "event", "async_task_enqueued", "task", "process-entry", "task_id", taskID, "parent_trace_id", parentTraceID, "entry_uuid", entryUUID, "reason", "async processing for evaluator, context links, analysis, embedding")
 		}
 	}
 	return entryUUID, nil

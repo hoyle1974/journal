@@ -65,6 +65,20 @@
       ]
     },
     {
+      "collectionGroup": "knowledge_nodes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "node_type", "order": "ASCENDING" },
+        {
+          "fieldPath": "embedding",
+          "vectorConfig": {
+            "dimension": 768,
+            "flat": {}
+          }
+        }
+      ]
+    },
+    {
       "collectionGroup": "queries",
       "queryScope": "COLLECTION",
       "fields": [

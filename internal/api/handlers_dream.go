@@ -11,13 +11,14 @@ import (
 )
 
 func handleDream(s *Server, w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	path := pathForLog(r.URL.Path)
+	LogHandlerRequest(ctx, r.Method, path)
 	if r.Method != http.MethodPost {
+		LogHandlerResponse(ctx, r.Method, path, http.StatusMethodNotAllowed, "error", "Method not allowed")
 		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
 		return
 	}
-	ctx := r.Context()
-	infra.LoggerFrom(ctx).Debug("dream handler: request received", "reason", "nightly consolidation of last 24h into semantic memory")
-	infra.LoggerFrom(ctx).Info("dream started")
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 	result, err := s.Backend.RunDreamer(ctx)
@@ -30,6 +31,7 @@ func handleDream(s *Server, w http.ResponseWriter, r *http.Request) {
 		} else if s.Backend.IsLLMPermissionOrBillingDenied(err) {
 			code = http.StatusForbidden
 		}
+		LogHandlerResponse(ctx, r.Method, path, code, "error", err.Error())
 		WriteJSON(w, code, map[string]string{"error": err.Error()})
 		return
 	}
@@ -37,7 +39,11 @@ func handleDream(s *Server, w http.ResponseWriter, r *http.Request) {
 	if pulseErr != nil {
 		infra.LoggerFrom(ctx).Warn("pulse audit failed after dreamer", "error", pulseErr)
 	}
-	infra.LoggerFrom(ctx).Info("dream completed", "entries_processed", result.EntriesProcessed, "facts_extracted", result.FactsExtracted, "facts_written", result.FactsWritten)
+	LogHandlerResponse(ctx, r.Method, path, http.StatusOK,
+		"success", true,
+		"entries_processed", result.EntriesProcessed,
+		"facts_extracted", result.FactsExtracted,
+		"facts_written", result.FactsWritten)
 	if pulseResult != nil && (pulseResult.Signals > 0 || len(pulseResult.StaleNodes) > 0) {
 		infra.LoggerFrom(ctx).Info("dream pulse", "signals", pulseResult.Signals, "stale_nodes", len(pulseResult.StaleNodes))
 	}
@@ -53,13 +59,14 @@ func handleDream(s *Server, w http.ResponseWriter, r *http.Request) {
 }
 
 func handleJanitor(s *Server, w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	path := pathForLog(r.URL.Path)
+	LogHandlerRequest(ctx, r.Method, path)
 	if r.Method != http.MethodPost {
+		LogHandlerResponse(ctx, r.Method, path, http.StatusMethodNotAllowed, "error", "Method not allowed")
 		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
 		return
 	}
-	ctx := r.Context()
-	infra.LoggerFrom(ctx).Debug("janitor handler: request received", "reason", "garbage collect low-significance knowledge not recalled in 30+ days")
-	infra.LoggerFrom(ctx).Info("janitor started")
 	deleted, err := s.Backend.RunJanitor(ctx)
 	if err != nil {
 		infra.ErrorsTotal.Inc()
@@ -70,71 +77,86 @@ func handleJanitor(s *Server, w http.ResponseWriter, r *http.Request) {
 		} else if s.Backend.IsLLMPermissionOrBillingDenied(err) {
 			code = http.StatusForbidden
 		}
+		LogHandlerResponse(ctx, r.Method, path, code, "error", err.Error())
 		WriteJSON(w, code, map[string]string{"error": err.Error()})
 		return
 	}
-	infra.LoggerFrom(ctx).Info("janitor completed", "deleted", deleted)
+	LogHandlerResponse(ctx, r.Method, path, http.StatusOK, "success", true, "deleted", deleted)
 	WriteJSON(w, http.StatusOK, map[string]interface{}{"success": true, "deleted": deleted})
 }
 
 func handlePendingQuestions(s *Server, w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	path := pathForLog(r.URL.Path)
+	LogHandlerRequest(ctx, r.Method, path)
 	if r.Method != http.MethodGet {
+		LogHandlerResponse(ctx, r.Method, path, http.StatusMethodNotAllowed, "error", "Method not allowed")
 		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
 		return
 	}
-	ctx := r.Context()
 	questions, err := s.Backend.GetUnresolvedPendingQuestions(ctx, 20)
 	if err != nil {
 		infra.LoggerFrom(ctx).Error("pending questions list failed", "error", err)
+		LogHandlerResponse(ctx, r.Method, path, http.StatusInternalServerError, "error", err.Error())
 		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	LogHandlerResponse(ctx, r.Method, path, http.StatusOK, "count", len(questions))
 	WriteJSON(w, http.StatusOK, map[string]interface{}{"questions": questions, "count": len(questions)})
 }
 
 func handleRollup(s *Server, w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	path := pathForLog(r.URL.Path)
+	LogHandlerRequest(ctx, r.Method, path)
 	if r.Method != http.MethodPost {
+		LogHandlerResponse(ctx, r.Method, path, http.StatusMethodNotAllowed, "error", "Method not allowed")
 		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
 		return
 	}
-	ctx := r.Context()
-	infra.LoggerFrom(ctx).Debug("rollup handler: request received", "reason", "weekly and monthly summary rollups")
-	infra.LoggerFrom(ctx).Info("rollup started")
 	weeklyEntries, err := s.Backend.RunWeeklyRollup(ctx)
 	if err != nil {
 		infra.LoggerFrom(ctx).Error("weekly rollup failed", "error", err)
+		LogHandlerResponse(ctx, r.Method, path, http.StatusInternalServerError, "error", err.Error())
 		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 	monthlyNodes, err := s.Backend.RunMonthlyRollup(ctx)
 	if err != nil {
 		infra.LoggerFrom(ctx).Error("monthly rollup failed", "error", err)
+		LogHandlerResponse(ctx, r.Method, path, http.StatusInternalServerError, "error", err.Error())
 		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	infra.LoggerFrom(ctx).Info("rollup completed", "weekly_entries", weeklyEntries, "monthly_weekly_nodes", monthlyNodes)
+	LogHandlerResponse(ctx, r.Method, path, http.StatusOK, "success", true, "weekly_entries_rolled", weeklyEntries, "monthly_weekly_nodes", monthlyNodes)
 	WriteJSON(w, http.StatusOK, map[string]interface{}{
 		"success": true, "weekly_entries_rolled": weeklyEntries, "monthly_weekly_nodes": monthlyNodes,
 	})
 }
 
 func handlePendingQuestionResolve(s *Server, w http.ResponseWriter, r *http.Request, questionID string) {
+	ctx := r.Context()
+	path := pathForLog(r.URL.Path)
+	LogHandlerRequest(ctx, r.Method, path, "question_id", questionID)
 	if r.Method != http.MethodPost {
+		LogHandlerResponse(ctx, r.Method, path, http.StatusMethodNotAllowed, "error", "Method not allowed")
 		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
 		return
 	}
-	ctx := r.Context()
 	var body struct {
 		Answer string `json:"answer"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		LogHandlerResponse(ctx, r.Method, path, http.StatusBadRequest, "error", "Invalid JSON body")
 		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON body"})
 		return
 	}
 	if err := s.Backend.ResolvePendingQuestion(ctx, questionID, strings.TrimSpace(body.Answer)); err != nil {
 		infra.LoggerFrom(ctx).Error("resolve pending question failed", "id", questionID, "error", err)
+		LogHandlerResponse(ctx, r.Method, path, http.StatusInternalServerError, "error", err.Error())
 		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	LogHandlerResponse(ctx, r.Method, path, http.StatusOK, "success", true, "id", questionID)
 	WriteJSON(w, http.StatusOK, map[string]string{"status": "ok", "id": questionID})
 }

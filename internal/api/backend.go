@@ -33,7 +33,7 @@ type Backend interface {
 	AddEntry(ctx context.Context, content, source string, timestamp *string) (string, error)
 	RunQuery(ctx context.Context, question, source string) *agent.QueryResult
 	CreateAndSavePlan(ctx context.Context, goal string) (string, error)
-	ProcessEntry(ctx context.Context, entryUUID, content, timestamp, source string) error
+	ProcessEntry(ctx context.Context, entryUUID, content, timestamp, source string) (*infra.LatencyBreakdown, error)
 	SaveQuery(ctx context.Context, question, answer, source string, isGap bool) (string, error)
 	InitializePermanentContexts(ctx context.Context) error
 	DecayContexts(ctx context.Context) (int, error)
