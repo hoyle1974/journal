@@ -3,7 +3,7 @@ package impl
 import (
 	"context"
 
-	"github.com/jackstrohm/jot"
+	"github.com/jackstrohm/jot/pkg/journal"
 	"github.com/jackstrohm/jot/pkg/utils"
 	"github.com/jackstrohm/jot/tools"
 )
@@ -20,7 +20,7 @@ func registerQueryTools() {
 		Params:      []tools.Param{tools.CountParam()},
 		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
 			count := args.IntBounded("count", 10, 1, 50)
-			queries, err := jot.GetRecentQueries(ctx, count)
+			queries, err := journal.GetRecentQueries(ctx, count)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
@@ -46,7 +46,7 @@ func registerQueryTools() {
 				return tools.MissingParam("query")
 			}
 			limit := args.IntBounded("limit", 10, 1, 50)
-			queries, err := jot.SearchQueries(ctx, query, limit)
+			queries, err := journal.SearchQueries(ctx, query, limit)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
@@ -81,7 +81,7 @@ func registerQueryTools() {
 				return tools.Fail("Date range error: %v", err)
 			}
 			limit := args.IntBounded("limit", 20, 1, 50)
-			queries, err := jot.GetQueriesByDateRange(ctx, startStr, endStr, limit)
+			queries, err := journal.GetQueriesByDateRange(ctx, startStr, endStr, limit)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}

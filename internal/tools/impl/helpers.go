@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jackstrohm/jot"
+	"github.com/jackstrohm/jot/pkg/journal"
 	"github.com/jackstrohm/jot/pkg/memory"
 )
 
@@ -13,7 +13,7 @@ const maxSourceDatesPerNode = 5
 const maxEntryIDsToResolve = 25
 
 // formatKnowledgeNodes formats knowledge nodes for LLM context, appending source dates when JournalEntryIDs are present.
-func formatKnowledgeNodes(ctx context.Context, nodes []jot.KnowledgeNode) string {
+func formatKnowledgeNodes(ctx context.Context, nodes []memory.KnowledgeNode) string {
 	// Collect unique entry IDs for batch date resolution
 	seenIDs := make(map[string]bool)
 	var allIDs []string
@@ -31,7 +31,7 @@ func formatKnowledgeNodes(ctx context.Context, nodes []jot.KnowledgeNode) string
 			break
 		}
 	}
-	dateMap, _ := jot.GetEntryDates(ctx, allIDs)
+	dateMap, _ := journal.GetEntryDates(ctx, allIDs)
 
 	var lines []string
 	for i, n := range nodes {
@@ -39,7 +39,7 @@ func formatKnowledgeNodes(ctx context.Context, nodes []jot.KnowledgeNode) string
 		if len(content) > 200 {
 			content = content[:197] + "..."
 		}
-		ts := jot.TruncateTimestamp(n.Timestamp, jot.DateTimeDisplayLen)
+		ts := journal.TruncateTimestamp(n.Timestamp, journal.DateTimeDisplayLen)
 		if ts == "" {
 			ts = "(no date)"
 		}
@@ -69,14 +69,14 @@ func formatKnowledgeNodes(ctx context.Context, nodes []jot.KnowledgeNode) string
 }
 
 // formatEntries formats entries for LLM context (short form).
-func formatEntries(entries []jot.Entry) string {
+func formatEntries(entries []journal.Entry) string {
 	var lines []string
 	for i, e := range entries {
 		content := e.Content
 		if len(content) > 200 {
 			content = content[:197] + "..."
 		}
-		ts := jot.TruncateTimestamp(e.Timestamp, jot.DateTimeDisplayLen)
+		ts := journal.TruncateTimestamp(e.Timestamp, journal.DateTimeDisplayLen)
 		if ts == "" {
 			ts = "(no date)"
 		}
@@ -98,11 +98,11 @@ func formatContexts(nodes []memory.KnowledgeNode, metas []memory.ContextMetadata
 		if len(content) > 150 {
 			content = content[:147] + "..."
 		}
-		lastTouched := jot.TruncateTimestamp(meta.LastTouched, jot.DateTimeDisplayLen)
+		lastTouched := journal.TruncateTimestamp(meta.LastTouched, journal.DateTimeDisplayLen)
 		if lastTouched == "" {
 			lastTouched = "(no date)"
 		}
-		updated := jot.TruncateTimestamp(n.Timestamp, jot.DateTimeDisplayLen)
+		updated := journal.TruncateTimestamp(n.Timestamp, journal.DateTimeDisplayLen)
 		if updated == "" {
 			updated = "(no date)"
 		}
@@ -113,6 +113,6 @@ func formatContexts(nodes []memory.KnowledgeNode, metas []memory.ContextMetadata
 }
 
 // formatQueriesForContext formats query history for LLM context using jot's formatter.
-func formatQueriesForContext(queries []jot.QueryLog) string {
-	return jot.FormatQueriesForContext(queries, 10000)
+func formatQueriesForContext(queries []journal.QueryLog) string {
+	return journal.FormatQueriesForContext(queries, 10000)
 }

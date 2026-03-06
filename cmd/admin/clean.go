@@ -10,8 +10,9 @@ import (
 
 	"google.golang.org/api/iterator"
 
-	"github.com/jackstrohm/jot"
 	"github.com/jackstrohm/jot/internal/config"
+	"github.com/jackstrohm/jot/pkg/infra"
+	"github.com/jackstrohm/jot/pkg/journal"
 )
 
 func runCleanTest() {
@@ -30,17 +31,17 @@ func runCleanTest() {
 	if err != nil {
 		log.Fatalf("config: %v", err)
 	}
-	app, err := jot.NewApp(ctx, cfg)
+	app, err := infra.NewApp(ctx, cfg, nil, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
-	ctx = jot.WithApp(ctx, app)
-	client, err := jot.GetFirestoreClient(ctx)
+	ctx = infra.WithApp(ctx, app)
+	client, err := infra.GetFirestoreClient(ctx)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	iter := client.Collection(jot.EntriesCollection).
+	iter := client.Collection(journal.EntriesCollection).
 		Where("source", "==", *source).
 		Documents(ctx)
 	defer iter.Stop()

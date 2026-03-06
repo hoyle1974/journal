@@ -1,4 +1,4 @@
-package jot
+package service
 
 import (
 	"context"
@@ -10,9 +10,11 @@ import (
 
 	"cloud.google.com/go/firestore"
 	"github.com/google/generative-ai-go/genai"
-	"github.com/jackstrohm/jot/pkg/agent"
 	"github.com/jackstrohm/jot/internal/prompts"
 	"github.com/jackstrohm/jot/llmjson"
+	"github.com/jackstrohm/jot/pkg/agent"
+	"github.com/jackstrohm/jot/pkg/infra"
+	"github.com/jackstrohm/jot/pkg/journal"
 	"github.com/jackstrohm/jot/pkg/memory"
 	"github.com/jackstrohm/jot/pkg/utils"
 	"google.golang.org/api/iterator"
@@ -47,17 +49,21 @@ type gapDetectItem struct {
 
 // RunGapDetection compares the last 24h journal to relevant knowledge and appends any gaps/contradictions to PendingQuestions.
 func RunGapDetection(ctx context.Context, journalContext string, entryUUIDs []string) error {
-	ctx, span := StartSpan(ctx, "cron.gap_detection")
+	ctx, span := infra.StartSpan(ctx, "cron.gap_detection")
 	defer span.End()
 
 	if len(journalContext) < 100 {
 		return nil
 	}
-	vec, err := GenerateEmbedding(ctx, journalContext, EmbedTaskRetrievalDocument)
+	app := infra.GetApp(ctx)
+	if app == nil || app.Config() == nil {
+		return fmt.Errorf("no app config for gap detection")
+	}
+	vec, err := infra.GenerateEmbedding(ctx, app.Config().GoogleCloudProject, journalContext, infra.EmbedTaskRetrievalDocument)
 	if err != nil {
 		return fmt.Errorf("gap detection embedding: %w", err)
 	}
-	nodes, err := QuerySimilarNodes(ctx, vec, 15)
+	nodes, err := memory.QuerySimilarNodes(ctx, vec, 15)
 	if err != nil {
 		return fmt.Errorf("gap detection query nodes: %w", err)
 	}
@@ -70,11 +76,11 @@ func RunGapDetection(ctx context.Context, journalContext string, entryUUIDs []st
 		relevantKnowledge = utils.TruncateToMaxBytes(relevantKnowledge, 4000) + "\n... (truncated)"
 	}
 
-	client, err := GetGeminiClient(ctx)
+	client, err := infra.GetGeminiClient(ctx)
 	if err != nil {
 		return err
 	}
-	model := client.GenerativeModel(GetEffectiveModel(ctx, defaultConfig.DreamerModel))
+	model := client.GenerativeModel(infra.GetEffectiveModel(ctx, app.Config().DreamerModel))
 	model.ResponseMIMEType = "application/json"
 	model.SetMaxOutputTokens(1024)
 	model.ResponseSchema = &genai.Schema{
@@ -88,21 +94,21 @@ func RunGapDetection(ctx context.Context, journalContext string, entryUUIDs []st
 			},
 		},
 	}
-	userPrompt := prompts.FormatGapDetector(WrapAsUserData(SanitizePrompt(journalContext)), WrapAsUserData(relevantKnowledge))
+	userPrompt := prompts.FormatGapDetector(utils.WrapAsUserData(utils.SanitizePrompt(journalContext)), utils.WrapAsUserData(relevantKnowledge))
 
 	apiCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
-	GeminiCallsTotal.Inc()
+	infra.GeminiCallsTotal.Inc()
 	resp, err := model.GenerateContent(apiCtx, genai.Text(userPrompt))
 	if err != nil {
 		span.RecordError(err)
-		return WrapLLMError(err)
+		return infra.WrapLLMError(err)
 	}
-	text := ExtractText(resp)
+	text := infra.ExtractText(resp)
 	var items []gapDetectItem
 	if err := json.Unmarshal([]byte(text), &items); err != nil {
 		if err := llmjson.RepairAndUnmarshal(text, &items); err != nil {
-			LoggerFrom(ctx).Debug("gap detection parse failed", "error", err, "raw", utils.TruncateString(text, 300))
+			infra.LoggerFrom(ctx).Debug("gap detection parse failed", "error", err, "raw", utils.TruncateString(text, 300))
 			return nil
 		}
 	}
@@ -126,13 +132,13 @@ func RunGapDetection(ctx context.Context, journalContext string, entryUUIDs []st
 }
 
 // RunDreamer consolidates the last 24h of journal entries into semantic memory.
-func RunDreamer(ctx context.Context) (*DreamerResult, error) {
-	return agent.RunDreamer(ctx, jotFOHEnv{})
+func RunDreamer(ctx context.Context) (*agent.DreamerResult, error) {
+	return agent.RunDreamer(ctx, ServiceEnv{})
 }
 
 // RunProfileSynthesis merges new persona facts into the permanent user_profile context node.
 func RunProfileSynthesis(ctx context.Context, personaFacts []string) error {
-	ctx, span := StartSpan(ctx, "cron.profile_synthesis")
+	ctx, span := infra.StartSpan(ctx, "cron.profile_synthesis")
 	defer span.End()
 
 	if len(personaFacts) == 0 {
@@ -145,19 +151,23 @@ func RunProfileSynthesis(ctx context.Context, personaFacts []string) error {
 	}
 
 	userPrompt := fmt.Sprintf("Current Profile:\n%s\n\nNew Identity Markers:\n%s",
-		WrapAsUserData(node.Content), WrapAsUserData(strings.Join(personaFacts, "\n")))
+		utils.WrapAsUserData(node.Content), utils.WrapAsUserData(strings.Join(personaFacts, "\n")))
 
-	newProfile, err := GenerateContentSimple(ctx, prompts.IdentityArchitect(), userPrompt, &GenConfig{MaxOutputTokens: 1024, ModelOverride: defaultConfig.DreamerModel})
+	app := infra.GetApp(ctx)
+	if app == nil || app.Config() == nil {
+		return fmt.Errorf("no app config for profile synthesis")
+	}
+	newProfile, err := infra.GenerateContentSimple(ctx, prompts.IdentityArchitect(), userPrompt, app.Config(), &infra.GenConfig{MaxOutputTokens: 1024, ModelOverride: app.Config().DreamerModel})
 	if err != nil {
 		return err
 	}
 
-	client, err := GetFirestoreClient(ctx)
+	client, err := infra.GetFirestoreClient(ctx)
 	if err != nil {
 		return err
 	}
 
-	_, err = client.Collection(KnowledgeCollection).Doc(node.UUID).Update(ctx, []firestore.Update{
+	_, err = client.Collection(memory.KnowledgeCollection).Doc(node.UUID).Update(ctx, []firestore.Update{
 		{Path: "content", Value: strings.TrimSpace(newProfile)},
 		{Path: "timestamp", Value: time.Now().Format(time.RFC3339)},
 	})
@@ -165,26 +175,25 @@ func RunProfileSynthesis(ctx context.Context, personaFacts []string) error {
 		return err
 	}
 
-	LoggerFrom(ctx).Info("profile synthesis completed", "uuid", node.UUID)
+	infra.LoggerFrom(ctx).Info("profile synthesis completed", "uuid", node.UUID)
 	return nil
 }
 
 // RunEvolutionSynthesis runs the Cognitive Engineer on recent queries (and journal summary), then writes the result to the system_evolution context.
 func RunEvolutionSynthesis(ctx context.Context, journalSummary string) error {
-	ctx, span := StartSpan(ctx, "cron.evolution_synthesis")
+	ctx, span := infra.StartSpan(ctx, "cron.evolution_synthesis")
 	defer span.End()
 
-	queries, err := GetRecentQueries(ctx, 50)
+	queries, err := journal.GetRecentQueries(ctx, 50)
 	if err != nil {
 		return fmt.Errorf("get recent queries: %w", err)
 	}
-	queriesText := FormatQueriesForContext(queries, 8000)
+	queriesText := journal.FormatQueriesForContext(queries, 8000)
 	if queriesText == "" || strings.TrimSpace(queriesText) == "No queries found." {
-		LoggerFrom(ctx).Info("evolution_synthesis: no queries to audit")
+		infra.LoggerFrom(ctx).Info("evolution_synthesis: no queries to audit")
 		return nil
 	}
 
-	// Optional: shorten journal summary for evolution context only
 	journalForEvolution := ""
 	if len(journalSummary) > 2000 {
 		journalForEvolution = utils.TruncateToMaxBytes(journalSummary, 2000) + "\n... (truncated)"
@@ -192,7 +201,7 @@ func RunEvolutionSynthesis(ctx context.Context, journalSummary string) error {
 		journalForEvolution = journalSummary
 	}
 
-	audit, err := RunEvolutionAudit(ctx, queriesText, journalForEvolution)
+	audit, err := agent.RunEvolutionAudit(ctx, queriesText, journalForEvolution)
 	if err != nil {
 		return err
 	}
@@ -213,18 +222,18 @@ func RunEvolutionSynthesis(ctx context.Context, journalSummary string) error {
 	}
 	content := strings.Join(sections, "\n\n")
 
-	client, err := GetFirestoreClient(ctx)
+	client, err := infra.GetFirestoreClient(ctx)
 	if err != nil {
 		return err
 	}
-	_, err = client.Collection(KnowledgeCollection).Doc(node.UUID).Update(ctx, []firestore.Update{
+	_, err = client.Collection(memory.KnowledgeCollection).Doc(node.UUID).Update(ctx, []firestore.Update{
 		{Path: "content", Value: content},
 		{Path: "timestamp", Value: time.Now().Format(time.RFC3339)},
 	})
 	if err != nil {
 		return err
 	}
-	LoggerFrom(ctx).Info("evolution synthesis wrote system_evolution", "uuid", node.UUID)
+	infra.LoggerFrom(ctx).Info("evolution synthesis wrote system_evolution", "uuid", node.UUID)
 	return nil
 }
 
@@ -238,10 +247,10 @@ func stringListWithBullets(s []string) []string {
 
 // RunJanitor performs garbage collection on semantic memory.
 func RunJanitor(ctx context.Context) (int, error) {
-	ctx, span := StartSpan(ctx, "cron.janitor")
+	ctx, span := infra.StartSpan(ctx, "cron.janitor")
 	defer span.End()
 
-	client, err := GetFirestoreClient(ctx)
+	client, err := infra.GetFirestoreClient(ctx)
 	if err != nil {
 		span.RecordError(err)
 		return 0, err
@@ -250,9 +259,7 @@ func RunJanitor(ctx context.Context) (int, error) {
 	cutoff := time.Now().AddDate(0, 0, -JanitorStaleDays)
 	cutoffStr := cutoff.Format(time.RFC3339)
 
-	// Query nodes with low weight and stale recall
-	// Note: Requires composite index on (significance_weight, last_recalled_at)
-	iter := client.Collection(KnowledgeCollection).
+	iter := client.Collection(memory.KnowledgeCollection).
 		Where("significance_weight", "<", JanitorWeightThreshold).
 		Where("last_recalled_at", "<", cutoffStr).
 		Documents(ctx)
@@ -266,41 +273,41 @@ func RunJanitor(ctx context.Context) (int, error) {
 		}
 		if err != nil {
 			span.RecordError(err)
-			return deleted, WrapFirestoreIndexError(err)
+			return deleted, infra.WrapFirestoreIndexError(err)
 		}
 
 		data := doc.Data()
-		projectID := GetLinkedCompletedProjectID(ctx, data)
+		projectID := memory.GetLinkedCompletedProjectID(ctx, data)
 		if projectID != "" {
-			content := getStringField(data, "content")
+			content := infra.GetStringField(data, "content")
 			if content != "" {
-				if err := AppendToProjectArchiveSummary(ctx, projectID, content); err != nil {
-					LoggerFrom(ctx).Warn("janitor archive append failed", "project_id", projectID, "error", err)
+				if err := memory.AppendToProjectArchiveSummary(ctx, projectID, content); err != nil {
+					infra.LoggerFrom(ctx).Warn("janitor archive append failed", "project_id", projectID, "error", err)
 				} else {
-					LoggerFrom(ctx).Debug("janitor squeezed into project", "id", doc.Ref.ID, "project_id", projectID)
+					infra.LoggerFrom(ctx).Debug("janitor squeezed into project", "id", doc.Ref.ID, "project_id", projectID)
 				}
 			}
 		}
 
 		if _, err := doc.Ref.Delete(ctx); err != nil {
-			LoggerFrom(ctx).Warn("janitor delete failed", "id", doc.Ref.ID, "error", err)
+			infra.LoggerFrom(ctx).Warn("janitor delete failed", "id", doc.Ref.ID, "error", err)
 			continue
 		}
 		deleted++
-		LoggerFrom(ctx).Debug("janitor evicted", "id", doc.Ref.ID)
+		infra.LoggerFrom(ctx).Debug("janitor evicted", "id", doc.Ref.ID)
 	}
 
-	LoggerFrom(ctx).Info("janitor completed", "deleted", deleted)
+	infra.LoggerFrom(ctx).Info("janitor completed", "deleted", deleted)
 	span.SetAttributes(map[string]string{"deleted": fmt.Sprintf("%d", deleted)})
 	return deleted, nil
 }
 
-// RunPulseAudit identifies high-value nodes (project, goal, person) that have not been recalled in PulseStaleDays and creates a proactive signal for each.
+// RunPulseAudit identifies high-value nodes that have not been recalled in PulseStaleDays and creates a proactive signal for each.
 func RunPulseAudit(ctx context.Context) (*PulseResult, error) {
-	ctx, span := StartSpan(ctx, "cron.pulse_audit")
+	ctx, span := infra.StartSpan(ctx, "cron.pulse_audit")
 	defer span.End()
 
-	client, err := GetFirestoreClient(ctx)
+	client, err := infra.GetFirestoreClient(ctx)
 	if err != nil {
 		span.RecordError(err)
 		return nil, err
@@ -308,8 +315,7 @@ func RunPulseAudit(ctx context.Context) (*PulseResult, error) {
 
 	staleThreshold := time.Now().AddDate(0, 0, -PulseStaleDays).Format(time.RFC3339)
 
-	// Requires composite index: node_type, significance_weight, last_recalled_at
-	iter := client.Collection(KnowledgeCollection).
+	iter := client.Collection(memory.KnowledgeCollection).
 		Where("node_type", "in", []string{"project", "goal", "person"}).
 		Where("significance_weight", ">=", PulseImportanceThreshold).
 		Where("last_recalled_at", "<", staleThreshold).
@@ -324,23 +330,23 @@ func RunPulseAudit(ctx context.Context) (*PulseResult, error) {
 		}
 		if err != nil {
 			span.RecordError(err)
-			return result, WrapFirestoreIndexError(err)
+			return result, infra.WrapFirestoreIndexError(err)
 		}
 
 		data := doc.Data()
 		nodeID := doc.Ref.ID
-		content := getStringField(data, "content")
+		content := infra.GetStringField(data, "content")
 
 		signalContent := fmt.Sprintf("STALE LOOP DETECTED: You haven't mentioned '%s' in 2 weeks. Is this still a priority?", content)
-		_, err = UpsertSemanticMemory(ctx, signalContent, "thought", "selfmodel", 0.9, []string{nodeID}, nil)
+		_, err = memory.UpsertSemanticMemory(ctx, signalContent, "thought", "selfmodel", 0.9, []string{nodeID}, nil)
 		if err != nil {
-			LoggerFrom(ctx).Warn("failed to create pulse signal", "node_id", nodeID, "error", err)
+			infra.LoggerFrom(ctx).Warn("failed to create pulse signal", "node_id", nodeID, "error", err)
 			continue
 		}
 
 		result.StaleNodes = append(result.StaleNodes, nodeID)
 		result.Signals++
-		LoggerFrom(ctx).Info("pulse audit flagged node", "id", nodeID, "content", utils.TruncateString(content, 40))
+		infra.LoggerFrom(ctx).Info("pulse audit flagged node", "id", nodeID, "content", utils.TruncateString(content, 40))
 	}
 
 	span.SetAttributes(map[string]string{

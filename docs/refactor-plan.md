@@ -179,7 +179,7 @@ Complete the remaining file moves from the architecture refactor. After **each s
 
 **Goal:** Ensure a single clear entry point for the Cloud Function and for local/server; no dead code in root.
 
-**Done:** Entry point confirmed: cmd/server imports the jot package; jot init registers JotAPI and builds the server with api.Router. Removed obsolete jot ratelimit wrapper (ratelimit.go); ratelimit_test.go now calls api.GetClientIP and api.CheckRateLimit directly. Build and tests pass for all packages and cmd/admin, cmd/server, cmd/jot.
+**Done:** Root reduced to function.go only. Re-exports removed; orchestrators in internal/service (ServiceEnv, APIBackend); gdoc in internal/gdoc; constants in pkg. default_config.go deleted. Build and tests pass.
 
 **Actions (completed):**
 

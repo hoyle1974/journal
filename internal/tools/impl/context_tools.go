@@ -7,8 +7,9 @@ import (
 	"time"
 
 	"cloud.google.com/go/firestore"
-	"github.com/jackstrohm/jot"
 	"github.com/jackstrohm/jot/pkg/agent"
+	"github.com/jackstrohm/jot/pkg/infra"
+	"github.com/jackstrohm/jot/pkg/journal"
 	"github.com/jackstrohm/jot/pkg/memory"
 	"github.com/jackstrohm/jot/tools"
 )
@@ -160,7 +161,7 @@ func registerSystemEvolutionTools() {
 			if content == "" {
 				return tools.OK("System evolution audit exists but is empty. The next nightly run will populate it.")
 			}
-			auditTs := jot.TruncateTimestamp(node.Timestamp, jot.DateTimeDisplayLen)
+			auditTs := journal.TruncateTimestamp(node.Timestamp, journal.DateTimeDisplayLen)
 			if auditTs == "" {
 				auditTs = "(no date)"
 			}
@@ -187,11 +188,15 @@ func registerProjectStatusTools() {
 			if status == "" {
 				return tools.MissingParam("status")
 			}
-			vec, err := jot.GenerateEmbedding(ctx, "Project: "+projectName)
+			app := infra.GetApp(ctx)
+			if app == nil || app.Config() == nil {
+				return tools.Fail("Error: no app in context")
+			}
+			vec, err := infra.GenerateEmbedding(ctx, app.Config().GoogleCloudProject, "Project: "+projectName)
 			if err != nil {
 				return tools.Fail("Error finding project: %v", err)
 			}
-			nodes, err := jot.QuerySimilarNodes(ctx, vec, 3)
+			nodes, err := memory.QuerySimilarNodes(ctx, vec, 3)
 			if err != nil || len(nodes) == 0 {
 				return tools.Fail("Project '%s' not found.", projectName)
 			}
@@ -206,15 +211,11 @@ func registerProjectStatusTools() {
 			meta["status"] = status
 			metaJSON, _ := json.Marshal(meta)
 
-			app := jot.GetApp(ctx)
-			if app == nil {
-				return tools.Fail("Error: no app in context")
-			}
 			client, err := app.Firestore(ctx)
 			if err != nil {
 				return tools.Fail("Error updating: %v", err)
 			}
-			_, err = client.Collection(jot.KnowledgeCollection).Doc(nodeID).Update(ctx, []firestore.Update{
+			_, err = client.Collection(memory.KnowledgeCollection).Doc(nodeID).Update(ctx, []firestore.Update{
 				{Path: "metadata", Value: string(metaJSON)},
 				{Path: "last_recalled_at", Value: time.Now().Format(time.RFC3339)},
 			})

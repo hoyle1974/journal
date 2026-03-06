@@ -6,7 +6,10 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/jackstrohm/jot"
+	"github.com/jackstrohm/jot/internal/service"
+	"github.com/jackstrohm/jot/pkg/agent"
+	"github.com/jackstrohm/jot/pkg/infra"
+	"github.com/jackstrohm/jot/pkg/journal"
 	"github.com/jackstrohm/jot/pkg/memory"
 	"github.com/jackstrohm/jot/tools"
 )
@@ -37,10 +40,10 @@ func registerKnowledgeTools() {
 			}
 			metadata := args.String("metadata", "{}")
 			var entryIDs []string
-			if cur := jot.CurrentEntryUUIDFrom(ctx); cur != "" {
+			if cur := agent.CurrentEntryUUIDFrom(ctx); cur != "" {
 				entryIDs = []string{cur}
 			}
-			id, err := jot.UpsertKnowledge(ctx, content, nodeType, metadata, entryIDs)
+			id, err := memory.UpsertKnowledge(ctx, content, nodeType, metadata, entryIDs)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
@@ -62,7 +65,11 @@ func registerKnowledgeTools() {
 				return tools.MissingParam("query")
 			}
 			limit := args.IntBounded("limit", 10, 1, 20)
-			queryVec, err := jot.GenerateEmbedding(ctx, query)
+			app := infra.GetApp(ctx)
+			if app == nil || app.Config() == nil {
+				return tools.Fail("Error: no app in context")
+			}
+			queryVec, err := infra.GenerateEmbedding(ctx, app.Config().GoogleCloudProject, query)
 			if err != nil {
 				return tools.Fail("Error generating embedding: %v", err)
 			}
@@ -75,26 +82,26 @@ func registerKnowledgeTools() {
 			entryCandidateLimit := entryLimit * 3
 			fusedNodeTopN := nodeLimit * 2
 
-			var vectorNodes, keywordNodes []jot.KnowledgeNode
-			var vectorEntries, keywordEntries []jot.Entry
+			var vectorNodes, keywordNodes []memory.KnowledgeNode
+			var vectorEntries, keywordEntries []journal.Entry
 			var nodeVecErr, nodeKwErr, entryVecErr, entryKwErr error
 			var wg sync.WaitGroup
 			wg.Add(4)
 			go func() {
 				defer wg.Done()
-				vectorNodes, nodeVecErr = jot.QuerySimilarNodes(ctx, queryVec, nodeCandidateLimit)
+				vectorNodes, nodeVecErr = memory.QuerySimilarNodes(ctx, queryVec, nodeCandidateLimit)
 			}()
 			go func() {
 				defer wg.Done()
-				keywordNodes, nodeKwErr = jot.SearchKnowledgeNodes(ctx, query, nodeCandidateLimit)
+				keywordNodes, nodeKwErr = memory.SearchKnowledgeNodes(ctx, query, nodeCandidateLimit)
 			}()
 			go func() {
 				defer wg.Done()
-				vectorEntries, entryVecErr = jot.QuerySimilarEntries(ctx, queryVec, entryCandidateLimit)
+				vectorEntries, entryVecErr = journal.QuerySimilarEntries(ctx, queryVec, entryCandidateLimit)
 			}()
 			go func() {
 				defer wg.Done()
-				keywordEntries, entryKwErr = jot.SearchEntries(ctx, query, entryCandidateLimit)
+				keywordEntries, entryKwErr = journal.SearchEntries(ctx, query, entryCandidateLimit)
 			}()
 			wg.Wait()
 
@@ -117,9 +124,9 @@ func registerKnowledgeTools() {
 				return tools.Fail("Error: entries search failed (vector: %v; keyword: %v)", entryVecErr, entryKwErr)
 			}
 
-			fusedNodes := jot.FuseKnowledgeNodes(vectorNodes, keywordNodes, fusedNodeTopN)
+			fusedNodes := memory.FuseKnowledgeNodes(vectorNodes, keywordNodes, fusedNodeTopN)
 			nodes, _ := memory.RerankNodes(ctx, query, fusedNodes, nodeLimit)
-			entries := jot.FuseEntries(vectorEntries, keywordEntries, entryLimit)
+			entries := memory.FuseEntries(vectorEntries, keywordEntries, entryLimit)
 
 			if len(nodes) == 0 && len(entries) == 0 {
 				return tools.OK("No semantic matches found for '%s'.", query)
@@ -151,16 +158,20 @@ func registerKnowledgeTools() {
 			if nodeType != "" {
 				queryStr = nodeType + " information"
 			}
-			queryVec, err := jot.GenerateEmbedding(ctx, queryStr)
+			app := infra.GetApp(ctx)
+			if app == nil || app.Config() == nil {
+				return tools.Fail("Error: no app in context")
+			}
+			queryVec, err := infra.GenerateEmbedding(ctx, app.Config().GoogleCloudProject, queryStr)
 			if err != nil {
 				return tools.Fail("Error generating embedding: %v", err)
 			}
-			nodes, err := jot.QuerySimilarNodes(ctx, queryVec, limit)
+			nodes, err := memory.QuerySimilarNodes(ctx, queryVec, limit)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
 			if nodeType != "" {
-				var filtered []jot.KnowledgeNode
+				var filtered []memory.KnowledgeNode
 				for _, n := range nodes {
 					if n.NodeType == nodeType {
 						filtered = append(filtered, n)
@@ -198,19 +209,19 @@ func registerKnowledgeTools() {
 			if entityName == "" {
 				return tools.Fail("entity_name cannot be empty")
 			}
-			node, err := jot.FindEntityNodeByName(ctx, entityName)
+			node, err := memory.FindEntityNodeByName(ctx, entityName)
 			if err != nil {
 				return tools.Fail("Error finding entity: %v", err)
 			}
 			if node == nil {
 				return tools.OK("No entity found for '%s'. Try semantic_search for related facts.", entityName)
 			}
-			full, err := jot.GetKnowledgeNodeByID(ctx, node.UUID)
+			full, err := memory.GetKnowledgeNodeByID(ctx, node.UUID)
 			if err != nil {
 				return tools.Fail("Error loading entity: %v", err)
 			}
 			var parts []string
-			entityTs := jot.TruncateTimestamp(full.Timestamp, jot.DateTimeDisplayLen)
+			entityTs := journal.TruncateTimestamp(full.Timestamp, journal.DateTimeDisplayLen)
 			if entityTs == "" {
 				entityTs = "(no date)"
 			}
@@ -219,7 +230,7 @@ func registerKnowledgeTools() {
 				parts = append(parts, fmt.Sprintf("Metadata: %s", full.Metadata))
 			}
 			if len(full.EntityLinks) > 0 {
-				related, err := jot.GetKnowledgeNodesByIDs(ctx, full.EntityLinks)
+				related, err := memory.GetKnowledgeNodesByIDs(ctx, full.EntityLinks)
 				if err != nil {
 					parts = append(parts, fmt.Sprintf("Related (fetch error: %v)", err))
 				} else if len(related) > 0 {
@@ -233,7 +244,7 @@ func registerKnowledgeTools() {
 						entryLines = append(entryLines, fmt.Sprintf("... and %d more entries", len(full.JournalEntryIDs)-5))
 						break
 					}
-					e, err := jot.GetEntry(ctx, eid)
+					e, err := journal.GetEntry(ctx, eid)
 					if err != nil || e == nil {
 						continue
 					}
@@ -241,7 +252,7 @@ func registerKnowledgeTools() {
 					if len(content) > 120 {
 						content = content[:117] + "..."
 					}
-					entryTs := jot.TruncateTimestamp(e.Timestamp, jot.DateTimeDisplayLen)
+					entryTs := journal.TruncateTimestamp(e.Timestamp, journal.DateTimeDisplayLen)
 					if entryTs == "" {
 						entryTs = "(no date)"
 					}
@@ -267,7 +278,7 @@ func registerKnowledgeTools() {
 			if !ok {
 				return tools.MissingParam("goal")
 			}
-			result, err := jot.CreateAndSavePlan(ctx, goal)
+			result, err := service.CreateAndSavePlan(ctx, goal)
 			if err != nil {
 				return tools.Fail("Error generating plan: %v", err)
 			}
@@ -284,7 +295,7 @@ func registerSignalTools() {
 		Params:      []tools.Param{tools.LimitParam(5, 10)},
 		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
 			limit := args.IntBounded("limit", 5, 1, 10)
-			signals, err := jot.GetActiveSignals(ctx, limit)
+			signals, err := memory.GetActiveSignals(ctx, limit)
 			if err != nil {
 				return tools.Fail("Error fetching signals: %v", err)
 			}

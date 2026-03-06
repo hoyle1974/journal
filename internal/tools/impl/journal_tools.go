@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jackstrohm/jot"
+	"github.com/jackstrohm/jot/pkg/journal"
 	"github.com/jackstrohm/jot/pkg/utils"
 	"github.com/jackstrohm/jot/tools"
 )
@@ -22,11 +22,11 @@ func registerJournalTools() {
 		Params:      []tools.Param{tools.CountParam()},
 		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
 			count := args.IntBounded("count", 10, 1, 50)
-			entries, err := jot.GetEntries(ctx, count)
+			entries, err := journal.GetEntries(ctx, count)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
-			result := jot.FormatEntriesForContext(entries, 10000)
+			result := journal.FormatEntriesForContext(entries, 10000)
 			return tools.OK("Found %d recent entries:\n%s", len(entries), result)
 		},
 	})
@@ -38,11 +38,11 @@ func registerJournalTools() {
 		Params:      []tools.Param{tools.CountParam()},
 		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
 			count := args.IntBounded("count", 10, 1, 50)
-			entries, err := jot.GetEntriesAsc(ctx, count)
+			entries, err := journal.GetEntriesAsc(ctx, count)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
-			result := jot.FormatEntriesForContext(entries, 10000)
+			result := journal.FormatEntriesForContext(entries, 10000)
 			return tools.OK("Found %d oldest entries (chronological order):\n%s", len(entries), result)
 		},
 	})
@@ -70,14 +70,14 @@ func registerJournalTools() {
 				return tools.Fail("Date range error: %v", err)
 			}
 			limit := args.IntBounded("limit", 50, 1, 200)
-			entries, err := jot.GetEntriesByDateRange(ctx, startStr, endStr, limit)
+			entries, err := journal.GetEntriesByDateRange(ctx, startStr, endStr, limit)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
 			if len(entries) == 0 {
 				return tools.OK("No entries found between %s and %s.", startStr, endStr)
 			}
-			result := jot.FormatEntriesForContext(entries, 10000)
+			result := journal.FormatEntriesForContext(entries, 10000)
 			return tools.OK("Found %d entries between %s and %s:\n%s", len(entries), startStr, endStr, result)
 		},
 	})
@@ -96,14 +96,14 @@ func registerJournalTools() {
 				return tools.MissingParam("query")
 			}
 			limit := args.IntBounded("limit", 20, 1, 50)
-			entries, err := jot.SearchEntries(ctx, query, limit)
+			entries, err := journal.SearchEntries(ctx, query, limit)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
 			if len(entries) == 0 {
 				return tools.OK("No entries matching '%s' found.", query)
 			}
-			result := jot.FormatEntriesForContext(entries, 10000)
+			result := journal.FormatEntriesForContext(entries, 10000)
 			return tools.OK("Found %d entries matching '%s':\n%s", len(entries), query, result)
 		},
 	})
@@ -126,7 +126,7 @@ func registerJournalTools() {
 			if endDateStr != "" {
 				endDate = &endDateStr
 			}
-			count, err := jot.CountEntries(ctx, startDate, endDate)
+			count, err := journal.CountEntries(ctx, startDate, endDate)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
@@ -151,7 +151,7 @@ func registerJournalTools() {
 		Category:    "journal",
 		Params:      []tools.Param{},
 		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
-			entries, err := jot.GetEntries(ctx, 100)
+			entries, err := journal.GetEntries(ctx, 100)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
@@ -186,14 +186,14 @@ func registerJournalTools() {
 				return tools.MissingParam("source")
 			}
 			count := args.IntBounded("count", 10, 1, 50)
-			entries, err := jot.GetEntriesBySource(ctx, source, count)
+			entries, err := journal.GetEntriesBySource(ctx, source, count)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
 			if len(entries) == 0 {
 				return tools.OK("No entries found from source '%s'.", source)
 			}
-			result := jot.FormatEntriesForContext(entries, 10000)
+			result := journal.FormatEntriesForContext(entries, 10000)
 			return tools.OK("Found %d entries from '%s':\n%s", len(entries), source, result)
 		},
 	})
@@ -218,7 +218,7 @@ func registerJournalTools() {
 				return tools.Fail("Date range error: %v", err)
 			}
 			limit := args.IntBounded("limit", 50, 1, 200)
-			withAnalyses, err := jot.GetEntriesWithAnalysisByDateRange(ctx, startStr, endStr, limit)
+			withAnalyses, err := journal.GetEntriesWithAnalysisByDateRange(ctx, startStr, endStr, limit)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
@@ -233,7 +233,7 @@ func registerJournalTools() {
 					continue
 				}
 				entryDate := ew.Entry.Timestamp
-				entryDate = jot.TruncateTimestamp(entryDate, jot.DateDisplayLen)
+				entryDate = journal.TruncateTimestamp(entryDate, journal.DateDisplayLen)
 				for _, ent := range ew.Analysis.Entities {
 					if entityType != "" && strings.ToLower(ent.Type) != entityType {
 						continue

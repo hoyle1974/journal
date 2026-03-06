@@ -8,8 +8,8 @@ import (
 	"log"
 	"os"
 
-	"github.com/jackstrohm/jot"
 	"github.com/jackstrohm/jot/internal/config"
+	"github.com/jackstrohm/jot/pkg/infra"
 	"github.com/jackstrohm/jot/pkg/memory"
 )
 
@@ -24,18 +24,18 @@ func runMigrateMeta() {
 	if err != nil {
 		log.Fatalf("config: %v", err)
 	}
-	app, err := jot.NewApp(ctx, cfg)
+	app, err := infra.NewApp(ctx, cfg, nil, nil)
 	if err != nil {
 		log.Fatalf("NewApp: %v", err)
 	}
-	ctx = jot.WithApp(ctx, app)
+	ctx = infra.WithApp(ctx, app)
 
-	client, err := jot.GetFirestoreClient(ctx)
+	client, err := infra.GetFirestoreClient(ctx)
 	if err != nil {
 		log.Fatalf("GetFirestoreClient: %v", err)
 	}
 
-	updated, err := memory.MigrateKnowledgeMetadata(ctx, client, jot.KnowledgeCollection, *dryRun)
+	updated, err := memory.MigrateKnowledgeMetadata(ctx, client, memory.KnowledgeCollection, *dryRun)
 	if err != nil {
 		log.Fatalf("MigrateKnowledgeMetadata: %v", err)
 	}

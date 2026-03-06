@@ -9,8 +9,12 @@ import (
 	"os"
 	"time"
 
-	"github.com/jackstrohm/jot"
 	"github.com/jackstrohm/jot/internal/config"
+	"github.com/jackstrohm/jot/internal/service"
+	"github.com/jackstrohm/jot/pkg/agent"
+	"github.com/jackstrohm/jot/pkg/infra"
+	"github.com/jackstrohm/jot/pkg/journal"
+	"github.com/jackstrohm/jot/pkg/memory"
 )
 
 const distanceThreshold = 0.15
@@ -27,13 +31,13 @@ func runBackfillLinks() {
 	if err != nil {
 		log.Fatalf("config: %v", err)
 	}
-	app, err := jot.NewApp(ctx, cfg)
+	app, err := infra.NewApp(ctx, cfg, nil, nil)
 	if err != nil {
 		log.Fatalf("init app: %v", err)
 	}
-	ctx = jot.WithApp(ctx, app)
+	ctx = infra.WithApp(ctx, app)
 
-	entries, err := jot.GetEntriesAsc(ctx, *limit)
+	entries, err := journal.GetEntriesAsc(ctx, *limit)
 	if err != nil {
 		log.Fatalf("get entries: %v", err)
 	}
@@ -41,7 +45,7 @@ func runBackfillLinks() {
 
 	linked, created, skipped, errors := 0, 0, 0, 0
 	for i, e := range entries {
-		extract, err := jot.RunEvaluatorExtract(ctx, e.Content)
+		extract, err := agent.RunEvaluatorExtract(ctx, service.ServiceEnv{}, e.Content)
 		if err != nil {
 			log.Printf("[%d/%d] %s extract error: %v", i+1, len(entries), e.UUID, err)
 			errors++
@@ -52,14 +56,14 @@ func runBackfillLinks() {
 			continue
 		}
 
-		vec, err := jot.GenerateEmbedding(ctx, extract.FactToStore, jot.EmbedTaskRetrievalDocument)
+		vec, err := infra.GenerateEmbedding(ctx, cfg.GoogleCloudProject, extract.FactToStore, infra.EmbedTaskRetrievalDocument)
 		if err != nil {
 			log.Printf("[%d/%d] %s embedding error: %v", i+1, len(entries), e.UUID, err)
 			errors++
 			continue
 		}
 
-		existing, err := jot.FindNearestWithThreshold(ctx, vec, distanceThreshold)
+		existing, err := memory.FindNearestWithThreshold(ctx, vec, distanceThreshold)
 		if err != nil {
 			log.Printf("[%d/%d] %s find-nearest error: %v", i+1, len(entries), e.UUID, err)
 			errors++
@@ -67,13 +71,13 @@ func runBackfillLinks() {
 		}
 
 		if existing != nil {
-			action, collErr := jot.EvaluateFactCollision(ctx, extract.FactToStore, existing.Content)
+			action, collErr := infra.EvaluateFactCollision(ctx, cfg, extract.FactToStore, existing.Content)
 			if collErr != nil {
 				action = "insert"
 			}
 			if action == "update" {
 				if !*dryRun {
-					if err := jot.AppendJournalEntryIDsToNode(ctx, existing.UUID, []string{e.UUID}); err != nil {
+					if err := memory.AppendJournalEntryIDsToNode(ctx, existing.UUID, []string{e.UUID}); err != nil {
 						log.Printf("[%d/%d] %s append link error: %v", i+1, len(entries), e.UUID, err)
 						errors++
 						continue
@@ -89,7 +93,7 @@ func runBackfillLinks() {
 					} else if extract.Domain == "work" {
 						nodeType = "project"
 					}
-					if _, err := jot.UpsertSemanticMemory(ctx, extract.FactToStore, nodeType, extract.Domain, extract.Significance, nil, []string{e.UUID}); err != nil {
+					if _, err := memory.UpsertSemanticMemory(ctx, extract.FactToStore, nodeType, extract.Domain, extract.Significance, nil, []string{e.UUID}); err != nil {
 						log.Printf("[%d/%d] %s upsert error: %v", i+1, len(entries), e.UUID, err)
 						errors++
 						continue
@@ -106,7 +110,7 @@ func runBackfillLinks() {
 				} else if extract.Domain == "work" {
 					nodeType = "project"
 				}
-				if _, err := jot.UpsertSemanticMemory(ctx, extract.FactToStore, nodeType, extract.Domain, extract.Significance, nil, []string{e.UUID}); err != nil {
+				if _, err := memory.UpsertSemanticMemory(ctx, extract.FactToStore, nodeType, extract.Domain, extract.Significance, nil, []string{e.UUID}); err != nil {
 					log.Printf("[%d/%d] %s upsert error: %v", i+1, len(entries), e.UUID, err)
 					errors++
 					continue

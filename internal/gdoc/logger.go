@@ -1,4 +1,4 @@
-package jot
+package gdoc
 
 import (
 	"context"
@@ -7,48 +7,27 @@ import (
 	"time"
 	"unicode/utf16"
 
+	"github.com/jackstrohm/jot/internal/config"
+	"github.com/jackstrohm/jot/pkg/infra"
 	"google.golang.org/api/docs/v1"
 	"google.golang.org/api/option"
 )
 
-// SubmitAsync submits a task to the app's async fire-and-forget pool (no-op if no App in context).
-func SubmitAsync(ctx context.Context, task func()) {
-	if app := GetApp(ctx); app != nil {
-		app.SubmitAsync(task)
+// NewGDocLogFunc returns a function that writes log lines to the configured Google Doc [LOGS] section.
+// Pass the returned function to infra.InitDefaultApp as the gdocLog callback.
+func NewGDocLogFunc(cfg *config.Config) func(ctx context.Context, message string) {
+	if cfg == nil {
+		return func(context.Context, string) {}
+	}
+	return func(ctx context.Context, message string) {
+		logToGDocSync(ctx, cfg, message)
 	}
 }
 
-// SubmitToolExec submits a task to the app's tool execution pool (no-op if no App in context).
-func SubmitToolExec(ctx context.Context, task func()) {
-	if app := GetApp(ctx); app != nil {
-		app.SubmitToolExec(task)
-	}
-}
-
-// SubmitSummaryGen submits a task to the app's summary generation pool (no-op if no App in context).
-func SubmitSummaryGen(ctx context.Context, task func()) {
-	if app := GetApp(ctx); app != nil {
-		app.SubmitSummaryGen(task)
-	}
-}
-
-// SubmitGDocLog submits a message to the Google Doc log pool.
-func SubmitGDocLog(ctx context.Context, msg string) {
-	app := GetApp(ctx)
-	if app == nil {
-		app, _ = GetDefaultApp()
-	}
-	if app != nil {
-		app.SubmitGDocLog(ctx, msg)
-	}
-}
-
-// docIndexLen returns the length of s in UTF-16 code units (Google Docs API StartIndex/EndIndex).
 func docIndexLen(s string) int64 {
 	return int64(len(utf16.Encode([]rune(s))))
 }
 
-// scanForLogsStanza finds [LOGS] and [/LOGS] in body content and nested table cells.
 func scanForLogsStanza(content []*docs.StructuralElement, logsStartIndex, logsEndTagStart *int64) {
 	if content == nil {
 		return
@@ -88,29 +67,28 @@ func scanForLogsStanza(content []*docs.StructuralElement, logsStartIndex, logsEn
 	}
 }
 
-// logToGDocSync writes a log line to the Google Doc (called by the gdoc appender pool).
-func logToGDocSync(ctx context.Context, message string) {
-	ctx = WithGDocLogging(ctx)
-	ctx, span := StartSpan(ctx, "gdoc.log")
+func logToGDocSync(ctx context.Context, cfg *config.Config, message string) {
+	ctx = infra.WithGDocLogging(ctx)
+	ctx, span := infra.StartSpan(ctx, "gdoc.log")
 	defer span.End()
 
 	var docsService *docs.Service
 	var err error
 
-	if defaultConfig.ServiceAccountFile != "" {
-		docsService, err = docs.NewService(ctx, option.WithCredentialsFile(defaultConfig.ServiceAccountFile))
+	if cfg.ServiceAccountFile != "" {
+		docsService, err = docs.NewService(ctx, option.WithCredentialsFile(cfg.ServiceAccountFile))
 	} else {
 		docsService, err = docs.NewService(ctx)
 	}
 	if err != nil {
-		LoggerFrom(ctx).Error("failed to create Docs service for logging", "error", err)
+		infra.LoggerFrom(ctx).Error("failed to create Docs service for logging", "error", err)
 		span.RecordError(err)
 		return
 	}
 
-	doc, err := docsService.Documents.Get(defaultConfig.DocumentID).Do()
+	doc, err := docsService.Documents.Get(cfg.DocumentID).Do()
 	if err != nil {
-		LoggerFrom(ctx).Error("failed to fetch document for logging", "error", err)
+		infra.LoggerFrom(ctx).Error("failed to fetch document for logging", "error", err)
 		span.RecordError(err)
 		return
 	}
@@ -119,7 +97,7 @@ func logToGDocSync(ctx context.Context, message string) {
 	scanForLogsStanza(doc.Body.Content, &logsStartIndex, &logsEndTagStart)
 
 	if logsStartIndex == -1 || logsEndTagStart == -1 {
-		LoggerFrom(ctx).Debug("gdoc logging skipped (no [LOGS] [/LOGS] section in document)")
+		infra.LoggerFrom(ctx).Debug("gdoc logging skipped (no [LOGS] [/LOGS] section in document)")
 		return
 	}
 
@@ -146,14 +124,14 @@ func logToGDocSync(ctx context.Context, message string) {
 		},
 	}
 
-	_, err = docsService.Documents.BatchUpdate(defaultConfig.DocumentID, &docs.BatchUpdateDocumentRequest{
+	_, err = docsService.Documents.BatchUpdate(cfg.DocumentID, &docs.BatchUpdateDocumentRequest{
 		Requests: requests,
 	}).Do()
 	if err != nil {
-		LoggerFrom(ctx).Error("failed to write log to gdoc", "error", err)
+		infra.LoggerFrom(ctx).Error("failed to write log to gdoc", "error", err)
 		span.RecordError(err)
 		return
 	}
 
-	LoggerFrom(ctx).Debug("logged to gdoc", "message", message)
+	infra.LoggerFrom(ctx).Debug("logged to gdoc", "message", message)
 }

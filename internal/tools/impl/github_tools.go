@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/google/generative-ai-go/genai"
-	"github.com/jackstrohm/jot"
+	"github.com/jackstrohm/jot/pkg/infra"
 	"github.com/jackstrohm/jot/tools"
 )
 
@@ -49,7 +49,7 @@ func registerGitHubTools() {
 func intPtr(n int) *int { return &n }
 
 func executeGitHubRead(ctx context.Context, args *tools.Args) tools.Result {
-	ctx, span := jot.StartSpan(ctx, "tool.github_read")
+	ctx, span := infra.StartSpan(ctx, "tool.github_read")
 	defer span.End()
 
 	action, ok := args.RequiredString("action")
