@@ -53,12 +53,11 @@ fi
 # Set project
 gcloud config set project $PROJECT 2>/dev/null
 
-# Deploy Firestore indexes from firestore.indexes.json (ensure existing indexes are updated).
+# Deploy Firestore indexes from firestore.indexes.json.
 # Includes Janitor index: knowledge_nodes (last_recalled_at, significance_weight).
+# With jq fallback, each index check/creation runs in parallel; we wait for all at the end.
 echo -e "${YELLOW}Deploying Firestore indexes...${NC}"
 if command -v firebase &> /dev/null; then
-  # Prefer Firebase CLI: syncs indexes from file (adds missing, leaves existing)
-  # Use project so we don't rely on default; show errors if one index fails
   firebase use "$PROJECT" 2>/dev/null || true
   if firebase deploy --only firestore:indexes --project "$PROJECT" --non-interactive; then
     echo -e "${GREEN}Firestore indexes deployed via Firebase CLI.${NC}"
@@ -66,50 +65,57 @@ if command -v firebase &> /dev/null; then
     echo -e "${YELLOW}Firebase deploy had errors (see above). Check Firebase Console > Firestore > Indexes for status.${NC}"
   fi
 elif command -v jq &> /dev/null && [ -f firestore.indexes.json ]; then
-  # Fallback: create each index via gcloud with inline --field-config=... (gcloud does not accept file path)
   INDEXES_JSON="firestore.indexes.json"
+  INDEX_LOGFILES=()
   N=0
-  CREATED=0
   while true; do
     CG=$(jq -r --argjson n "$N" '.indexes[$n].collectionGroup // empty' "$INDEXES_JSON")
     [ -z "$CG" ] && break
-    QS=$(jq -r --argjson n "$N" '.indexes[$n].queryScope // "COLLECTION"' "$INDEXES_JSON" | tr '[:upper:]' '[:lower:]')
-    # Build one --field-config=... per field. Vector: vector-config={dimension=N,flat} (flat inside braces)
-    FCONFIG_ARGS=()
-    while IFS= read -r line; do
-      [ -z "$line" ] && continue
-      FCONFIG_ARGS+=(--field-config="$line")
-    done < <(jq -r --argjson n "$N" '
-      .indexes[$n].fields[]
-      | if .vectorConfig then
-          "field-path=\(.fieldPath),vector-config={dimension=\(.vectorConfig.dimension),flat}"
-        else
-          "field-path=\(.fieldPath),order=\(.order | ascii_downcase)"
-        end
-    ' "$INDEXES_JSON")
-    TMPF=$(mktemp)
-    if gcloud firestore indexes composite create \
-      --project="$PROJECT" \
-      --collection-group="$CG" \
-      --query-scope="$QS" \
-      "${FCONFIG_ARGS[@]}" \
-      --async \
-      --quiet 2>"$TMPF.err"; then
-      echo -e "  Created (building): $CG"
-      CREATED=$((CREATED + 1))
-    else
-      ERR=$(cat "$TMPF.err" 2>/dev/null)
-      if echo "$ERR" | grep -qi "already exists\|RESOURCE_ALREADY_EXISTS"; then
-        echo -e "  Exists: $CG"
+    OUTFILE=$(mktemp)
+    INDEX_LOGFILES+=("$OUTFILE")
+    (
+      IDX=$N
+      QS=$(jq -r --argjson n "$IDX" '.indexes[$n].queryScope // "COLLECTION"' "$INDEXES_JSON" | tr '[:upper:]' '[:lower:]')
+      FCONFIG_ARGS=()
+      while IFS= read -r line; do
+        [ -z "$line" ] && continue
+        FCONFIG_ARGS+=(--field-config="$line")
+      done < <(jq -r --argjson n "$IDX" '
+        .indexes[$n].fields[]
+        | if .vectorConfig then
+            "field-path=\(.fieldPath),vector-config={dimension=\(.vectorConfig.dimension),flat}"
+          else
+            "field-path=\(.fieldPath),order=\(.order | ascii_downcase)"
+          end
+      ' "$INDEXES_JSON")
+      TMPF=$(mktemp)
+      if gcloud firestore indexes composite create \
+        --project="$PROJECT" \
+        --collection-group="$CG" \
+        --query-scope="$QS" \
+        "${FCONFIG_ARGS[@]}" \
+        --async \
+        --quiet 2>"$TMPF.err"; then
+        echo -e "  Created (building): $CG"
       else
-        echo -e "${YELLOW}  Failed: $CG${NC}"
-        echo "$ERR" | head -5
+        ERR=$(cat "$TMPF.err" 2>/dev/null)
+        if echo "$ERR" | grep -qi "already exists\|RESOURCE_ALREADY_EXISTS"; then
+          echo -e "  Exists: $CG"
+        else
+          echo -e "${YELLOW}  Failed: $CG${NC}"
+          echo "$ERR" | head -5
+        fi
       fi
-    fi
-    rm -f "$TMPF" "$TMPF.err"
+      rm -f "$TMPF" "$TMPF.err"
+    ) > "$OUTFILE" 2>&1 &
     N=$((N + 1))
   done
-  echo -e "${GREEN}Processed $N index definitions ($CREATED created).${NC}"
+  wait
+  for f in "${INDEX_LOGFILES[@]}"; do
+    cat "$f"
+    rm -f "$f"
+  done
+  echo -e "${GREEN}Processed $N index definitions.${NC}"
 else
   echo -e "${YELLOW}Install Firebase CLI (firebase-tools) or jq to deploy indexes from firestore.indexes.json.${NC}"
   echo -e "${YELLOW}Otherwise create indexes manually in the GCP Console or via gcloud.${NC}"
