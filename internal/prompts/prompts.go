@@ -68,6 +68,9 @@ var gapDetectorTxt string
 //go:embed roll_up.txt
 var rollUpTxt string
 
+//go:embed activity_history.txt
+var activityHistoryTxt string
+
 var (
 	specialistMap   map[string]string
 	specialistMapOnce sync.Once
@@ -163,4 +166,12 @@ func RollUpTemplate() string { return rollUpTxt }
 // FormatRollUp formats the roll-up template with period and analyses text.
 func FormatRollUp(periodLabel, analysesText string) string {
 	return fmt.Sprintf(RollUpTemplate(), periodLabel, analysesText)
+}
+
+// ActivityHistoryTemplate returns the activity-history summarization prompt template with three %s: topic, timeframe, entriesText.
+func ActivityHistoryTemplate() string { return activityHistoryTxt }
+
+// FormatActivityHistory formats the activity-history template with topic, timeframe, and entries text.
+func FormatActivityHistory(topic, timeframe, entriesText string) string {
+	return fmt.Sprintf(ActivityHistoryTemplate(), topic, timeframe, entriesText)
 }

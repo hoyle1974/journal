@@ -3,6 +3,7 @@ package impl
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/jackstrohm/jot/pkg/infra"
 	"github.com/jackstrohm/jot/pkg/journal"
 	"github.com/jackstrohm/jot/pkg/memory"
+	"github.com/jackstrohm/jot/pkg/utils"
 	"github.com/jackstrohm/jot/tools"
 )
 
@@ -171,6 +173,102 @@ func registerSystemEvolutionTools() {
 }
 
 func registerProjectStatusTools() {
+	tools.Register(&tools.Tool{
+		Name:        "get_project_timeline",
+		Description: "Get a unified timeline for a project: current status from knowledge, briefing content, and recent journal activity mentioning the project. Use when the user asks 'what's the status of X?', 'how's the jot app going?', or for a project summary with recent momentum. Limitation: 'recent activity' is the last calendar month only, not a rolling 30-day window.",
+		Category:    "context",
+		Params: []tools.Param{
+			tools.RequiredStringParam("project_name", "Name of the project or goal (e.g. 'jot app', 'party planning')"),
+		},
+		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
+			projectName, ok := args.RequiredString("project_name")
+			if !ok {
+				return tools.MissingParam("project_name")
+			}
+			app := infra.GetApp(ctx)
+			if app == nil || app.Config() == nil {
+				return tools.Fail("Error: no app in context")
+			}
+			vec, err := infra.GenerateEmbedding(ctx, app.Config().GoogleCloudProject, "Project: "+projectName)
+			if err != nil {
+				return tools.Fail("Error finding project: %v", err)
+			}
+			nodes, err := memory.QuerySimilarNodes(ctx, vec, 5)
+			if err != nil {
+				return tools.Fail("Error querying knowledge: %v", err)
+			}
+			var projectNode *memory.KnowledgeNode
+			for i := range nodes {
+				if nodes[i].NodeType == "project" || nodes[i].NodeType == "goal" {
+					projectNode = &nodes[i]
+					break
+				}
+			}
+			startStr, endStr, err := utils.ResolveDateRange("last month", "today")
+			if err != nil {
+				return tools.Fail("Date range error: %v", err)
+			}
+			withAnalyses, err := journal.GetEntriesWithAnalysisByDateRange(ctx, startStr, endStr, 100)
+			if err != nil {
+				return tools.Fail("Error fetching journal entries: %v", err)
+			}
+			projectLower := strings.ToLower(projectName)
+			var activityLines []string
+			for _, ew := range withAnalyses {
+				if ew.Analysis == nil {
+					continue
+				}
+				var hasProject bool
+				for _, e := range ew.Analysis.Entities {
+					if strings.Contains(strings.ToLower(e.Name), projectLower) {
+						hasProject = true
+						break
+					}
+				}
+				if !hasProject {
+					continue
+				}
+				date := journal.TruncateTimestamp(ew.Entry.Timestamp, journal.DateDisplayLen)
+				summary := ew.Analysis.Summary
+				if summary == "" {
+					summary = utils.TruncateString(ew.Entry.Content, 80)
+				}
+				activityLines = append(activityLines, fmt.Sprintf("- [%s] %s", date, summary))
+			}
+			var status, briefing string
+			if projectNode != nil {
+				var meta map[string]interface{}
+				if projectNode.Metadata != "" {
+					_ = json.Unmarshal([]byte(projectNode.Metadata), &meta)
+				}
+				if meta != nil {
+					if s, _ := meta["status"].(string); s != "" {
+						status = s
+					}
+				}
+				if status == "" {
+					status = "Unknown"
+				}
+				briefing = strings.TrimSpace(projectNode.Content)
+			} else {
+				status = "Not found in knowledge"
+				briefing = "(No knowledge node for this project.)"
+			}
+			var b strings.Builder
+			b.WriteString(fmt.Sprintf("Project: %s\n", projectName))
+			b.WriteString(fmt.Sprintf("Current Status: %s\n", status))
+			b.WriteString("Knowledge Briefing: ")
+			b.WriteString(briefing)
+			b.WriteString("\n\nRecent Activity:\n")
+			if len(activityLines) == 0 {
+				b.WriteString("(No journal entries in the last 30 days mentioning this project.)")
+			} else {
+				b.WriteString(strings.Join(activityLines, "\n"))
+			}
+			return tools.OK("%s", b.String())
+		},
+	})
+
 	tools.Register(&tools.Tool{
 		Name:        "update_project_status",
 		Description: "Update the status of an ongoing goal or project (e.g. 'active', 'blocked', 'completed', 'archived'). Use this when the user indicates a project phase is done or finished.",

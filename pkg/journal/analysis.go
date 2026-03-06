@@ -40,6 +40,7 @@ type OpenLoop struct {
 type JournalAnalysis struct {
 	Summary   string     `json:"summary"`
 	Mood      string     `json:"mood"`
+	Category  string     `json:"category"` // work, personal, health, finance, logistics
 	Tags      []string   `json:"tags"`
 	Entities  []Entity   `json:"entities"`
 	OpenLoops []OpenLoop `json:"open_loops"`
@@ -80,9 +81,10 @@ func AnalyzeJournalEntry(ctx context.Context, entryContent, entryUUID, entryTime
 	model.ResponseSchema = &genai.Schema{
 		Type: genai.TypeObject,
 		Properties: map[string]*genai.Schema{
-			"summary": {Type: genai.TypeString},
-			"mood":    {Type: genai.TypeString},
-			"tags":    {Type: genai.TypeArray, Items: &genai.Schema{Type: genai.TypeString}},
+			"summary":   {Type: genai.TypeString},
+			"mood":      {Type: genai.TypeString},
+			"category":  {Type: genai.TypeString, Enum: []string{"work", "personal", "health", "finance", "logistics"}},
+			"tags":      {Type: genai.TypeArray, Items: &genai.Schema{Type: genai.TypeString}},
 			"open_loops": {
 				Type: genai.TypeArray,
 				Items: &genai.Schema{
@@ -117,7 +119,7 @@ func AnalyzeJournalEntry(ctx context.Context, entryContent, entryUUID, entryTime
 	}
 
 	jsonText := infra.ExtractText(resp)
-	analysis, parseErr := llmjson.ParseLLMResponse[JournalAnalysis](jsonText, []string{"summary", "mood", "tags", "entities", "open_loops"})
+	analysis, parseErr := llmjson.ParseLLMResponse[JournalAnalysis](jsonText, []string{"summary", "mood", "category", "tags", "entities", "open_loops"})
 	if analysis == nil {
 		if parseErr == nil {
 			parseErr = fmt.Errorf("parse failed")

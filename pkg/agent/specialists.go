@@ -42,8 +42,8 @@ func RunEvaluatorExtract(ctx context.Context, env SpecialistsEnv, content string
 		return nil, err
 	}
 	model := client.GenerativeModel(app.QueryModel())
-	model.ResponseMIMEType = "application/json"
-	model.SetMaxOutputTokens(256)
+	model.ResponseMIMEType = "application/json" // JSON mode for structured output
+	model.SetMaxOutputTokens(1024)
 	model.ResponseSchema = &genai.Schema{
 		Type: genai.TypeObject,
 		Properties: map[string]*genai.Schema{
@@ -130,9 +130,42 @@ func RunEvaluator(ctx context.Context, env SpecialistsEnv, content, entryUUID, t
 	status := "IGNORE_PROACTIVE"
 	if parsed.Significance >= ProactiveAlertSignificanceThreshold {
 		status = "ALERT"
+		// Async: generate one follow-up question/observation and store as proactive signal for FOH.
+		app := infra.GetApp(ctx)
+		if app != nil && app.Config() != nil {
+			go runProactiveInsight(context.Background(), app, env, entryUUID, content)
+		}
 	}
 	infra.LoggerFrom(ctx).Info("evaluator", "entry_uuid", entryUUID, "significance", parsed.Significance, "threshold_for_alert", ProactiveAlertSignificanceThreshold, "status", status, "domain", parsed.Domain, "fact_stored", factStored)
 	_ = timestamp
+}
+
+const proactiveInsightPrompt = `Based on this highly significant journal entry, generate exactly one insightful follow-up question or brief observation. Output only that single question or observation—no preamble, no numbering.`
+
+func runProactiveInsight(ctx context.Context, app *infra.App, env SpecialistsEnv, entryUUID, entryContent string) {
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	ctx = infra.WithApp(ctx, app)
+	cfg := app.Config()
+	if cfg == nil {
+		return
+	}
+	userPrompt := "Entry:\n" + utils.WrapAsUserData(utils.SanitizePrompt(utils.TruncateString(entryContent, 2000)))
+	summary, err := infra.GenerateContentSimple(ctx, proactiveInsightPrompt+prompts.DataSafety(), userPrompt, cfg, &infra.GenConfig{MaxOutputTokens: 128})
+	if err != nil || strings.TrimSpace(summary) == "" {
+		if err != nil {
+			infra.LoggerFrom(ctx).Debug("proactive insight LLM failed", "entry_uuid", entryUUID, "error", err)
+		}
+		return
+	}
+	bgCtx, cancel2 := context.WithTimeout(context.Background(), 15*time.Second)
+	bgCtx = infra.WithApp(bgCtx, app)
+	defer cancel2()
+	if _, err := env.UpsertSemanticMemory(bgCtx, strings.TrimSpace(summary), "thought", "selfmodel", 0.9, nil, []string{entryUUID}); err != nil {
+		infra.LoggerFrom(ctx).Debug("proactive insight upsert failed", "entry_uuid", entryUUID, "error", err)
+		return
+	}
+	infra.LoggerFrom(ctx).Info("proactive insight stored", "entry_uuid", entryUUID, "preview", utils.TruncateString(summary, 60))
 }
 
 // Domain represents a specialist's focus area.
@@ -193,8 +226,9 @@ func RunEvolutionAudit(ctx context.Context, queriesText, journalSummary string) 
 		return nil, infra.WrapLLMError(err)
 	}
 	model := client.GenerativeModel(app.DreamerModel())
-	model.ResponseMIMEType = "application/json"
+	model.ResponseMIMEType = "application/json" // JSON mode for structured output
 	model.SetMaxOutputTokens(2048)
+	model.SetTopP(0.9) // Slight penalty for repetition (SDK has no frequency_penalty)
 	model.ResponseSchema = &genai.Schema{
 		Type: genai.TypeObject,
 		Properties: map[string]*genai.Schema{
@@ -225,11 +259,23 @@ func RunEvolutionAudit(ctx context.Context, queriesText, journalSummary string) 
 	text := infra.ExtractTextFromResponse(resp)
 	out, parseErr := llmjson.ParseLLMResponse[EvolutionAuditOutput](text, []string{"summary", "facts", "entities", "engineer_questions"})
 	if out == nil {
+		// Best-effort: try repair-only parse so evolution synthesis can still write something.
+		var repaired EvolutionAuditOutput
+		if err := llmjson.RepairAndUnmarshal(text, &repaired); err == nil {
+			infra.LoggerFrom(ctx).Info("evolution_audit recovered via repair", "summary_len", len(repaired.Summary), "facts", len(repaired.Facts))
+			return &repaired, nil
+		}
 		if parseErr == nil {
 			parseErr = errors.New("parse failed")
 		}
-		infra.LoggerFrom(ctx).Warn("evolution_audit parse failed", "error", parseErr, "raw", utils.TruncateString(text, 400))
-		return nil, fmt.Errorf("evolution audit JSON parse failed: %w", parseErr)
+		infra.LoggerFrom(ctx).Warn("evolution_audit parse failed, returning minimal output", "error", parseErr, "raw", utils.TruncateString(text, 400))
+		// Return minimal valid output so RunEvolutionSynthesis can still update system_evolution.
+		return &EvolutionAuditOutput{
+			Summary:           "Evolution audit response was truncated or malformed; partial raw: " + utils.TruncateString(strings.TrimSpace(text), 500),
+			Facts:             nil,
+			Entities:          nil,
+			EngineerQuestions: nil,
+		}, nil
 	}
 	infra.LoggerFrom(ctx).Info("evolution_audit done", "summary_len", len(out.Summary), "facts", len(out.Facts), "entities", len(out.Entities), "engineer_questions", len(out.EngineerQuestions))
 	return out, nil
@@ -273,8 +319,9 @@ Recent journal context:
 		modelName = app.DreamerModel()
 	}
 	model := client.GenerativeModel(modelName)
-	model.ResponseMIMEType = "application/json"
+	model.ResponseMIMEType = "application/json" // JSON mode for structured output
 	model.SetMaxOutputTokens(2048)
+	model.SetTopP(0.9) // Reduce repetition / infinite loops in entities
 	model.ResponseSchema = &genai.Schema{
 		Type: genai.TypeObject,
 		Properties: map[string]*genai.Schema{
@@ -284,7 +331,8 @@ Recent journal context:
 		},
 	}
 
-	systemPrompt := specialistSystemPrompts[domain] + prompts.DataSafety()
+	// Streamline output: cap facts and summary so response fits token limit and stays valid JSON.
+	systemPrompt := specialistSystemPrompts[domain] + "\n\nOutput at most 5 facts. Keep summary to 1-2 sentences. Prefer quality over quantity; avoid repeating similar entities." + prompts.DataSafety()
 	model.SystemInstruction = &genai.Content{Parts: []genai.Part{genai.Text(systemPrompt)}}
 
 	apiCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
@@ -320,10 +368,16 @@ Recent journal context:
 		Facts    []string `json:"facts"`
 		Entities []string `json:"entities"`
 	}
-	if err := json.Unmarshal([]byte(text), &parsed); err != nil {
-		infra.LoggerFrom(ctx).Warn("specialist output parse failed", "domain", domain, "error", err, "raw", utils.TruncateString(text, 500))
+	parsedOut, parseErr := llmjson.ParseLLMResponse[struct {
+		Summary  string   `json:"summary"`
+		Facts    []string `json:"facts"`
+		Entities []string `json:"entities"`
+	}](text, []string{"summary", "facts", "entities"})
+	if parsedOut == nil {
+		infra.LoggerFrom(ctx).Warn("specialist output parse failed", "domain", domain, "error", parseErr, "raw", utils.TruncateString(text, 500))
 		return &SpecialistOutput{Domain: domain, Summary: strings.TrimSpace(text)}, nil
 	}
+	parsed = *parsedOut
 
 	if len(parsed.Facts) == 0 {
 		infra.LoggerFrom(ctx).Info("specialist returned 0 facts", "domain", domain, "summary", utils.TruncateString(parsed.Summary, 150), "raw_response", utils.TruncateString(text, 500))
@@ -354,8 +408,9 @@ func RunContextExtractor(ctx context.Context, journalContext string) ([]string, 
 	}
 
 	model := client.GenerativeModel(app.DreamerModel())
-	model.ResponseMIMEType = "application/json"
-	model.SetMaxOutputTokens(512)
+	model.ResponseMIMEType = "application/json" // JSON mode for structured output
+	model.SetMaxOutputTokens(1024)
+	model.SetTopP(0.9)
 	model.ResponseSchema = &genai.Schema{
 		Type: genai.TypeObject,
 		Properties: map[string]*genai.Schema{
@@ -385,7 +440,8 @@ func RunContextExtractor(ctx context.Context, journalContext string) ([]string, 
 	parsedOut, parseErr := llmjson.ParseLLMResponse[struct{ ImpactedContexts []string }](text, []string{"impacted_contexts"})
 	if parseErr != nil || parsedOut == nil {
 		infra.LoggerFrom(ctx).Warn("context_extractor parse failed", "error", parseErr, "raw", utils.TruncateString(text, 300))
-		return nil, nil
+		// Return empty slice (not nil) so dreamer continues with no impacted contexts instead of nil.
+		return []string{}, nil
 	}
 	infra.LoggerFrom(ctx).Info("context_extractor done", "count", len(parsedOut.ImpactedContexts))
 	return parsedOut.ImpactedContexts, nil
@@ -412,8 +468,9 @@ func RunQueryAnalyzer(ctx context.Context, recentQueriesText string) (string, er
 	}
 
 	model := client.GenerativeModel(app.DreamerModel())
-	model.ResponseMIMEType = "application/json"
+	model.ResponseMIMEType = "application/json" // JSON mode for structured output
 	model.SetMaxOutputTokens(1024)
+	model.SetTopP(0.9)
 	model.ResponseSchema = &genai.Schema{
 		Type: genai.TypeObject,
 		Properties: map[string]*genai.Schema{
@@ -470,8 +527,8 @@ func DecomposeMessage(ctx context.Context, userMessage string) ([]Domain, error)
 	}
 
 	model := client.GenerativeModel(app.QueryModel())
-	model.ResponseMIMEType = "application/json"
-	model.SetMaxOutputTokens(512)
+	model.ResponseMIMEType = "application/json" // JSON mode for structured output
+	model.SetMaxOutputTokens(1024)
 	model.ResponseSchema = &genai.Schema{
 		Type: genai.TypeObject,
 		Properties: map[string]*genai.Schema{
