@@ -13,6 +13,7 @@ import (
 	"github.com/jackstrohm/jot/pkg/agent"
 	"github.com/jackstrohm/jot/internal/prompts"
 	"github.com/jackstrohm/jot/llmjson"
+	"github.com/jackstrohm/jot/pkg/memory"
 	"github.com/jackstrohm/jot/pkg/utils"
 	"google.golang.org/api/iterator"
 )
@@ -108,20 +109,20 @@ func RunGapDetection(ctx context.Context, journalContext string, entryUUIDs []st
 	if len(items) == 0 {
 		return nil
 	}
-	questions := make([]PendingQuestion, 0, len(items))
+	questions := make([]memory.PendingQuestion, 0, len(items))
 	for _, it := range items {
 		kind := strings.TrimSpace(strings.ToLower(it.Kind))
 		if kind != "gap" && kind != "contradiction" {
 			kind = "gap"
 		}
-		questions = append(questions, PendingQuestion{
+		questions = append(questions, memory.PendingQuestion{
 			Question:       strings.TrimSpace(it.Question),
 			Kind:           kind,
 			Context:        strings.TrimSpace(it.Context),
 			SourceEntryIDs: entryUUIDs,
 		})
 	}
-	return InsertPendingQuestions(ctx, questions)
+	return memory.InsertPendingQuestions(ctx, questions)
 }
 
 // RunDreamer consolidates the last 24h of journal entries into semantic memory.
@@ -138,7 +139,7 @@ func RunProfileSynthesis(ctx context.Context, personaFacts []string) error {
 		return nil
 	}
 
-	node, _, err := FindContextByName(ctx, "user_profile")
+	node, _, err := memory.FindContextByName(ctx, "user_profile")
 	if err != nil || node == nil {
 		return fmt.Errorf("user_profile node not found: %w", err)
 	}
@@ -196,7 +197,7 @@ func RunEvolutionSynthesis(ctx context.Context, journalSummary string) error {
 		return err
 	}
 
-	node, _, err := FindContextByName(ctx, "system_evolution")
+	node, _, err := memory.FindContextByName(ctx, "system_evolution")
 	if err != nil || node == nil {
 		return fmt.Errorf("system_evolution context not found: %w", err)
 	}

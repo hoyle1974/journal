@@ -1,4 +1,4 @@
-package jot
+package api
 
 import (
 	"encoding/json"
@@ -8,15 +8,19 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jackstrohm/jot/internal/api"
 	"github.com/jackstrohm/jot/internal/config"
+	"github.com/jackstrohm/jot/pkg/infra"
 )
+
+func init() {
+	infra.InitObservability(&config.Config{})
+}
 
 func TestWriteJSON(t *testing.T) {
 	rec := httptest.NewRecorder()
 	data := map[string]string{"key": "value"}
 
-	api.WriteJSON(rec, http.StatusOK, data)
+	WriteJSON(rec, http.StatusOK, data)
 
 	if rec.Code != http.StatusOK {
 		t.Errorf("writeJSON status = %d, want 200", rec.Code)
@@ -35,16 +39,15 @@ func TestWriteJSON(t *testing.T) {
 
 func TestWriteJSON_ErrorStatus(t *testing.T) {
 	rec := httptest.NewRecorder()
-	api.WriteJSON(rec, http.StatusNotFound, map[string]string{"error": "Not found"})
+	WriteJSON(rec, http.StatusNotFound, map[string]string{"error": "Not found"})
 
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("writeJSON status = %d, want 404", rec.Code)
 	}
 }
 
-// Test that the API router returns 404 for unknown paths (responseWriter captures status).
 func TestRouter_NotFound(t *testing.T) {
-	srv := api.NewServer(testApp(), &config.Config{}, slog.Default(), nil, api.Router)
+	srv := NewServer(testAppForAPI(), &config.Config{}, slog.Default(), nil, Router)
 	rec := httptest.NewRecorder()
 	r, _ := http.NewRequest("GET", "/unknown-path", nil)
 	srv.ServeHTTP(rec, r)
@@ -54,7 +57,7 @@ func TestRouter_NotFound(t *testing.T) {
 }
 
 func TestHandleHealth(t *testing.T) {
-	srv := testServer(&config.Config{GoogleCloudProject: "test-project"})
+	srv := testServerForAPI(&config.Config{GoogleCloudProject: "test-project"})
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/health", nil)
 	srv.ServeHTTP(rec, req)
@@ -74,7 +77,7 @@ func TestHandleHealth(t *testing.T) {
 }
 
 func TestHandleMetrics(t *testing.T) {
-	srv := testServer(nil)
+	srv := testServerForAPI(nil)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/metrics", nil)
 	srv.ServeHTTP(rec, req)

@@ -9,6 +9,7 @@ import (
 	"github.com/jackstrohm/jot/pkg/agent"
 	"github.com/jackstrohm/jot/pkg/infra"
 	"github.com/jackstrohm/jot/pkg/journal"
+	"github.com/jackstrohm/jot/pkg/memory"
 )
 
 // jotBackend implements api.Backend by delegating to jot.
@@ -38,11 +39,11 @@ func (jotBackend) SaveQuery(ctx context.Context, question, answer, source string
 }
 
 func (jotBackend) InitializePermanentContexts(ctx context.Context) error {
-	return InitializePermanentContexts(ctx)
+	return memory.InitializePermanentContexts(ctx)
 }
 
 func (jotBackend) DecayContexts(ctx context.Context) (int, error) {
-	return DecayContexts(ctx)
+	return memory.DecayContexts(ctx)
 }
 
 func (jotBackend) BackfillEntryEmbeddings(ctx context.Context, limit int) (int, error) {
@@ -90,7 +91,7 @@ func (jotBackend) RunJanitor(ctx context.Context) (int, error) {
 }
 
 func (jotBackend) GetUnresolvedPendingQuestions(ctx context.Context, limit int) ([]api.PendingQuestion, error) {
-	qs, err := GetUnresolvedPendingQuestions(ctx, limit)
+	qs, err := memory.GetUnresolvedPendingQuestions(ctx, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +118,7 @@ func (jotBackend) RunMonthlyRollup(ctx context.Context) (int, error) {
 }
 
 func (jotBackend) ResolvePendingQuestion(ctx context.Context, id, answer string) error {
-	return ResolvePendingQuestion(ctx, id, answer)
+	return memory.ResolvePendingQuestion(ctx, id, answer)
 }
 
 func (jotBackend) ValidateTwilioSignature(r *http.Request, webhookURL string) bool {

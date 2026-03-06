@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackstrohm/jot/pkg/agent"
 	"github.com/jackstrohm/jot/pkg/journal"
+	"github.com/jackstrohm/jot/pkg/memory"
 	"github.com/jackstrohm/jot/pkg/utils"
 )
 
@@ -51,7 +52,7 @@ func (jotFOHEnv) UpsertKnowledge(ctx context.Context, content, nodeType, metadat
 
 // PrompterEnv: GetActiveContexts converts jot results to agent.ActiveContextItem.
 func (jotFOHEnv) GetActiveContexts(ctx context.Context, limit int) ([]agent.ActiveContextItem, error) {
-	nodes, metas, err := GetActiveContexts(ctx, limit)
+	nodes, metas, err := memory.GetActiveContexts(ctx, limit)
 	if err != nil || len(nodes) == 0 {
 		return nil, err
 	}
@@ -76,7 +77,7 @@ func (jotFOHEnv) GetActiveSignals(ctx context.Context, limit int) (string, error
 
 // SpecialistsEnv: FindContextContent returns content of the named context.
 func (jotFOHEnv) FindContextContent(ctx context.Context, name string) (string, error) {
-	node, _, err := FindContextByName(ctx, name)
+	node, _, err := memory.FindContextByName(ctx, name)
 	if err != nil || node == nil {
 		return "", err
 	}
@@ -114,7 +115,7 @@ func (jotFOHEnv) GetEntriesWithAnalysisForRollup(ctx context.Context, start, end
 
 // RollupEnv: GetWeeklySummariesForRollup returns concatenated weekly summary content and aggregated source IDs.
 func (jotFOHEnv) GetWeeklySummariesForRollup(ctx context.Context, startDate, endDate string, limit int) (string, []string, error) {
-	nodes, err := GetWeeklySummaryNodesInRange(ctx, startDate, endDate, limit)
+	nodes, err := memory.GetWeeklySummaryNodesInRange(ctx, startDate, endDate, limit)
 	if err != nil {
 		return "", nil, err
 	}
@@ -189,22 +190,22 @@ func (jotFOHEnv) GenerateEmbedding(ctx context.Context, text string, taskType ..
 
 // DreamerEnv: EnsureContextExists delegates to jot.EnsureContextExists.
 func (jotFOHEnv) EnsureContextExists(ctx context.Context, name string) (string, error) {
-	return EnsureContextExists(ctx, name)
+	return memory.EnsureContextExists(ctx, name)
 }
 
 // DreamerEnv: TouchContextBatch delegates to jot.TouchContextBatch.
 func (jotFOHEnv) TouchContextBatch(ctx context.Context, contextUUID string, entryUUIDs []string, relevanceBoost float64) error {
-	return TouchContextBatch(ctx, contextUUID, entryUUIDs, relevanceBoost)
+	return memory.TouchContextBatch(ctx, contextUUID, entryUUIDs, relevanceBoost)
 }
 
 // DreamerEnv: GetContextMetadata converts jot metadata to agent.ContextMetadata.
 func (jotFOHEnv) GetContextMetadata(ctx context.Context, contextUUID string) (*agent.ContextMetadata, error) {
-	m, err := GetContextMetadata(ctx, contextUUID)
+	m, err := memory.GetContextMetadata(ctx, contextUUID)
 	if err != nil || m == nil {
 		return nil, err
 	}
 	return &agent.ContextMetadata{
-		LastSynthesizedAt:          m.LastSynthesizedAt,
+		LastSynthesizedAt:           m.LastSynthesizedAt,
 		SourceEntryCountAtSynthesis: m.SourceEntryCountAtSynthesis,
 		SourceEntries:              m.SourceEntries,
 		Relevance:                  m.Relevance,
@@ -213,12 +214,12 @@ func (jotFOHEnv) GetContextMetadata(ctx context.Context, contextUUID string) (*a
 
 // DreamerEnv: TouchContext delegates to jot.TouchContext (no new source entry).
 func (jotFOHEnv) TouchContext(ctx context.Context, contextUUID string, relevanceBoost float64) error {
-	return TouchContext(ctx, contextUUID, nil, relevanceBoost)
+	return memory.TouchContext(ctx, contextUUID, nil, relevanceBoost)
 }
 
 // DreamerEnv: SynthesizeContext delegates to jot.SynthesizeContext.
 func (jotFOHEnv) SynthesizeContext(ctx context.Context, contextUUID string) error {
-	return SynthesizeContext(ctx, contextUUID)
+	return memory.SynthesizeContext(ctx, contextUUID)
 }
 
 // DreamerEnv: RunGapDetection delegates to jot.RunGapDetection.

@@ -1,4 +1,4 @@
-package jot
+package impl
 
 import (
 	"context"
@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/jackstrohm/jot/pkg/infra"
+	"github.com/jackstrohm/jot/pkg/memory"
 )
 
 // HandleCountdown manages countdown events (uses knowledge/embedding).
@@ -20,7 +23,7 @@ func HandleCountdown(ctx context.Context, action, name, dateStr string) (string,
 			return "", fmt.Errorf("invalid date format (use YYYY-MM-DD): %v", err)
 		}
 		metadata := fmt.Sprintf(`{"target_date": "%s"}`, dateStr)
-		id, err := UpsertKnowledge(ctx, fmt.Sprintf("Countdown: %s", name), "countdown", metadata, nil)
+		id, err := memory.UpsertKnowledge(ctx, fmt.Sprintf("Countdown: %s", name), "countdown", metadata, nil)
 		if err != nil {
 			return "", err
 		}
@@ -31,11 +34,11 @@ func HandleCountdown(ctx context.Context, action, name, dateStr string) (string,
 		if name == "" {
 			return "", fmt.Errorf("name required for check")
 		}
-		queryVec, err := GenerateEmbedding(ctx, fmt.Sprintf("Countdown: %s", name))
+		queryVec, err := embeddingForContext(ctx, fmt.Sprintf("Countdown: %s", name))
 		if err != nil {
 			return "", err
 		}
-		nodes, err := QuerySimilarNodes(ctx, queryVec, 5)
+		nodes, err := memory.QuerySimilarNodes(ctx, queryVec, 5)
 		if err != nil {
 			return "", err
 		}
@@ -57,11 +60,11 @@ func HandleCountdown(ctx context.Context, action, name, dateStr string) (string,
 		return fmt.Sprintf("Countdown '%s' not found", name), nil
 
 	case "list":
-		queryVec, err := GenerateEmbedding(ctx, "Countdown event")
+		queryVec, err := embeddingForContext(ctx, "Countdown event")
 		if err != nil {
 			return "", err
 		}
-		nodes, err := QuerySimilarNodes(ctx, queryVec, 20)
+		nodes, err := memory.QuerySimilarNodes(ctx, queryVec, 20)
 		if err != nil {
 			return "", err
 		}
@@ -111,7 +114,7 @@ func HandleBookmark(ctx context.Context, action, bookmarkURL, title, tags, query
 			"tags": strings.Split(tags, ","),
 		}
 		metaJSON, _ := json.Marshal(metadata)
-		id, err := UpsertKnowledge(ctx, fmt.Sprintf("Bookmark: %s", title), "bookmark", string(metaJSON), nil)
+		id, err := memory.UpsertKnowledge(ctx, fmt.Sprintf("Bookmark: %s", title), "bookmark", string(metaJSON), nil)
 		if err != nil {
 			return "", err
 		}
@@ -125,11 +128,11 @@ func HandleBookmark(ctx context.Context, action, bookmarkURL, title, tags, query
 		if searchQuery == "" {
 			return "", fmt.Errorf("query or tags required for search")
 		}
-		queryVec, err := GenerateEmbedding(ctx, fmt.Sprintf("Bookmark %s", searchQuery))
+		queryVec, err := embeddingForContext(ctx, fmt.Sprintf("Bookmark %s", searchQuery))
 		if err != nil {
 			return "", err
 		}
-		nodes, err := QuerySimilarNodes(ctx, queryVec, 10)
+		nodes, err := memory.QuerySimilarNodes(ctx, queryVec, 10)
 		if err != nil {
 			return "", err
 		}
@@ -150,11 +153,11 @@ func HandleBookmark(ctx context.Context, action, bookmarkURL, title, tags, query
 		return fmt.Sprintf("Bookmarks matching '%s':\n%s", searchQuery, strings.Join(bookmarks, "\n")), nil
 
 	case "list":
-		queryVec, err := GenerateEmbedding(ctx, "Bookmark")
+		queryVec, err := embeddingForContext(ctx, "Bookmark")
 		if err != nil {
 			return "", err
 		}
-		nodes, err := QuerySimilarNodes(ctx, queryVec, 20)
+		nodes, err := memory.QuerySimilarNodes(ctx, queryVec, 20)
 		if err != nil {
 			return "", err
 		}
@@ -180,4 +183,12 @@ func HandleBookmark(ctx context.Context, action, bookmarkURL, title, tags, query
 	default:
 		return "", fmt.Errorf("unknown action: %s (use: save, search, list)", action)
 	}
+}
+
+func embeddingForContext(ctx context.Context, text string) ([]float32, error) {
+	app := infra.GetApp(ctx)
+	if app == nil || app.Config() == nil {
+		return nil, fmt.Errorf("no app in context for embedding")
+	}
+	return infra.GenerateEmbedding(ctx, app.Config().GoogleCloudProject, text)
 }

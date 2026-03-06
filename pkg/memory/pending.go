@@ -1,4 +1,4 @@
-package jot
+package memory
 
 import (
 	"context"
@@ -6,7 +6,11 @@ import (
 	"time"
 
 	"cloud.google.com/go/firestore"
+	"github.com/jackstrohm/jot/pkg/infra"
 )
+
+// PendingQuestionsCollection is the Firestore collection name for pending questions.
+const PendingQuestionsCollection = "pending_questions"
 
 // PendingQuestion is a gap or contradiction detected during Dreamer synthesis, to be clarified by the user.
 type PendingQuestion struct {
@@ -25,7 +29,7 @@ func InsertPendingQuestions(ctx context.Context, questions []PendingQuestion) er
 	if len(questions) == 0 {
 		return nil
 	}
-	client, err := GetFirestoreClient(ctx)
+	client, err := infra.GetFirestoreClient(ctx)
 	if err != nil {
 		return err
 	}
@@ -33,7 +37,7 @@ func InsertPendingQuestions(ctx context.Context, questions []PendingQuestion) er
 	for i := range questions {
 		q := &questions[i]
 		if q.UUID == "" {
-			q.UUID = GenerateUUID()
+			q.UUID = infra.GenerateUUID()
 		}
 		if q.CreatedAt == "" {
 			q.CreatedAt = now
@@ -56,36 +60,35 @@ func InsertPendingQuestions(ctx context.Context, questions []PendingQuestion) er
 
 // GetUnresolvedPendingQuestions returns pending questions that have not been resolved, newest first.
 func GetUnresolvedPendingQuestions(ctx context.Context, limit int) ([]PendingQuestion, error) {
-	client, err := GetFirestoreClient(ctx)
+	client, err := infra.GetFirestoreClient(ctx)
 	if err != nil {
 		return nil, err
 	}
 	if limit <= 0 {
 		limit = 20
 	}
-	// Fetch by created_at desc and filter unresolved in memory to avoid composite index
 	query := client.Collection(PendingQuestionsCollection).
 		OrderBy("created_at", firestore.Desc).
 		Limit(100)
-	out, err := QueryDocuments(ctx, query, func(doc *firestore.DocumentSnapshot) (PendingQuestion, error) {
+	out, err := infra.QueryDocuments(ctx, query, func(doc *firestore.DocumentSnapshot) (PendingQuestion, error) {
 		data := doc.Data()
-		if getStringField(data, "resolved_at") != "" {
+		if infra.GetStringField(data, "resolved_at") != "" {
 			return PendingQuestion{}, fmt.Errorf("skip")
 		}
 		q := PendingQuestion{
 			UUID:       doc.Ref.ID,
-			Question:   getStringField(data, "question"),
-			Kind:       getStringField(data, "kind"),
-			Context:    getStringField(data, "context"),
-			CreatedAt:  getStringField(data, "created_at"),
-			ResolvedAt: getStringField(data, "resolved_at"),
-			Answer:     getStringField(data, "answer"),
+			Question:   infra.GetStringField(data, "question"),
+			Kind:       infra.GetStringField(data, "kind"),
+			Context:    infra.GetStringField(data, "context"),
+			CreatedAt:  infra.GetStringField(data, "created_at"),
+			ResolvedAt: infra.GetStringField(data, "resolved_at"),
+			Answer:     infra.GetStringField(data, "answer"),
 		}
-		q.SourceEntryIDs = getStringSliceField(data, "source_entry_ids")
+		q.SourceEntryIDs = infra.GetStringSliceField(data, "source_entry_ids")
 		return q, nil
 	})
 	if err != nil {
-		return nil, WrapFirestoreIndexError(err)
+		return nil, infra.WrapFirestoreIndexError(err)
 	}
 	if len(out) > limit {
 		out = out[:limit]
@@ -95,7 +98,7 @@ func GetUnresolvedPendingQuestions(ctx context.Context, limit int) ([]PendingQue
 
 // ResolvePendingQuestion sets resolved_at and answer for a pending question.
 func ResolvePendingQuestion(ctx context.Context, uuid, answer string) error {
-	client, err := GetFirestoreClient(ctx)
+	client, err := infra.GetFirestoreClient(ctx)
 	if err != nil {
 		return err
 	}

@@ -1,8 +1,19 @@
 #!/bin/bash
 #
-# Set up secrets in Google Secret Manager
+# Set up secrets in Google Secret Manager.
+# Run when (re)starting the project.
 #
 set -e
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT"
+
+if [ -f .env ]; then
+  set -a
+  # shellcheck source=.env
+  source .env
+  set +a
+fi
 
 PROJECT="${GOOGLE_CLOUD_PROJECT:?Set GOOGLE_CLOUD_PROJECT (e.g. export GOOGLE_CLOUD_PROJECT=your-project-id)}"
 REGION="us-central1"
@@ -53,11 +64,7 @@ generate_api_key() {
     openssl rand -base64 32 | tr -d '/+=' | head -c 32
 }
 
-# Get GEMINI_API_KEY from .env or prompt
-if [ -f .env ]; then
-    source .env
-fi
-
+# Get GEMINI_API_KEY from .env (already sourced above) or prompt
 if [ -z "$GEMINI_API_KEY" ]; then
     echo -e "${YELLOW}Enter your GEMINI_API_KEY:${NC}"
     read -s GEMINI_API_KEY
@@ -141,5 +148,6 @@ echo ""
 echo -e "${YELLOW}Next steps:${NC}"
 echo "1. Add JOT_API_KEY to your .env file"
 echo "2. For Twilio SMS: add TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER, ALLOWED_PHONE_NUMBER to .env and re-run this script"
-echo "3. Redeploy the function: ./deploy.sh"
-echo "4. Test: curl -H 'X-API-Key: $JOT_API_KEY' https://...cloudfunctions.net/jot-api/entries"
+echo "3. Redeploy: ./scripts/deploy.sh"
+echo "4. Test: curl -H 'X-API-Key: \$JOT_API_KEY' https://...cloudrun.app/..."
+echo ""

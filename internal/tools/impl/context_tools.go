@@ -8,6 +8,8 @@ import (
 
 	"cloud.google.com/go/firestore"
 	"github.com/jackstrohm/jot"
+	"github.com/jackstrohm/jot/pkg/agent"
+	"github.com/jackstrohm/jot/pkg/memory"
 	"github.com/jackstrohm/jot/tools"
 )
 
@@ -27,7 +29,7 @@ func registerContextTools() {
 		},
 		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
 			limit := args.IntBounded("limit", 10, 1, 20)
-			contexts, metas, err := jot.GetActiveContexts(ctx, limit)
+			contexts, metas, err := memory.GetActiveContexts(ctx, limit)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
@@ -59,16 +61,16 @@ func registerContextTools() {
 			}
 			contextType := args.String("context_type", "auto")
 
-			existing, _, err := jot.FindContextByName(ctx, name)
+			existing, _, err := memory.FindContextByName(ctx, name)
 			if err == nil && existing != nil {
 				return tools.Fail("Context '%s' already exists.", name)
 			}
 
 			var sourceEntries []string
-			if cur := jot.CurrentEntryUUIDFrom(ctx); cur != "" {
+			if cur := agent.CurrentEntryUUIDFrom(ctx); cur != "" {
 				sourceEntries = []string{cur}
 			}
-			uuid, err := jot.CreateContext(ctx, name, description, contextType, nil, sourceEntries)
+			uuid, err := memory.CreateContext(ctx, name, description, contextType, nil, sourceEntries)
 			if err != nil {
 				return tools.Fail("Error creating context: %v", err)
 			}
@@ -97,16 +99,16 @@ func registerContextTools() {
 				boost = 0.5
 			}
 
-			node, meta, err := jot.FindContextByName(ctx, name)
+			node, meta, err := memory.FindContextByName(ctx, name)
 			if err != nil || node == nil {
 				return tools.Fail("Context '%s' not found.", name)
 			}
 
 			var newSourceEntry *string
-			if cur := jot.CurrentEntryUUIDFrom(ctx); cur != "" {
+			if cur := agent.CurrentEntryUUIDFrom(ctx); cur != "" {
 				newSourceEntry = &cur
 			}
-			err = jot.TouchContext(ctx, node.UUID, newSourceEntry, boost)
+			err = memory.TouchContext(ctx, node.UUID, newSourceEntry, boost)
 			if err != nil {
 				return tools.Fail("Error touching context: %v", err)
 			}
@@ -131,7 +133,7 @@ func registerContextTools() {
 				return tools.MissingParam("context_id")
 			}
 
-			err := jot.DeleteContext(ctx, contextID)
+			err := memory.DeleteContext(ctx, contextID)
 			if err != nil {
 				return tools.Fail("Error deleting context: %v", err)
 			}
@@ -147,7 +149,7 @@ func registerSystemEvolutionTools() {
 		Category:    "context",
 		Params:      nil,
 		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
-			node, _, err := jot.FindContextByName(ctx, "system_evolution")
+			node, _, err := memory.FindContextByName(ctx, "system_evolution")
 			if err != nil {
 				return tools.Fail("Error finding system_evolution context: %v", err)
 			}

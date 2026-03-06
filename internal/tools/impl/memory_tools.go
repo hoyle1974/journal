@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/jackstrohm/jot"
+	"github.com/jackstrohm/jot/pkg/memory"
 	"github.com/jackstrohm/jot/tools"
 )
 
@@ -117,7 +118,7 @@ func registerKnowledgeTools() {
 			}
 
 			fusedNodes := jot.FuseKnowledgeNodes(vectorNodes, keywordNodes, fusedNodeTopN)
-			nodes, _ := jot.RerankNodes(ctx, query, fusedNodes, nodeLimit)
+			nodes, _ := memory.RerankNodes(ctx, query, fusedNodes, nodeLimit)
 			entries := jot.FuseEntries(vectorEntries, keywordEntries, entryLimit)
 
 			if len(nodes) == 0 && len(entries) == 0 {

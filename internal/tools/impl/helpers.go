@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/jackstrohm/jot"
+	"github.com/jackstrohm/jot/pkg/memory"
 )
 
 const maxSourceDatesPerNode = 5
@@ -89,7 +90,7 @@ func formatEntries(entries []jot.Entry) string {
 }
 
 // formatContexts formats context nodes and metadata for LLM context.
-func formatContexts(nodes []jot.KnowledgeNode, metas []jot.ContextMetadata) string {
+func formatContexts(nodes []memory.KnowledgeNode, metas []memory.ContextMetadata) string {
 	var lines []string
 	for i, n := range nodes {
 		meta := metas[i]

@@ -3,8 +3,7 @@ package jot
 
 // Collection names for Firestore
 const (
-	EntriesCollection          = "entries"
-	QueriesCollection          = "queries"
-	SystemCollection           = "_system"
-	PendingQuestionsCollection = "pending_questions"
+	EntriesCollection = "entries"
+	QueriesCollection = "queries"
+	SystemCollection  = "_system"
 )

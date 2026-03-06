@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/google/generative-ai-go/genai"
-	"github.com/jackstrohm/jot"
 	"github.com/jackstrohm/jot/pkg/utils"
 	"github.com/jackstrohm/jot/tools"
 )
@@ -125,7 +124,7 @@ func registerWebTools() {
 			title := args.String("title", "")
 			tags := args.String("tags", "")
 			query := args.String("query", "")
-			result, err := jot.HandleBookmark(ctx, action, bookmarkURL, title, tags, query)
+			result, err := HandleBookmark(ctx, action, bookmarkURL, title, tags, query)
 			if err != nil {
 				return tools.Fail("Bookmark error: %v", err)
 			}
@@ -149,7 +148,7 @@ func registerWebTools() {
 			}
 			name := args.String("name", "")
 			dateStr := args.String("date", "")
-			result, err := jot.HandleCountdown(ctx, action, name, dateStr)
+			result, err := HandleCountdown(ctx, action, name, dateStr)
 			if err != nil {
 				return tools.Fail("Countdown error: %v", err)
 			}

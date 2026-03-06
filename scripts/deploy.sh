@@ -5,6 +5,9 @@
 #
 set -e
 
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT"
+
 # Load .env if present (GOOGLE_CLOUD_PROJECT and other vars)
 if [ -f .env ]; then
   set -a
@@ -161,7 +164,7 @@ case "$MODE" in
       --memory="$MEMORY" \
       --concurrency="$CONCURRENCY" \
       --timeout="$QUERY_TIMEOUT" \
-      --max-instances=100 \
+      --max-instances=1 \
       --allow-unauthenticated \
       --execution-environment=gen1 \
       --update-env-vars="FUNCTION_TARGET=JotAPI,GOOGLE_CLOUD_PROJECT=$PROJECT,JOT_API_URL=https://${REGION}-${PROJECT}.cloudfunctions.net/${FUNCTION_NAME},SYNC_GDOC_URL=https://${REGION}-${PROJECT}.cloudfunctions.net/${FUNCTION_NAME}/sync,DREAMER_MODEL=gemini-2.5-flash" \
@@ -190,7 +193,7 @@ case "$MODE" in
       --memory="$MEMORY" \
       --concurrency="$CONCURRENCY" \
       --timeout="${QUERY_TIMEOUT}s" \
-      --max-instances=100 \
+      --max-instances=1 \
       --set-env-vars="FUNCTION_TARGET=JotAPI,GOOGLE_CLOUD_PROJECT=$PROJECT,JOT_API_URL=https://${REGION}-${PROJECT}.cloudfunctions.net/${FUNCTION_NAME},SYNC_GDOC_URL=https://${REGION}-${PROJECT}.cloudfunctions.net/${FUNCTION_NAME}/sync,DREAMER_MODEL=gemini-2.5-flash" \
       --quiet
     ;;

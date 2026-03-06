@@ -1,13 +1,24 @@
 #!/bin/bash
 #
-# Set up GCP infrastructure for Jot Cloud Functions
+# Set up GCP infrastructure for Jot (Cloud Tasks, Scheduler, APIs).
+# Run when (re)starting the project.
 #
-# This script creates:
+# Creates:
 # - Cloud Tasks queue for debounced sync
 # - Cloud Scheduler jobs for daily dream, weekly janitor
 # - Sets up Drive Watch for Google Doc changes (optional)
 #
 set -e
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT"
+
+if [ -f .env ]; then
+  set -a
+  # shellcheck source=.env
+  source .env
+  set +a
+fi
 
 PROJECT="${GOOGLE_CLOUD_PROJECT:?Set GOOGLE_CLOUD_PROJECT (e.g. export GOOGLE_CLOUD_PROJECT=your-project-id)}"
 REGION="us-central1"
@@ -131,9 +142,9 @@ echo "  CLOUD_TASKS_LOCATION=$REGION"
 echo "  SYNC_GDOC_URL=https://${REGION}-${PROJECT}.cloudfunctions.net/jot-api-go/sync"
 echo ""
 echo -e "${YELLOW}Next steps:${NC}"
-echo "1. Deploy functions: ./deploy.sh"
-echo "2. Set environment variables in Cloud Console or via gcloud"
-echo "3. Test locally: ./test-local.sh dream"
+echo "1. Run ./scripts/setup-secrets.sh if needed"
+echo "2. Deploy: ./scripts/deploy.sh"
+echo "3. Test locally: ./scripts/test-local.sh dream"
 echo ""
 echo -e "${CYAN}To set up Drive Watch for auto-sync (run after deploy):${NC}"
 echo "  python setup_drive_watch.py"

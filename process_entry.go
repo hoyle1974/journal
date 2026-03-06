@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"cloud.google.com/go/firestore"
+	"github.com/jackstrohm/jot/pkg/memory"
 	"github.com/jackstrohm/jot/pkg/utils"
 )
 
@@ -14,7 +15,7 @@ func ProcessEntry(ctx context.Context, entryUUID, content, timestamp, source str
 	LoggerFrom(ctx).Info("process-entry start", "entry_uuid", entryUUID, "content", utils.TruncateString(content, 50), "source", source)
 	RunEvaluator(ctx, content, entryUUID, timestamp)
 
-	contextUUIDs, err := DetectOrCreateContext(ctx, content, entryUUID)
+	contextUUIDs, err := memory.DetectOrCreateContext(ctx, content, entryUUID)
 	if err != nil {
 		LoggerFrom(ctx).Warn("context detection failed", "error", err)
 	}

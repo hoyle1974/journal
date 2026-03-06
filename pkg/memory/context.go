@@ -1,4 +1,5 @@
-package jot
+// Package memory provides context nodes (briefings, user_profile, etc.) in the knowledge graph.
+package memory
 
 import (
 	"context"
@@ -11,17 +12,28 @@ import (
 
 	"cloud.google.com/go/firestore"
 	"github.com/google/generative-ai-go/genai"
+	"github.com/jackstrohm/jot/internal/config"
 	"github.com/jackstrohm/jot/internal/prompts"
 	"github.com/jackstrohm/jot/llmjson"
+	"github.com/jackstrohm/jot/pkg/infra"
+	"github.com/jackstrohm/jot/pkg/journal"
 	"github.com/jackstrohm/jot/pkg/utils"
 	"google.golang.org/api/iterator"
 )
 
-func truncateForLog(s string, maxLen int) string {
+func truncateForLogContext(s string, maxLen int) string {
 	if len([]rune(s)) <= maxLen {
 		return s
 	}
 	return utils.TruncateString(s, maxLen) + "..."
+}
+
+func getConfigFromCtx(ctx context.Context) *config.Config {
+	app := infra.GetApp(ctx)
+	if app == nil {
+		return nil
+	}
+	return app.Config()
 }
 
 // Context system constants
@@ -34,25 +46,24 @@ const (
 
 // ContextMetadata represents the metadata stored with context nodes.
 type ContextMetadata struct {
-	ContextType                 string   `json:"context_type"`                   // "permanent", "auto", "derived"
-	ContextName                 string   `json:"context_name"`                   // e.g., "party_planning"
-	Relevance                   float64  `json:"relevance"`                      // 0-1, decays over time
-	LastTouched                 string   `json:"last_touched"`                    // RFC3339 timestamp
-	Entities                    []string `json:"entities"`                        // Related entities/keywords
-	SourceEntries               []string `json:"source_entries"`                  // Entry UUIDs that contributed
-	DecayRate                   float64  `json:"decay_rate"`                       // Per day, 0 for permanent
-	LastSynthesizedAt           string   `json:"last_synthesized_at"`             // RFC3339; when context was last synthesized
-	SourceEntryCountAtSynthesis int      `json:"source_entry_count_at_synthesis"` // len(SourceEntries) at last synthesis
+	ContextType                 string   `json:"context_type"`
+	ContextName                 string   `json:"context_name"`
+	Relevance                   float64  `json:"relevance"`
+	LastTouched                 string   `json:"last_touched"`
+	Entities                    []string `json:"entities"`
+	SourceEntries               []string `json:"source_entries"`
+	DecayRate                   float64  `json:"decay_rate"`
+	LastSynthesizedAt           string   `json:"last_synthesized_at"`
+	SourceEntryCountAtSynthesis int      `json:"source_entry_count_at_synthesis"`
 }
 
 // CreateContext creates a new context node in the knowledge graph.
 func CreateContext(ctx context.Context, name, content, contextType string, entities, sourceEntries []string) (string, error) {
-	ctx, span := StartSpan(ctx, "context.create")
+	ctx, span := infra.StartSpan(ctx, "context.create")
 	defer span.End()
 
-	LoggerFrom(ctx).Info("creating context", "name", name, "type", contextType)
+	infra.LoggerFrom(ctx).Info("creating context", "name", name, "type", contextType)
 
-	// Set defaults
 	decayRate := DefaultDecayRate
 	if contextType == "permanent" {
 		decayRate = 0
@@ -74,14 +85,13 @@ func CreateContext(ctx context.Context, name, content, contextType string, entit
 		return "", fmt.Errorf("failed to marshal context metadata: %w", err)
 	}
 
-	// Use UpsertKnowledge which handles embedding generation
 	nodeUUID, err := UpsertKnowledge(ctx, content, ContextNodeType, string(metadataJSON), nil)
 	if err != nil {
 		span.RecordError(err)
 		return "", err
 	}
 
-	LoggerFrom(ctx).Info("context created", "uuid", nodeUUID, "name", name)
+	infra.LoggerFrom(ctx).Info("context created", "uuid", nodeUUID, "name", name)
 	span.SetAttributes(map[string]string{
 		"context_uuid": nodeUUID,
 		"context_name": name,
@@ -92,27 +102,25 @@ func CreateContext(ctx context.Context, name, content, contextType string, entit
 
 // TouchContext updates a context's last_touched timestamp and optionally boosts relevance.
 func TouchContext(ctx context.Context, contextUUID string, newSourceEntry *string, relevanceBoost float64) error {
-	ctx, span := StartSpan(ctx, "context.touch")
+	ctx, span := infra.StartSpan(ctx, "context.touch")
 	defer span.End()
 
-	LoggerFrom(ctx).Info("touching context", "uuid", contextUUID, "boost", relevanceBoost)
+	infra.LoggerFrom(ctx).Info("touching context", "uuid", contextUUID, "boost", relevanceBoost)
 
-	client, err := GetFirestoreClient(ctx)
+	client, err := infra.GetFirestoreClient(ctx)
 	if err != nil {
 		span.RecordError(err)
 		return err
 	}
 
-	// Get current context
 	doc, err := client.Collection(KnowledgeCollection).Doc(contextUUID).Get(ctx)
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("context not found: %w", err)
 	}
 
-	// Parse current metadata
 	data := doc.Data()
-	metadataStr := getStringField(data, "metadata")
+	metadataStr := infra.GetStringField(data, "metadata")
 
 	var metadata ContextMetadata
 	if err := json.Unmarshal([]byte(metadataStr), &metadata); err != nil {
@@ -120,7 +128,6 @@ func TouchContext(ctx context.Context, contextUUID string, newSourceEntry *strin
 		return fmt.Errorf("failed to parse context metadata: %w", err)
 	}
 
-	// Update metadata
 	metadata.LastTouched = time.Now().Format(time.RFC3339)
 	metadata.Relevance = min(1.0, metadata.Relevance+relevanceBoost)
 
@@ -128,7 +135,6 @@ func TouchContext(ctx context.Context, contextUUID string, newSourceEntry *strin
 		metadata.SourceEntries = append(metadata.SourceEntries, *newSourceEntry)
 	}
 
-	// Save updated metadata
 	updatedMetadataJSON, err := json.Marshal(metadata)
 	if err != nil {
 		span.RecordError(err)
@@ -144,20 +150,18 @@ func TouchContext(ctx context.Context, contextUUID string, newSourceEntry *strin
 		return err
 	}
 
-	LoggerFrom(ctx).Info("context touched", "uuid", contextUUID, "new_relevance", metadata.Relevance)
+	infra.LoggerFrom(ctx).Info("context touched", "uuid", contextUUID, "new_relevance", metadata.Relevance)
 	return nil
 }
 
-// normalizeContextName trims, lowercases, and converts spaces to underscores for consistency with FindContextByName.
 func normalizeContextName(name string) string {
 	s := strings.TrimSpace(strings.ToLower(name))
 	return strings.ReplaceAll(s, " ", "_")
 }
 
-// EnsureContextExists finds a context by name or creates it with placeholder content. No LLM calls.
-// Returns the context UUID for use in TouchContext/TouchContextBatch and synthesis.
+// EnsureContextExists finds a context by name or creates it with placeholder content.
 func EnsureContextExists(ctx context.Context, name string) (string, error) {
-	ctx, span := StartSpan(ctx, "context.ensure_exists")
+	ctx, span := infra.StartSpan(ctx, "context.ensure_exists")
 	defer span.End()
 
 	norm := normalizeContextName(name)
@@ -179,20 +183,20 @@ func EnsureContextExists(ctx context.Context, name string) (string, error) {
 		span.RecordError(err)
 		return "", err
 	}
-	LoggerFrom(ctx).Info("ensure_context_created", "name", norm, "uuid", uuid)
+	infra.LoggerFrom(ctx).Info("ensure_context_created", "name", norm, "uuid", uuid)
 	return uuid, nil
 }
 
-// TouchContextBatch appends multiple entry UUIDs to a context's SourceEntries and updates last_touched in one read/update.
+// TouchContextBatch appends multiple entry UUIDs to a context's SourceEntries and updates last_touched.
 func TouchContextBatch(ctx context.Context, contextUUID string, entryUUIDs []string, relevanceBoost float64) error {
-	ctx, span := StartSpan(ctx, "context.touch_batch")
+	ctx, span := infra.StartSpan(ctx, "context.touch_batch")
 	defer span.End()
 
 	if len(entryUUIDs) == 0 {
 		return nil
 	}
 
-	client, err := GetFirestoreClient(ctx)
+	client, err := infra.GetFirestoreClient(ctx)
 	if err != nil {
 		span.RecordError(err)
 		return err
@@ -205,7 +209,7 @@ func TouchContextBatch(ctx context.Context, contextUUID string, entryUUIDs []str
 	}
 
 	data := doc.Data()
-	metadataStr := getStringField(data, "metadata")
+	metadataStr := infra.GetStringField(data, "metadata")
 	var metadata ContextMetadata
 	if err := json.Unmarshal([]byte(metadataStr), &metadata); err != nil {
 		return fmt.Errorf("failed to parse context metadata: %w", err)
@@ -228,14 +232,12 @@ func TouchContextBatch(ctx context.Context, contextUUID string, entryUUIDs []str
 		span.RecordError(err)
 		return err
 	}
-	LoggerFrom(ctx).Info("context touched batch", "uuid", contextUUID, "entries_added", len(entryUUIDs))
+	infra.LoggerFrom(ctx).Info("context touched batch", "uuid", contextUUID, "entries_added", len(entryUUIDs))
 	return nil
 }
 
-// permanentContextsOnce ensures permanent contexts are initialized only once per cold start.
 var permanentContextsOnce sync.Once
 
-// byRelevanceDesc implements sort.Interface to sort nodes and metas by relevance descending.
 type byRelevanceDesc struct {
 	nodes []KnowledgeNode
 	metas []ContextMetadata
@@ -250,31 +252,28 @@ func (b byRelevanceDesc) Swap(i, j int) {
 
 // GetActiveContexts returns contexts with relevance above MinActiveRelevance, sorted by relevance.
 func GetActiveContexts(ctx context.Context, limit int) ([]KnowledgeNode, []ContextMetadata, error) {
-	ctx, span := StartSpan(ctx, "context.get_active")
+	ctx, span := infra.StartSpan(ctx, "context.get_active")
 	defer span.End()
 
-	client, err := GetFirestoreClient(ctx)
+	client, err := infra.GetFirestoreClient(ctx)
 	if err != nil {
 		span.RecordError(err)
 		return nil, nil, err
 	}
 
-	// Lazy initialization of permanent contexts (only once per cold start). Use a background context
-	// that carries the same App so the goroutine can use Firestore without "no app in context".
 	permanentContextsOnce.Do(func() {
-		app := GetApp(ctx)
+		app := infra.GetApp(ctx)
 		if app == nil {
 			return
 		}
-		bgCtx := WithApp(context.Background(), app)
+		bgCtx := infra.WithApp(context.Background(), app)
 		go func() {
 			if err := InitializePermanentContexts(bgCtx); err != nil {
-				LoggerFrom(bgCtx).Warn("failed to initialize permanent contexts", "error", err)
+				infra.LoggerFrom(bgCtx).Warn("failed to initialize permanent contexts", "error", err)
 			}
 		}()
 	})
 
-	// Query all context nodes
 	iter := client.Collection(KnowledgeCollection).
 		Where("node_type", "==", ContextNodeType).
 		Documents(ctx)
@@ -296,36 +295,32 @@ func GetActiveContexts(ctx context.Context, limit int) ([]KnowledgeNode, []Conte
 		data := doc.Data()
 		node := KnowledgeNode{
 			UUID:      doc.Ref.ID,
-			Content:   getStringField(data, "content"),
-			NodeType:  getStringField(data, "node_type"),
-			Metadata:  getStringField(data, "metadata"),
-			Timestamp: getStringField(data, "timestamp"),
+			Content:   infra.GetStringField(data, "content"),
+			NodeType:  infra.GetStringField(data, "node_type"),
+			Metadata:  infra.GetStringField(data, "metadata"),
+			Timestamp: infra.GetStringField(data, "timestamp"),
 		}
 
-		// Parse metadata
 		var meta ContextMetadata
 		if err := json.Unmarshal([]byte(node.Metadata), &meta); err != nil {
-			LoggerFrom(ctx).Warn("failed to parse context metadata", "uuid", node.UUID, "error", err)
+			infra.LoggerFrom(ctx).Warn("failed to parse context metadata", "uuid", node.UUID, "error", err)
 			continue
 		}
 
-		// Filter by relevance
 		if meta.Relevance >= MinActiveRelevance {
 			nodes = append(nodes, node)
 			metas = append(metas, meta)
 		}
 	}
 
-	// Sort by relevance (descending)
 	sort.Sort(byRelevanceDesc{nodes: nodes, metas: metas})
 
-	// Apply limit
 	if limit > 0 && len(nodes) > limit {
 		nodes = nodes[:limit]
 		metas = metas[:limit]
 	}
 
-	LoggerFrom(ctx).Info("active contexts retrieved", "count", len(nodes))
+	infra.LoggerFrom(ctx).Info("active contexts retrieved", "count", len(nodes))
 	span.SetAttributes(map[string]string{
 		"context_count": fmt.Sprintf("%d", len(nodes)),
 	})
@@ -334,20 +329,18 @@ func GetActiveContexts(ctx context.Context, limit int) ([]KnowledgeNode, []Conte
 }
 
 // DecayContexts applies time-based decay to all auto contexts.
-// Returns the number of contexts that were decayed.
 func DecayContexts(ctx context.Context) (int, error) {
-	ctx, span := StartSpan(ctx, "context.decay")
+	ctx, span := infra.StartSpan(ctx, "context.decay")
 	defer span.End()
 
-	LoggerFrom(ctx).Info("starting context decay")
+	infra.LoggerFrom(ctx).Info("starting context decay")
 
-	client, err := GetFirestoreClient(ctx)
+	client, err := infra.GetFirestoreClient(ctx)
 	if err != nil {
 		span.RecordError(err)
 		return 0, err
 	}
 
-	// Query all context nodes
 	iter := client.Collection(KnowledgeCollection).
 		Where("node_type", "==", ContextNodeType).
 		Documents(ctx)
@@ -367,39 +360,35 @@ func DecayContexts(ctx context.Context) (int, error) {
 		}
 
 		data := doc.Data()
-		metadataStr := getStringField(data, "metadata")
+		metadataStr := infra.GetStringField(data, "metadata")
 
 		var meta ContextMetadata
 		if err := json.Unmarshal([]byte(metadataStr), &meta); err != nil {
-			LoggerFrom(ctx).Warn("failed to parse context metadata for decay", "uuid", doc.Ref.ID, "error", err)
+			infra.LoggerFrom(ctx).Warn("failed to parse context metadata for decay", "uuid", doc.Ref.ID, "error", err)
 			continue
 		}
 
-		// Skip permanent contexts (decay_rate == 0)
 		if meta.DecayRate == 0 {
 			continue
 		}
 
-		// Calculate days since last touched
 		lastTouched, err := time.Parse(time.RFC3339, meta.LastTouched)
 		if err != nil {
-			LoggerFrom(ctx).Warn("failed to parse last_touched", "uuid", doc.Ref.ID, "error", err)
+			infra.LoggerFrom(ctx).Warn("failed to parse last_touched", "uuid", doc.Ref.ID, "error", err)
 			continue
 		}
 
 		daysSince := now.Sub(lastTouched).Hours() / 24
 		if daysSince < 1 {
-			continue // Only decay if at least a day has passed
+			continue
 		}
 
-		// Apply decay: new_relevance = old_relevance * (1 - decay_rate)^days
 		decayFactor := 1.0
 		for i := 0; i < int(daysSince); i++ {
 			decayFactor *= (1 - meta.DecayRate)
 		}
 		newRelevance := meta.Relevance * decayFactor
 
-		// Update metadata
 		meta.Relevance = newRelevance
 		meta.LastTouched = now.Format(time.RFC3339)
 
@@ -412,12 +401,12 @@ func DecayContexts(ctx context.Context) (int, error) {
 			{Path: "metadata", Value: string(updatedMetadataJSON)},
 		})
 		if err != nil {
-			LoggerFrom(ctx).Warn("failed to update decayed context", "uuid", doc.Ref.ID, "error", err)
+			infra.LoggerFrom(ctx).Warn("failed to update decayed context", "uuid", doc.Ref.ID, "error", err)
 			continue
 		}
 
 		decayedCount++
-		LoggerFrom(ctx).Debug("context decayed",
+		infra.LoggerFrom(ctx).Debug("context decayed",
 			"uuid", doc.Ref.ID,
 			"name", meta.ContextName,
 			"old_relevance", meta.Relevance/decayFactor,
@@ -425,7 +414,7 @@ func DecayContexts(ctx context.Context) (int, error) {
 		)
 	}
 
-	LoggerFrom(ctx).Info("context decay completed", "decayed_count", decayedCount)
+	infra.LoggerFrom(ctx).Info("context decay completed", "decayed_count", decayedCount)
 	span.SetAttributes(map[string]string{
 		"decayed_count": fmt.Sprintf("%d", decayedCount),
 	})
@@ -435,10 +424,10 @@ func DecayContexts(ctx context.Context) (int, error) {
 
 // DeleteContext deletes a context by UUID.
 func DeleteContext(ctx context.Context, contextUUID string) error {
-	ctx, span := StartSpan(ctx, "context.delete")
+	ctx, span := infra.StartSpan(ctx, "context.delete")
 	defer span.End()
 
-	client, err := GetFirestoreClient(ctx)
+	client, err := infra.GetFirestoreClient(ctx)
 	if err != nil {
 		span.RecordError(err)
 		return err
@@ -450,13 +439,13 @@ func DeleteContext(ctx context.Context, contextUUID string) error {
 		return err
 	}
 
-	LoggerFrom(ctx).Info("context deleted", "uuid", contextUUID)
+	infra.LoggerFrom(ctx).Info("context deleted", "uuid", contextUUID)
 	return nil
 }
 
-// GetContextMetadata returns metadata for a context by UUID. Returns nil, nil if doc not found.
+// GetContextMetadata returns metadata for a context by UUID.
 func GetContextMetadata(ctx context.Context, contextUUID string) (*ContextMetadata, error) {
-	client, err := GetFirestoreClient(ctx)
+	client, err := infra.GetFirestoreClient(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -465,7 +454,7 @@ func GetContextMetadata(ctx context.Context, contextUUID string) (*ContextMetada
 		return nil, err
 	}
 	data := doc.Data()
-	metadataStr := getStringField(data, "metadata")
+	metadataStr := infra.GetStringField(data, "metadata")
 	var meta ContextMetadata
 	if err := json.Unmarshal([]byte(metadataStr), &meta); err != nil {
 		return nil, fmt.Errorf("parse context metadata: %w", err)
@@ -475,16 +464,15 @@ func GetContextMetadata(ctx context.Context, contextUUID string) (*ContextMetada
 
 // FindContextByName finds a context by its name.
 func FindContextByName(ctx context.Context, name string) (*KnowledgeNode, *ContextMetadata, error) {
-	ctx, span := StartSpan(ctx, "context.find_by_name")
+	ctx, span := infra.StartSpan(ctx, "context.find_by_name")
 	defer span.End()
 
-	client, err := GetFirestoreClient(ctx)
+	client, err := infra.GetFirestoreClient(ctx)
 	if err != nil {
 		span.RecordError(err)
 		return nil, nil, err
 	}
 
-	// Query all context nodes
 	iter := client.Collection(KnowledgeCollection).
 		Where("node_type", "==", ContextNodeType).
 		Documents(ctx)
@@ -503,7 +491,7 @@ func FindContextByName(ctx context.Context, name string) (*KnowledgeNode, *Conte
 		}
 
 		data := doc.Data()
-		metadataStr := getStringField(data, "metadata")
+		metadataStr := infra.GetStringField(data, "metadata")
 
 		var meta ContextMetadata
 		if err := json.Unmarshal([]byte(metadataStr), &meta); err != nil {
@@ -513,44 +501,40 @@ func FindContextByName(ctx context.Context, name string) (*KnowledgeNode, *Conte
 		if strings.ToLower(meta.ContextName) == nameLower {
 			node := &KnowledgeNode{
 				UUID:      doc.Ref.ID,
-				Content:   getStringField(data, "content"),
-				NodeType:  getStringField(data, "node_type"),
+				Content:   infra.GetStringField(data, "content"),
+				NodeType:  infra.GetStringField(data, "node_type"),
 				Metadata:  metadataStr,
-				Timestamp: getStringField(data, "timestamp"),
+				Timestamp: infra.GetStringField(data, "timestamp"),
 			}
 			return node, &meta, nil
 		}
 	}
 
-	return nil, nil, nil // Not found
+	return nil, nil, nil
 }
 
-// =============================================================================
-// CONTEXT DETECTION (Phase 2)
-// =============================================================================
-
 // MatchEntryToContexts finds contexts that semantically match the entry content.
-// Returns context UUIDs and their similarity scores above the threshold.
 func MatchEntryToContexts(ctx context.Context, entryContent string, threshold float64) ([]string, []float64, error) {
-	ctx, span := StartSpan(ctx, "context.match_entry")
+	ctx, span := infra.StartSpan(ctx, "context.match_entry")
 	defer span.End()
 
-	// Generate embedding for the entry content
-	entryVector, err := GenerateEmbedding(ctx, entryContent)
+	cfg := getConfigFromCtx(ctx)
+	if cfg == nil {
+		return nil, nil, fmt.Errorf("no app config in context")
+	}
+	entryVector, err := infra.GenerateEmbedding(ctx, cfg.GoogleCloudProject, entryContent)
 	if err != nil {
 		span.RecordError(err)
 		return nil, nil, err
 	}
 
-	client, err := GetFirestoreClient(ctx)
+	client, err := infra.GetFirestoreClient(ctx)
 	if err != nil {
 		span.RecordError(err)
 		return nil, nil, err
 	}
 
-	// Use vector search to find similar context nodes
-	// We use a distance threshold to find semantically related contexts
-	distanceThreshold := 1 - threshold // Convert similarity threshold to distance
+	distanceThreshold := 1 - threshold
 	vectorQuery := client.Collection(KnowledgeCollection).
 		Where("node_type", "==", ContextNodeType).
 		FindNearest("embedding", firestore.Vector32(entryVector), 10, firestore.DistanceMeasureCosine,
@@ -568,43 +552,38 @@ func MatchEntryToContexts(ctx context.Context, entryContent string, threshold fl
 			break
 		}
 		if err != nil {
-			// Vector search may not be available, fall back gracefully
-			LoggerFrom(ctx).Debug("vector search error (may not be supported)", "error", err)
+			infra.LoggerFrom(ctx).Debug("vector search error (may not be supported)", "error", err)
 			break
 		}
 
-		// Parse metadata to check relevance
 		data := doc.Data()
-		metadataStr := getStringField(data, "metadata")
+		metadataStr := infra.GetStringField(data, "metadata")
 
 		var meta ContextMetadata
 		if err := json.Unmarshal([]byte(metadataStr), &meta); err != nil {
 			continue
 		}
 
-		// Only include contexts above minimum relevance
 		if meta.Relevance >= MinActiveRelevance {
 			uuids = append(uuids, doc.Ref.ID)
-			// Approximate score from distance (cosine similarity = 1 - cosine distance)
-			scores = append(scores, meta.Relevance) // Use relevance as proxy for match quality
+			scores = append(scores, meta.Relevance)
 		}
 	}
 
-	LoggerFrom(ctx).Info("matched contexts", "entry_preview", truncateForLog(entryContent, 50), "matches", len(uuids))
+	infra.LoggerFrom(ctx).Info("matched contexts", "entry_preview", truncateForLogContext(entryContent, 50), "matches", len(uuids))
 	return uuids, scores, nil
 }
 
 // DetectOrCreateContext analyzes entry content and either links to existing context or creates new.
-// It returns the list of context UUIDs that were touched or created (for synthesis queuing).
 func DetectOrCreateContext(ctx context.Context, entryContent, entryUUID string) ([]string, error) {
-	ctx, span := StartSpan(ctx, "context.detect_or_create")
+	ctx, span := infra.StartSpan(ctx, "context.detect_or_create")
 	defer span.End()
 
-	LoggerFrom(ctx).Info("detecting context for entry", "entry_uuid", entryUUID, "content", truncateForLog(entryContent, 50))
+	infra.LoggerFrom(ctx).Info("detecting context for entry", "entry_uuid", entryUUID, "content", truncateForLogContext(entryContent, 50))
 
-	matchedUUIDs, scores, err := MatchEntryToContexts(ctx, entryContent, 0.6) // 60% similarity threshold
+	matchedUUIDs, scores, err := MatchEntryToContexts(ctx, entryContent, 0.6)
 	if err != nil {
-		LoggerFrom(ctx).Warn("context matching failed", "error", err)
+		infra.LoggerFrom(ctx).Warn("context matching failed", "error", err)
 	}
 
 	if len(matchedUUIDs) > 0 {
@@ -614,24 +593,24 @@ func DetectOrCreateContext(ctx context.Context, entryContent, entryUUID string) 
 				relevanceBoost = 0.10
 			}
 			if err := TouchContext(ctx, uuid, &entryUUID, relevanceBoost); err != nil {
-				LoggerFrom(ctx).Warn("failed to touch matched context", "uuid", uuid, "error", err)
+				infra.LoggerFrom(ctx).Warn("failed to touch matched context", "uuid", uuid, "error", err)
 			}
 		}
-		LoggerFrom(ctx).Info("linked entry to existing contexts", "entry_uuid", entryUUID, "context_count", len(matchedUUIDs))
+		infra.LoggerFrom(ctx).Info("linked entry to existing contexts", "entry_uuid", entryUUID, "context_count", len(matchedUUIDs))
 		return matchedUUIDs, nil
 	}
 
 	shouldCreate, contextName, entities := analyzeForNewContext(ctx, entryContent)
 	if !shouldCreate {
-		LoggerFrom(ctx).Debug("no new context needed", "entry_uuid", entryUUID)
+		infra.LoggerFrom(ctx).Debug("no new context needed", "entry_uuid", entryUUID)
 		return nil, nil
 	}
 
 	existingNode, _, err := FindContextByName(ctx, contextName)
 	if err == nil && existingNode != nil {
-		LoggerFrom(ctx).Info("context with name already exists, touching instead", "name", contextName, "uuid", existingNode.UUID)
+		infra.LoggerFrom(ctx).Info("context with name already exists, touching instead", "name", contextName, "uuid", existingNode.UUID)
 		if err := TouchContext(ctx, existingNode.UUID, &entryUUID, 0.05); err != nil {
-			LoggerFrom(ctx).Warn("failed to touch existing context", "uuid", existingNode.UUID, "error", err)
+			infra.LoggerFrom(ctx).Warn("failed to touch existing context", "uuid", existingNode.UUID, "error", err)
 		}
 		return []string{existingNode.UUID}, nil
 	}
@@ -642,29 +621,29 @@ func DetectOrCreateContext(ctx context.Context, entryContent, entryUUID string) 
 		return nil, fmt.Errorf("failed to create context: %w", err)
 	}
 
-	LoggerFrom(ctx).Info("created new context from entry", "entry_uuid", entryUUID, "context_name", contextName)
+	infra.LoggerFrom(ctx).Info("created new context from entry", "entry_uuid", entryUUID, "context_name", contextName)
 	return []string{nodeUUID}, nil
 }
 
-// analyzeForNewContext uses the LLM to determine if content warrants a new context.
-// Returns (shouldCreate, contextName, entities).
 func analyzeForNewContext(ctx context.Context, entryContent string) (bool, string, []string) {
-	ctx, span := StartSpan(ctx, "context.analyze_for_new")
+	ctx, span := infra.StartSpan(ctx, "context.analyze_for_new")
 	defer span.End()
 
-	// Skip very short content
 	if len(strings.TrimSpace(entryContent)) < 20 {
 		return false, "", nil
 	}
 
-	// Use Gemini to analyze if this content represents a new project/plan/topic
-	client, err := GetGeminiClient(ctx)
+	client, err := infra.GetGeminiClient(ctx)
 	if err != nil {
-		LoggerFrom(ctx).Warn("failed to get Gemini client for context analysis", "error", err)
+		infra.LoggerFrom(ctx).Warn("failed to get Gemini client for context analysis", "error", err)
 		return false, "", nil
 	}
 
-	model := client.GenerativeModel(GetEffectiveModel(ctx, defaultConfig.GeminiModel))
+	modelName := "gemini-2.0-flash"
+	if cfg := getConfigFromCtx(ctx); cfg != nil && cfg.GeminiModel != "" {
+		modelName = infra.GetEffectiveModel(ctx, cfg.GeminiModel)
+	}
+	model := client.GenerativeModel(modelName)
 	model.ResponseMIMEType = "application/json"
 	model.SetMaxOutputTokens(512)
 	model.ResponseSchema = &genai.Schema{
@@ -686,15 +665,15 @@ func analyzeForNewContext(ctx context.Context, entryContent string) (bool, strin
 		},
 	}
 
-	prompt := prompts.FormatContextAnalyze(WrapAsUserData(SanitizePrompt(entryContent)))
+	prompt := prompts.FormatContextAnalyze(utils.WrapAsUserData(utils.SanitizePrompt(entryContent)))
 
 	resp, err := model.GenerateContent(ctx, genai.Text(prompt))
 	if err != nil {
-		LoggerFrom(ctx).Warn("context analysis failed", "error", err)
+		infra.LoggerFrom(ctx).Warn("context analysis failed", "error", err)
 		return false, "", nil
 	}
 
-	jsonText := ExtractText(resp)
+	jsonText := infra.ExtractText(resp)
 
 	type contextResult struct {
 		IsProjectOrPlan bool     `json:"is_project_or_plan"`
@@ -703,37 +682,27 @@ func analyzeForNewContext(ctx context.Context, entryContent string) (bool, strin
 	}
 	result, _ := llmjson.ParseLLMResponse[contextResult](jsonText, []string{"is_project_or_plan", "context_name", "entities"})
 	if result == nil {
-		LoggerFrom(ctx).Warn("failed to parse context analysis response")
+		infra.LoggerFrom(ctx).Warn("failed to parse context analysis response")
 		return false, "", nil
 	}
 	return result.IsProjectOrPlan, result.ContextName, result.Entities
 }
 
-// maxSourceEntriesForSynthesis is the number of most recent source entries to use when synthesizing a context.
 const maxSourceEntriesForSynthesis = 10
-
-// maxRawLogsChars caps the total raw log text sent to the LLM for synthesis.
 const maxRawLogsChars = 6000
-
-// synthesisNoNewInfoOverlap is the word-set overlap ratio above which we skip synthesis (0.85 = 85% of new words already in briefing).
 const synthesisNoNewInfoOverlap = 0.85
-
-// synthesisNoNewInfoMinRawLen: if rawLogs is shorter than this and contained in oldContent, skip synthesis.
 const synthesisNoNewInfoMinRawLen = 50
 
-// synthesisHasNoNewInfo returns true if rawLogs does not add substantial information over oldContent (local check, no API).
 func synthesisHasNoNewInfo(rawLogs, oldContent string) bool {
 	rawLogs = strings.TrimSpace(rawLogs)
 	oldContent = strings.TrimSpace(oldContent)
 	if rawLogs == "" {
 		return true
 	}
-	// Option B: very short new logs already contained in briefing
 	if len(rawLogs) < synthesisNoNewInfoMinRawLen && oldContent != "" {
 		if strings.Contains(oldContent, rawLogs) {
 			return true
 		}
-		// Normalize for loose containment (e.g. ignore timestamps)
 		rawWords := strings.Fields(strings.ToLower(rawLogs))
 		if len(rawWords) <= 5 {
 			oldLower := strings.ToLower(oldContent)
@@ -752,7 +721,6 @@ func synthesisHasNoNewInfo(rawLogs, oldContent string) bool {
 			}
 		}
 	}
-	// Option A: word-set overlap
 	newWords := strings.Fields(strings.ToLower(rawLogs))
 	oldSet := make(map[string]struct{})
 	for _, w := range strings.Fields(strings.ToLower(oldContent)) {
@@ -777,12 +745,12 @@ func synthesisHasNoNewInfo(rawLogs, oldContent string) bool {
 	return overlapRatio >= synthesisNoNewInfoOverlap
 }
 
-// SynthesizeContext loads the context node and its source entries, then uses the LLM to produce a high-density briefing and overwrites the node's content.
+// SynthesizeContext loads the context node and its source entries, then uses the LLM to produce a briefing.
 func SynthesizeContext(ctx context.Context, contextUUID string) error {
-	ctx, span := StartSpan(ctx, "context.synthesize")
+	ctx, span := infra.StartSpan(ctx, "context.synthesize")
 	defer span.End()
 
-	client, err := GetFirestoreClient(ctx)
+	client, err := infra.GetFirestoreClient(ctx)
 	if err != nil {
 		span.RecordError(err)
 		return err
@@ -795,8 +763,8 @@ func SynthesizeContext(ctx context.Context, contextUUID string) error {
 	}
 
 	data := doc.Data()
-	oldContent := getStringField(data, "content")
-	metadataStr := getStringField(data, "metadata")
+	oldContent := infra.GetStringField(data, "content")
+	metadataStr := infra.GetStringField(data, "metadata")
 
 	var meta ContextMetadata
 	if err := json.Unmarshal([]byte(metadataStr), &meta); err != nil {
@@ -804,7 +772,6 @@ func SynthesizeContext(ctx context.Context, contextUUID string) error {
 		return fmt.Errorf("failed to parse context metadata: %w", err)
 	}
 
-	// Take last N source entry UUIDs (most recent in append order)
 	entryUUIDs := meta.SourceEntries
 	if len(entryUUIDs) > maxSourceEntriesForSynthesis {
 		entryUUIDs = entryUUIDs[len(entryUUIDs)-maxSourceEntriesForSynthesis:]
@@ -816,7 +783,7 @@ func SynthesizeContext(ctx context.Context, contextUUID string) error {
 		if totalLen >= maxRawLogsChars {
 			break
 		}
-		entry, err := GetEntry(ctx, uuid)
+		entry, err := journal.GetEntry(ctx, uuid)
 		if err != nil || entry == nil {
 			continue
 		}
@@ -829,9 +796,8 @@ func SynthesizeContext(ctx context.Context, contextUUID string) error {
 	}
 	rawLogs := strings.Join(rawParts, "\n\n")
 
-	// Local similarity filter: skip LLM if new logs don't add substantial information.
 	if synthesisHasNoNewInfo(rawLogs, oldContent) {
-		LoggerFrom(ctx).Info("context synthesis skipped (no new info)", "uuid", contextUUID, "name", meta.ContextName)
+		infra.LoggerFrom(ctx).Info("context synthesis skipped (no new info)", "uuid", contextUUID, "name", meta.ContextName)
 		now := time.Now().Format(time.RFC3339)
 		meta.LastTouched = now
 		meta.LastSynthesizedAt = now
@@ -850,10 +816,14 @@ func SynthesizeContext(ctx context.Context, contextUUID string) error {
 		return nil
 	}
 
+	cfg := getConfigFromCtx(ctx)
+	if cfg == nil {
+		return fmt.Errorf("no app config for synthesis")
+	}
 	userPrompt := fmt.Sprintf("Current Briefing:\n%s\n\nNew Information:\n%s\n\nTask: Write a new briefing (max 250 words) that preserves active Open Loops, critical dates, and key stakeholder preferences. Use bullet points for status.",
-		WrapAsUserData(oldContent), WrapAsUserData(rawLogs))
+		utils.WrapAsUserData(oldContent), utils.WrapAsUserData(rawLogs))
 
-	newContent, err := GenerateContentSimple(ctx, prompts.ExecutiveSummary(), userPrompt, &GenConfig{MaxOutputTokens: 512})
+	newContent, err := infra.GenerateContentSimple(ctx, prompts.ExecutiveSummary(), userPrompt, cfg, &infra.GenConfig{MaxOutputTokens: 512})
 	if err != nil {
 		span.RecordError(err)
 		return err
@@ -883,37 +853,14 @@ func SynthesizeContext(ctx context.Context, contextUUID string) error {
 		return err
 	}
 
-	LoggerFrom(ctx).Info("context synthesized", "uuid", contextUUID, "name", meta.ContextName)
+	infra.LoggerFrom(ctx).Info("context synthesized", "uuid", contextUUID, "name", meta.ContextName)
 	span.SetAttributes(map[string]string{"context_uuid": contextUUID, "context_name": meta.ContextName})
 	return nil
 }
 
-// firstSentence returns the first sentence of s, or up to maxChars runes if no period found.
-func firstSentence(s string, maxChars int) string {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return ""
-	}
-	runes := []rune(s)
-	for i, r := range runes {
-		if r == '.' || r == '!' || r == '?' {
-			return strings.TrimSpace(string(runes[:i+1]))
-		}
-	}
-	if len(runes) <= maxChars {
-		return string(runes)
-	}
-	return string(runes[:maxChars]) + "..."
-}
-
-// =============================================================================
-// PERMANENT CONTEXTS (Phase 5)
-// =============================================================================
-
-// InitializePermanentContexts ensures permanent contexts exist. It never overwrites content of existing
-// contexts so that user_profile and others remain dynamic (updated only by synthesis/profiling).
+// InitializePermanentContexts ensures permanent contexts exist.
 func InitializePermanentContexts(ctx context.Context) error {
-	ctx, span := StartSpan(ctx, "context.init_permanent")
+	ctx, span := infra.StartSpan(ctx, "context.init_permanent")
 	defer span.End()
 
 	permanentContexts := []struct {
@@ -929,7 +876,7 @@ func InitializePermanentContexts(ctx context.Context) error {
 	for _, pc := range permanentContexts {
 		existing, _, err := FindContextByName(ctx, pc.Name)
 		if err != nil {
-			LoggerFrom(ctx).Warn("error checking permanent context", "name", pc.Name, "error", err)
+			infra.LoggerFrom(ctx).Warn("error checking permanent context", "name", pc.Name, "error", err)
 			continue
 		}
 		if existing != nil {
@@ -937,10 +884,10 @@ func InitializePermanentContexts(ctx context.Context) error {
 		}
 		_, err = CreateContext(ctx, pc.Name, pc.Content, "permanent", nil, nil)
 		if err != nil {
-			LoggerFrom(ctx).Warn("failed to create permanent context", "name", pc.Name, "error", err)
+			infra.LoggerFrom(ctx).Warn("failed to create permanent context", "name", pc.Name, "error", err)
 			continue
 		}
-		LoggerFrom(ctx).Info("created permanent context", "name", pc.Name)
+		infra.LoggerFrom(ctx).Info("created permanent context", "name", pc.Name)
 	}
 
 	return nil

@@ -1,4 +1,4 @@
-package jot
+package memory
 
 import (
 	"context"
@@ -6,12 +6,12 @@ import (
 	"strings"
 
 	"github.com/jackstrohm/jot/llmjson"
+	"github.com/jackstrohm/jot/pkg/infra"
 )
 
 const rerankSystemPrompt = "You are a re-ranker. Given a query and a numbered list of text items, return a JSON array of the item numbers (1-based indices) that best answer the query, ordered by relevance. Only include relevant items. Example: [3, 1, 5]."
 
 // RerankNodes uses the LLM to re-rank knowledge nodes by relevance to the query.
-// Returns at most topN nodes in the order returned by the model. On LLM or parse error, returns the first topN of the input.
 func RerankNodes(ctx context.Context, query string, nodes []KnowledgeNode, topN int) ([]KnowledgeNode, error) {
 	if len(nodes) == 0 {
 		return nil, nil
@@ -30,12 +30,17 @@ func RerankNodes(ctx context.Context, query string, nodes []KnowledgeNode, topN 
 	}
 	userPrompt := fmt.Sprintf("Query: %s\n\nNumbered items:\n%s\nReturn a JSON array of the 1-based indices that best answer the query, ordered by relevance (e.g. [2, 5, 1]).", query, sb.String())
 
-	jsonText, err := GenerateContentSimple(ctx, rerankSystemPrompt, userPrompt, &GenConfig{
+	cfg := getConfigFromCtx(ctx)
+	if cfg == nil {
+		infra.LoggerFrom(ctx).Warn("rerank: no app config, using first topN")
+		return firstN(nodes, topN), nil
+	}
+	jsonText, err := infra.GenerateContentSimple(ctx, rerankSystemPrompt, userPrompt, cfg, &infra.GenConfig{
 		ResponseMIMEType: "application/json",
 		MaxOutputTokens:  512,
 	})
 	if err != nil {
-		LoggerFrom(ctx).Warn("rerank generation failed, using first topN", "error", err)
+		infra.LoggerFrom(ctx).Warn("rerank generation failed, using first topN", "error", err)
 		return firstN(nodes, topN), nil
 	}
 
@@ -43,7 +48,7 @@ func RerankNodes(ctx context.Context, query string, nodes []KnowledgeNode, topN 
 	if err := llmjson.RepairAndUnmarshal(jsonText, &indices); err != nil {
 		var floats []float64
 		if err2 := llmjson.RepairAndUnmarshal(jsonText, &floats); err2 != nil {
-			LoggerFrom(ctx).Warn("rerank parse failed, using first topN", "error", err, "error2", err2)
+			infra.LoggerFrom(ctx).Warn("rerank parse failed, using first topN", "error", err, "error2", err2)
 			return firstN(nodes, topN), nil
 		}
 		indices = make([]int, 0, len(floats))

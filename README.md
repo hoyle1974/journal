@@ -51,7 +51,6 @@ $ jot sync
 
 This project is designed to be deployed to Google Cloud Platform.
 
-1. **Infrastructure:** Run `./setup-infra.sh` to configure Cloud Tasks, Scheduler, and necessary APIs.
-2. **Secrets:** Run `./setup-secrets.sh` to load API keys (Gemini, Twilio) into GCP Secret Manager.
-3. **Deploy:** Run `./deploy.sh container` to build and push the image to Cloud Run.
-4. **Database Indexes:** Firestore composite and vector indexes must be deployed via `firebase deploy --only firestore` using the included `firestore.indexes.json`.
+1. **Configure GCP:** When (re)starting the project, run `./scripts/setup-infra.sh` (APIs, Cloud Tasks queue, Scheduler jobs) and `./scripts/setup-secrets.sh` (Secret Manager: Gemini API key, JOT_API_KEY, optional Twilio). Alternatively configure APIs and secrets in the GCP Console or via gcloud.
+2. **Deploy:** Run `./scripts/deploy.sh` (or `./scripts/deploy.sh container`) to build, test, push the image to Cloud Run, and deploy Firestore indexes from `firestore.indexes.json`.
+3. **Local testing:** Run `./scripts/test-local.sh` to start the API locally. Tail logs with `./scripts/tail.sh`.

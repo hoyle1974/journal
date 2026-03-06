@@ -1,18 +1,16 @@
-package jot
+package agent
 
 import (
 	"fmt"
 	"strings"
 	"testing"
-
-	"github.com/jackstrohm/jot/pkg/agent"
 )
 
 func TestParsePlanJSON(t *testing.T) {
 	tests := []struct {
-		name      string
-		jsonText  string
-		wantErr   bool
+		name       string
+		jsonText   string
+		wantErr    bool
 		wantPhases int
 	}{
 		{
@@ -27,8 +25,8 @@ func TestParsePlanJSON(t *testing.T) {
 			wantPhases: 2,
 		},
 		{
-			name: "valid plan with empty phases",
-			jsonText: `{"phases": []}`,
+			name:       "valid plan with empty phases",
+			jsonText:   `{"phases": []}`,
 			wantErr:    false,
 			wantPhases: 0,
 		},
@@ -55,16 +53,16 @@ func TestParsePlanJSON(t *testing.T) {
 			wantErr:  true,
 		},
 		{
-			name:     "null phases",
-			jsonText: `{"phases": null}`,
-			wantErr:  false,
+			name:       "null phases",
+			jsonText:   `{"phases": null}`,
+			wantErr:    false,
 			wantPhases: 0,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			plan, err := agent.ParsePlanJSON(tt.jsonText)
+			plan, err := ParsePlanJSON(tt.jsonText)
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("ParsePlanJSON() expected error, got nil")
@@ -95,7 +93,7 @@ func TestParsePlanJSON_PhaseStructure(t *testing.T) {
 		]
 	}`
 
-	plan, err := agent.ParsePlanJSON(jsonText)
+	plan, err := ParsePlanJSON(jsonText)
 	if err != nil {
 		t.Fatalf("ParsePlanJSON() error: %v", err)
 	}
@@ -104,7 +102,6 @@ func TestParsePlanJSON_PhaseStructure(t *testing.T) {
 		t.Fatalf("expected 2 phases, got %d", len(plan.Phases))
 	}
 
-	// Verify first phase
 	if plan.Phases[0].Title != "Research" {
 		t.Errorf("phase 0 title = %q, want %q", plan.Phases[0].Title, "Research")
 	}
@@ -115,7 +112,6 @@ func TestParsePlanJSON_PhaseStructure(t *testing.T) {
 		t.Errorf("phase 0 dependencies = %v, want []", plan.Phases[0].Dependencies)
 	}
 
-	// Verify second phase
 	if plan.Phases[1].Title != "Design" {
 		t.Errorf("phase 1 title = %q, want %q", plan.Phases[1].Title, "Design")
 	}
@@ -125,15 +121,13 @@ func TestParsePlanJSON_PhaseStructure(t *testing.T) {
 }
 
 func TestGeneratedPlan_FormatOutput(t *testing.T) {
-	// Test that the plan output format is consistent
-	plan := &agent.GeneratedPlan{
-		Phases: []agent.PlanPhase{
+	plan := &GeneratedPlan{
+		Phases: []PlanPhase{
 			{Title: "Step 1", Description: "Do first thing", Dependencies: []string{}},
 			{Title: "Step 2", Description: "Do second thing", Dependencies: []string{"Step 1"}},
 		},
 	}
 
-	// Simulate the output format used in CreateAndSavePlan
 	goal := "Test goal"
 	parentID := "fake-uuid-123"
 	var resultLines []string

@@ -1,28 +1,29 @@
-package jot
+package impl
 
 import (
 	"strings"
 	"testing"
 
+	"github.com/jackstrohm/jot/pkg/journal"
 	"github.com/jackstrohm/jot/pkg/utils"
 )
 
 func TestFormatEntriesForContext(t *testing.T) {
 	tests := []struct {
 		name     string
-		entries  []Entry
+		entries  []journal.Entry
 		maxChars int
 		contains []string
 	}{
 		{
 			name:     "empty entries",
-			entries:  []Entry{},
+			entries:  []journal.Entry{},
 			maxChars: 1000,
 			contains: []string{"No entries found"},
 		},
 		{
 			name: "single entry",
-			entries: []Entry{
+			entries: []journal.Entry{
 				{Timestamp: "2024-01-15T10:00:00Z", Source: "cli", Content: "Test entry"},
 			},
 			maxChars: 1000,
@@ -30,7 +31,7 @@ func TestFormatEntriesForContext(t *testing.T) {
 		},
 		{
 			name: "truncation",
-			entries: []Entry{
+			entries: []journal.Entry{
 				{Timestamp: "2024-01-15T10:00:00Z", Source: "cli", Content: "First entry"},
 				{Timestamp: "2024-01-15T11:00:00Z", Source: "cli", Content: "Second entry"},
 			},
@@ -41,7 +42,7 @@ func TestFormatEntriesForContext(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := FormatEntriesForContext(tt.entries, tt.maxChars)
+			result := journal.FormatEntriesForContext(tt.entries, tt.maxChars)
 			for _, s := range tt.contains {
 				if !strings.Contains(result, s) {
 					t.Errorf("FormatEntriesForContext() result should contain %q, got %q", s, result)
@@ -79,7 +80,6 @@ func TestCalculateTool(t *testing.T) {
 }
 
 func TestDateCalcTool(t *testing.T) {
-	// Test day_of_week
 	result, err := utils.PerformDateCalculation("day_of_week", "2024-01-01", "", 0)
 	if err != nil {
 		t.Errorf("day_of_week error: %v", err)
@@ -88,7 +88,6 @@ func TestDateCalcTool(t *testing.T) {
 		t.Errorf("day_of_week expected Monday, got: %s", result)
 	}
 
-	// Test add_days
 	result, err = utils.PerformDateCalculation("add_days", "2024-01-01", "", 7)
 	if err != nil {
 		t.Errorf("add_days error: %v", err)
@@ -97,7 +96,6 @@ func TestDateCalcTool(t *testing.T) {
 		t.Errorf("add_days expected 2024-01-08, got: %s", result)
 	}
 
-	// Test days_between
 	result, err = utils.PerformDateCalculation("days_between", "2024-01-01", "2024-01-31", 0)
 	if err != nil {
 		t.Errorf("days_between error: %v", err)
@@ -146,25 +144,21 @@ func TestTextStatsTool(t *testing.T) {
 }
 
 func TestRandomTool(t *testing.T) {
-	// Test coin flip
 	result := utils.GenerateRandom("coin", 0, 0, "")
 	if !strings.Contains(result, "Heads") && !strings.Contains(result, "Tails") {
 		t.Errorf("coin flip expected Heads or Tails, got: %s", result)
 	}
 
-	// Test dice
 	result = utils.GenerateRandom("dice", 0, 0, "")
 	if !strings.Contains(result, "Dice roll:") {
 		t.Errorf("dice roll expected 'Dice roll:', got: %s", result)
 	}
 
-	// Test UUID
 	result = utils.GenerateRandom("uuid", 0, 0, "")
 	if !strings.Contains(result, "Random UUID:") {
 		t.Errorf("uuid expected 'Random UUID:', got: %s", result)
 	}
 
-	// Test pick
 	result = utils.GenerateRandom("pick", 0, 0, "red, green, blue")
 	if !strings.Contains(result, "Picked:") {
 		t.Errorf("pick expected 'Picked:', got: %s", result)
@@ -172,7 +166,6 @@ func TestRandomTool(t *testing.T) {
 }
 
 func TestTimezoneConvert(t *testing.T) {
-	// Test PST to EST
 	result, err := utils.ConvertTimezone("3:00 PM", "PST", "EST")
 	if err != nil {
 		t.Errorf("ConvertTimezone error: %v", err)
@@ -181,7 +174,6 @@ func TestTimezoneConvert(t *testing.T) {
 		t.Errorf("expected 6:00 PM EST, got: %s", result)
 	}
 
-	// Test UTC to JST
 	result, err = utils.ConvertTimezone("12:00 PM", "UTC", "JST")
 	if err != nil {
 		t.Errorf("ConvertTimezone error: %v", err)
@@ -192,7 +184,6 @@ func TestTimezoneConvert(t *testing.T) {
 }
 
 func TestEncodeDecode(t *testing.T) {
-	// Test base64 encode
 	result, err := utils.EncodeDecodeText("base64_encode", "hello world")
 	if err != nil {
 		t.Errorf("base64_encode error: %v", err)
@@ -201,7 +192,6 @@ func TestEncodeDecode(t *testing.T) {
 		t.Errorf("base64_encode expected aGVsbG8gd29ybGQ=, got: %s", result)
 	}
 
-	// Test base64 decode
 	result, err = utils.EncodeDecodeText("base64_decode", "aGVsbG8gd29ybGQ=")
 	if err != nil {
 		t.Errorf("base64_decode error: %v", err)
@@ -210,7 +200,6 @@ func TestEncodeDecode(t *testing.T) {
 		t.Errorf("base64_decode expected 'hello world', got: %s", result)
 	}
 
-	// Test URL encode
 	result, err = utils.EncodeDecodeText("url_encode", "hello world")
 	if err != nil {
 		t.Errorf("url_encode error: %v", err)
@@ -219,12 +208,11 @@ func TestEncodeDecode(t *testing.T) {
 		t.Errorf("url_encode expected 'hello+world', got: %s", result)
 	}
 
-	// Test JSON format
 	result, err = utils.EncodeDecodeText("json_format", `{"a":1,"b":2}`)
 	if err != nil {
 		t.Errorf("json_format error: %v", err)
 	}
-	if !strings.Contains(result, "  ") { // Check for indentation
+	if !strings.Contains(result, "  ") {
 		t.Errorf("json_format expected indented JSON, got: %s", result)
 	}
 }

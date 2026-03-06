@@ -3,10 +3,13 @@
 # Run Jot Cloud Function locally for testing (Go version)
 #
 # Usage:
-#   ./test-local.sh           # Start server on port 8080
-#   ./test-local.sh 8081      # Start on custom port
+#   ./scripts/test-local.sh           # Start server on port 8080
+#   ./scripts/test-local.sh 8081      # Start on custom port
 #
 set -e
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT"
 
 PORT=${1:-8080}
 
@@ -20,13 +23,13 @@ echo -e "${YELLOW}Starting Jot API locally (Go)${NC}"
 echo "Port: ${PORT}"
 echo ""
 
-# Get absolute path to script directory
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-
 # Load environment variables from .env if it exists
-if [ -f "$SCRIPT_DIR/.env" ]; then
+if [ -f .env ]; then
     echo -e "${CYAN}Loading environment from .env${NC}"
-    export $(grep -v '^#' "$SCRIPT_DIR/.env" | xargs)
+    set -a
+    # shellcheck source=.env
+    source .env
+    set +a
 fi
 
 echo ""
@@ -62,6 +65,5 @@ echo ""
 echo "---"
 
 # Build and run the server (plain HTTP, loads .env from project root)
-cd "$SCRIPT_DIR"
-go build -o jot-local ./cmd/local
-PORT=$PORT ./jot-local
+go build -o jot-local ./cmd/server
+PORT=$PORT RUN_LOCAL=1 ./jot-local
