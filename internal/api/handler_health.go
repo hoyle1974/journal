@@ -14,6 +14,7 @@ func handleHealth(s *Server, w http.ResponseWriter, r *http.Request) {
 	LogHandlerResponse(ctx, r.Method, path, http.StatusOK, "status", "healthy")
 	WriteJSON(w, http.StatusOK, map[string]interface{}{
 		"status": "healthy", "timestamp": time.Now().Format(time.RFC3339), "project": s.Config.GoogleCloudProject,
+		"version": infra.Version, "commit": infra.Commit,
 	})
 }
 

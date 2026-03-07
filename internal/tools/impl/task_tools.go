@@ -186,33 +186,40 @@ func registerTaskTools() {
 
 	tools.Register(&tools.Tool{
 		Name:        "search_tasks",
-		Description: "Search tasks by semantic similarity to the query. Optionally filter by status (pending, active, completed, abandoned). Returns one line per task: uuid, status, due date (or 'not set'), and content. Use get_task for full details of a single task.",
+		Description: "Search tasks by semantic similarity to the query, or list open root-level tasks. If query is empty or omitted, returns your open todo list roots (same as in context). Optionally filter by status (pending, active, completed, abandoned). Returns one line per task: uuid, status, due date (or 'not set'), and content. Use get_task for full details of a single task.",
 		Category:    "task",
 		Params: []tools.Param{
-			tools.RequiredStringParam("query", "Natural language search query"),
+			tools.OptionalStringParam("query", "Natural language search query; omit or leave empty to list open root-level tasks"),
 			tools.LimitParam(10, 20),
 			tools.OptionalStringParam("status", "Filter by status (pending, active, completed, abandoned)"),
 		},
 		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
-			query, ok := args.RequiredString("query")
-			if !ok {
-				return tools.MissingParam("query")
-			}
+			query := args.String("query", "")
+			query = strings.TrimSpace(query)
 			limit := args.IntBounded("limit", 10, 1, 20)
 			statusFilter := args.String("status", "")
 
-			app := infra.GetApp(ctx)
-			if app == nil || app.Config() == nil {
-				return tools.Fail("Error: no app in context")
-			}
-			vec, err := infra.GenerateEmbedding(ctx, app.Config().GoogleCloudProject, query, infra.EmbedTaskRetrievalDocument)
-			if err != nil {
-				return tools.Fail("Error generating embedding: %v", err)
-			}
-
-			tasks, err := task.QuerySimilarTasks(ctx, vec, limit*2)
-			if err != nil {
-				return tools.Fail("Error searching tasks: %v", err)
+			var tasks []task.Task
+			var err error
+			if query == "" {
+				// List open root-level tasks (same as OPEN TODO LIST ROOTS in prompt).
+				tasks, err = task.GetOpenRootTasks(ctx, limit*2)
+				if err != nil {
+					return tools.Fail("Error listing tasks: %v", err)
+				}
+			} else {
+				app := infra.GetApp(ctx)
+				if app == nil || app.Config() == nil {
+					return tools.Fail("Error: no app in context")
+				}
+				vec, err := infra.GenerateEmbedding(ctx, app.Config().GoogleCloudProject, query, infra.EmbedTaskRetrievalDocument)
+				if err != nil {
+					return tools.Fail("Error generating embedding: %v", err)
+				}
+				tasks, err = task.QuerySimilarTasks(ctx, vec, limit*2)
+				if err != nil {
+					return tools.Fail("Error searching tasks: %v", err)
+				}
 			}
 
 			if statusFilter != "" {

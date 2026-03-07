@@ -402,6 +402,7 @@ func QuerySimilarTasks(ctx context.Context, queryVector []float32, limit int) ([
 		}
 		var t Task
 		if err := doc.DataTo(&t); err != nil {
+			infra.LoggerFrom(ctx).Debug("task document skip", "doc_id", doc.Ref.ID, "reason", err)
 			continue
 		}
 		t.UUID = doc.Ref.ID

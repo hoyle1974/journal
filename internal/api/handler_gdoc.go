@@ -118,8 +118,12 @@ func findSyncDoneTriggerInElements(ctx context.Context, content []*docs.Structur
 					"text_preview", utils.TruncateString(text, 60),
 					"text_len", len(text), "bold", isBold, "is_match", isMatch)
 				if isMatch {
-					infra.LoggerFrom(ctx).Debug("sync trigger found", "start_index", e.StartIndex, "end_index", e.EndIndex)
-					return e.TextRun, e.StartIndex, e.EndIndex
+					end := e.EndIndex
+					if strings.HasSuffix(raw, "\n") {
+						end-- // API forbids deleting the newline at end of segment
+					}
+					infra.LoggerFrom(ctx).Debug("sync trigger found", "start_index", e.StartIndex, "end_index", end)
+					return e.TextRun, e.StartIndex, end
 				}
 			}
 			continue
@@ -217,6 +221,13 @@ func collectSyncBlock(doc *docs.Document, beforeEndIndex int64) *syncBlock {
 		}
 		if l.elem.EndIndex > endIndex {
 			endIndex = l.elem.EndIndex
+		}
+	}
+	// API forbids deleting the newline at end of segment; exclude it from range if present
+	for _, l := range lines {
+		if l.elem.EndIndex == endIndex && l.elem.TextRun != nil && strings.HasSuffix(l.elem.TextRun.Content, "\n") {
+			endIndex--
+			break
 		}
 	}
 	return &syncBlock{
