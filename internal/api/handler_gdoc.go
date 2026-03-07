@@ -37,16 +37,7 @@ const (
 )
 
 func sanitizeResponseForDoc(response string) string {
-	lines := strings.Split(response, "\n")
-	for i, line := range lines {
-		trimmed := strings.TrimSpace(strings.ToLower(line))
-		if trimmed == "done." || trimmed == "done" {
-			lines[i] = "[logged]"
-		} else if trimmed == "logged." || trimmed == "logged" {
-			lines[i] = "[logged]"
-		}
-	}
-	return strings.Join(lines, "\n")
+	return response
 }
 
 func docIndexLen(s string) int64 {
@@ -56,14 +47,12 @@ func docIndexLen(s string) int64 {
 type syncLine struct {
 	elem *docs.ParagraphElement
 	text string
-	kind int
 }
 
 type syncBlock struct {
 	text       string
 	startIndex int64
 	endIndex   int64
-	kind       int
 }
 
 func syncCreateDocsService(ctx context.Context, cfg *config.Config) (*docs.Service, error) {
@@ -189,13 +178,7 @@ func collectSyncLinesFromElements(content []*docs.StructuralElement, beforeEndIn
 				if text == "" || (e.TextRun.TextStyle != nil && e.TextRun.TextStyle.Bold) {
 					continue
 				}
-				kind := 0
-				if strings.HasPrefix(text, "?") {
-					kind = 1
-				} else if strings.HasPrefix(text, "!") {
-					kind = 2
-				}
-				*lines = append(*lines, syncLine{elem: e, text: text, kind: kind})
+				*lines = append(*lines, syncLine{elem: e, text: text})
 			}
 			continue
 		}
@@ -236,90 +219,52 @@ func collectSyncBlock(doc *docs.Document, beforeEndIndex int64) *syncBlock {
 			endIndex = l.elem.EndIndex
 		}
 	}
-	kind := lines[0].kind
 	return &syncBlock{
 		text:       strings.Join(parts, "\n"),
 		startIndex: startIndex,
 		endIndex:   endIndex,
-		kind:       kind,
 	}
 }
 
 func buildSyncRequests(ctx context.Context, s *Server, doneStartIndex, doneEndIndex int64, block *syncBlock) ([]*docs.Request, int, int, int) {
 	var requests []*docs.Request
+	// Remove "done." trigger first (indices after it shift; block is before it so unchanged).
 	requests = append(requests,
 		&docs.Request{
-			InsertText: &docs.InsertTextRequest{
-				Location: &docs.Location{Index: doneEndIndex},
-				Text:     "\n[processed]",
-			},
-		},
-		&docs.Request{
-			UpdateTextStyle: &docs.UpdateTextStyleRequest{
-				Range:     &docs.Range{StartIndex: doneStartIndex, EndIndex: doneEndIndex},
-				TextStyle: &docs.TextStyle{Bold: true},
-				Fields:    "bold",
+			DeleteContentRange: &docs.DeleteContentRangeRequest{
+				Range: &docs.Range{StartIndex: doneStartIndex, EndIndex: doneEndIndex},
 			},
 		},
 	)
 	entriesAdded := 0
 	questionsAnswered := 0
 	actionsExecuted := 0
+	if block != nil && block.text != "" {
+		// Remove ingested block from doc (delete instead of bolding).
+		requests = append(requests,
+			&docs.Request{
+				DeleteContentRange: &docs.DeleteContentRangeRequest{
+					Range: &docs.Range{StartIndex: block.startIndex, EndIndex: block.endIndex},
+				},
+			},
+		)
+	}
 	if block == nil || block.text == "" {
 		return requests, entriesAdded, questionsAnswered, actionsExecuted
 	}
 	text := strings.TrimSpace(block.text)
 	source := "gdoc"
-	switch block.kind {
-	case 1:
-		question := strings.TrimPrefix(text, "?")
-		question = strings.TrimSpace(question)
-		if question != "" {
-			infra.LoggerFrom(ctx).Info("processing question", "question", utils.TruncateString(question, 80))
-			queryStart := time.Now()
-			answer := s.Agent.RunQuery(ctx, question, source).Answer
-			infra.LoggerFrom(ctx).Info("question answered", "duration_ms", time.Since(queryStart).Milliseconds())
-			inserted := "\n" + sanitizeResponseForDoc(answer)
-			requests = append(requests,
-				&docs.Request{UpdateTextStyle: &docs.UpdateTextStyleRequest{Range: &docs.Range{StartIndex: block.startIndex, EndIndex: block.endIndex}, TextStyle: &docs.TextStyle{Bold: true}, Fields: "bold"}},
-				&docs.Request{InsertText: &docs.InsertTextRequest{Location: &docs.Location{Index: block.endIndex}, Text: inserted}},
-				&docs.Request{UpdateTextStyle: &docs.UpdateTextStyleRequest{Range: &docs.Range{StartIndex: block.endIndex, EndIndex: block.endIndex + docIndexLen(inserted)}, TextStyle: &docs.TextStyle{Bold: true}, Fields: "bold"}},
-			)
-			questionsAnswered++
-		}
-	case 2:
-		action := strings.TrimPrefix(text, "!")
-		action = strings.TrimSpace(action)
-		if action != "" {
-			infra.LoggerFrom(ctx).Info("processing action", "action", utils.TruncateString(action, 80))
-			actionStart := time.Now()
-			result := s.Agent.RunQuery(ctx, "Execute this action and confirm what you did: "+action, source).Answer
-			infra.LoggerFrom(ctx).Info("action executed", "duration_ms", time.Since(actionStart).Milliseconds())
-			inserted := "\n✓ " + sanitizeResponseForDoc(result)
-			requests = append(requests,
-				&docs.Request{UpdateTextStyle: &docs.UpdateTextStyleRequest{Range: &docs.Range{StartIndex: block.startIndex, EndIndex: block.endIndex}, TextStyle: &docs.TextStyle{Bold: true}, Fields: "bold"}},
-				&docs.Request{InsertText: &docs.InsertTextRequest{Location: &docs.Location{Index: block.endIndex}, Text: inserted}},
-				&docs.Request{UpdateTextStyle: &docs.UpdateTextStyleRequest{Range: &docs.Range{StartIndex: block.endIndex, EndIndex: block.endIndex + docIndexLen(inserted)}, TextStyle: &docs.TextStyle{Bold: true}, Fields: "bold"}},
-			)
-			actionsExecuted++
-		}
-	default:
-		infra.LoggerFrom(ctx).Info("processing input", "text", utils.TruncateString(text, 80))
-		processStart := time.Now()
-		response := s.Agent.RunQuery(ctx, text, source).Answer
-		infra.LoggerFrom(ctx).Info("input processed", "duration_ms", time.Since(processStart).Milliseconds())
-		sanitized := sanitizeResponseForDoc(response)
-		inserted := "\n→ " + sanitized
-		if strings.TrimSpace(sanitized) == "[logged]" || strings.TrimSpace(sanitized) == "[logged]." {
-			inserted = "\n[logged]"
-		}
-		requests = append(requests,
-			&docs.Request{UpdateTextStyle: &docs.UpdateTextStyleRequest{Range: &docs.Range{StartIndex: block.startIndex, EndIndex: block.endIndex}, TextStyle: &docs.TextStyle{Bold: true}, Fields: "bold"}},
-			&docs.Request{InsertText: &docs.InsertTextRequest{Location: &docs.Location{Index: block.endIndex}, Text: inserted}},
-			&docs.Request{UpdateTextStyle: &docs.UpdateTextStyleRequest{Range: &docs.Range{StartIndex: block.endIndex, EndIndex: block.endIndex + docIndexLen(inserted)}, TextStyle: &docs.TextStyle{Bold: true}, Fields: "bold"}},
-		)
-		entriesAdded++
-	}
+	infra.LoggerFrom(ctx).Info("input", "text", utils.TruncateString(text, 80))
+	queryStart := time.Now()
+	response := s.Agent.RunQuery(ctx, text, source).Answer
+	infra.LoggerFrom(ctx).Info("input processed", "duration_ms", time.Since(queryStart).Milliseconds())
+	inserted := "\n" + sanitizeResponseForDoc(response)
+	insertEndIndex := block.startIndex + docIndexLen(inserted)
+	requests = append(requests,
+		&docs.Request{InsertText: &docs.InsertTextRequest{Location: &docs.Location{Index: block.startIndex}, Text: inserted}},
+		&docs.Request{UpdateTextStyle: &docs.UpdateTextStyleRequest{Range: &docs.Range{StartIndex: block.startIndex, EndIndex: insertEndIndex}, TextStyle: &docs.TextStyle{Bold: true}, Fields: "bold"}},
+	)
+	entriesAdded++
 	return requests, entriesAdded, questionsAnswered, actionsExecuted
 }
 
@@ -485,7 +430,7 @@ func handleSync(s *Server, w http.ResponseWriter, r *http.Request) {
 	}
 
 	infra.LoggerFrom(ctx).Debug("sync trigger scan complete", "found", true, "start_index", doneStartIndex, "end_index", doneEndIndex)
-	infra.LoggerFrom(ctx).Info("found 'done.' trigger, processing document")
+	infra.LoggerFrom(ctx).Info("found 'done.' trigger")
 
 	// Collect only content before "done." so the trigger text is not included in the parsed block.
 	block := collectSyncBlock(doc, doneStartIndex)
