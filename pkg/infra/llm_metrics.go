@@ -56,6 +56,200 @@ func formatCost(usd float64) string {
 	return fmt.Sprintf("$%.6f", usd)
 }
 
+// ContextAuditTelemetry holds pre-call token breakdown and post-call actual usage for context-caching analysis.
+// Static = system + tools + archive (candidate for caching). Dynamic = recent turns + current prompt.
+type ContextAuditTelemetry struct {
+	// Pre-call (from CountTokens)
+	SystemTokens    int  // full system instruction
+	ToolTokens      int  // tool definitions
+	PreambleTokens  int  // system instruction text before "=======" (cacheable)
+	RestOfSystemTokens int  // system instruction text after "=======" (dynamic)
+	ArchiveTokens   int  // historical turns excluding the last 2
+	RecentTokens    int  // last 2 turns + current user prompt
+	TotalInputCalc  int  // sum of the above
+	IsCacheableSize bool // true if (system + tools + archive) > 2048
+	// Post-call (from UsageMetadata)
+	ActualBilledPrompt  int
+	ActualCandidates    int
+	CachedContentTokens int // if present, implicit caching already applied
+}
+
+const contextAuditStaticThreshold = 2048
+
+const preambleSeparator = "======="
+
+// contentPartsToText concatenates text from genai.Parts (for system instruction, which is text-only).
+func contentPartsToText(parts []genai.Part) string {
+	var b strings.Builder
+	for _, p := range parts {
+		if t, ok := p.(genai.Text); ok {
+			b.WriteString(string(t))
+		}
+	}
+	return b.String()
+}
+
+// CollectContextAudit runs CountTokens for system, tools, archive, and recent+current to populate telemetry.
+// Uses app to create a system-only model for separating system vs tool tokens. Returns nil on any CountTokens error.
+func CollectContextAudit(ctx context.Context, app *App, model *genai.GenerativeModel, modelName string, history []*genai.Content, currentParts []genai.Part) *ContextAuditTelemetry {
+	if app == nil || model == nil {
+		return nil
+	}
+	client, err := app.Gemini(ctx)
+	if err != nil {
+		return nil
+	}
+	audit := &ContextAuditTelemetry{}
+
+	// Minimal content for "preamble" counts (system, system+tools)
+	emptyParts := []genai.Part{genai.Text(" ")}
+
+	// System only: model with same system instruction, no tools
+	modelSys := client.GenerativeModel(modelName)
+	if model.SystemInstruction != nil {
+		modelSys.SystemInstruction = model.SystemInstruction
+	}
+	modelSys.Tools = nil
+	respSys, err := modelSys.CountTokens(ctx, emptyParts...)
+	if err != nil {
+		return nil
+	}
+	audit.SystemTokens = int(respSys.TotalTokens)
+
+	respFull, err := model.CountTokens(ctx, emptyParts...)
+	if err != nil {
+		return nil
+	}
+	systemPlusTools := int(respFull.TotalTokens)
+	if systemPlusTools >= audit.SystemTokens {
+		audit.ToolTokens = systemPlusTools - audit.SystemTokens
+	}
+
+	// Preamble vs rest of system: split system instruction on "=======" and count tokens for each (content-only via plain model).
+	modelPlain := client.GenerativeModel(modelName)
+	modelPlain.SystemInstruction = nil
+	modelPlain.Tools = nil
+	if model.SystemInstruction != nil && len(model.SystemInstruction.Parts) > 0 {
+		fullSystemText := contentPartsToText(model.SystemInstruction.Parts)
+		if idx := strings.Index(fullSystemText, preambleSeparator); idx >= 0 {
+			preambleText := strings.TrimSpace(fullSystemText[:idx])
+			restText := strings.TrimSpace(fullSystemText[idx+len(preambleSeparator):])
+			if preambleText != "" {
+				if resp, err := modelPlain.CountTokens(ctx, genai.Text(preambleText)); err == nil {
+					audit.PreambleTokens = int(resp.TotalTokens)
+				}
+			}
+			if restText != "" {
+				if resp, err := modelPlain.CountTokens(ctx, genai.Text(restText)); err == nil {
+					audit.RestOfSystemTokens = int(resp.TotalTokens)
+				}
+			}
+		} else {
+			if resp, err := modelPlain.CountTokens(ctx, genai.Text(fullSystemText)); err == nil {
+				audit.PreambleTokens = int(resp.TotalTokens)
+			}
+		}
+	}
+
+	// Archive = history excluding last 2 turns (2 turns = 4 Content items: user, model, user, model)
+	const lastNContents = 4
+	archiveEnd := len(history) - lastNContents
+	if archiveEnd < 0 {
+		archiveEnd = 0
+	}
+	archiveContents := history[:archiveEnd]
+	recentContents := history[archiveEnd:]
+
+	// Archive tokens: flatten archive contents to one Part list, count, subtract preamble
+	if len(archiveContents) > 0 {
+		var archiveParts []genai.Part
+		for _, c := range archiveContents {
+			if c != nil {
+				archiveParts = append(archiveParts, c.Parts...)
+			}
+		}
+		if len(archiveParts) > 0 {
+			respArchive, err := model.CountTokens(ctx, archiveParts...)
+			if err == nil {
+				audit.ArchiveTokens = max(0, int(respArchive.TotalTokens)-systemPlusTools)
+			}
+		}
+	}
+
+	// Recent + current: flatten last 2 turns and current parts, count, subtract preamble
+	var recentParts []genai.Part
+	for _, c := range recentContents {
+		if c != nil {
+			recentParts = append(recentParts, c.Parts...)
+		}
+	}
+	recentParts = append(recentParts, currentParts...)
+	if len(recentParts) > 0 {
+		respRecent, err := model.CountTokens(ctx, recentParts...)
+		if err == nil {
+			audit.RecentTokens = max(0, int(respRecent.TotalTokens)-systemPlusTools)
+		}
+	}
+
+	audit.TotalInputCalc = audit.SystemTokens + audit.ToolTokens + audit.ArchiveTokens + audit.RecentTokens
+	staticTotal := audit.SystemTokens + audit.ToolTokens + audit.ArchiveTokens
+	audit.IsCacheableSize = staticTotal > contextAuditStaticThreshold
+	return audit
+}
+
+// LogContextAudit writes a single structured log line for context-caching analysis: pre-call breakdown + actual usage.
+func LogContextAudit(ctx context.Context, modelName string, audit *ContextAuditTelemetry, resp *genai.GenerateContentResponse) {
+	log := LoggerFrom(ctx)
+	attrs := []any{
+		slog.String("event", "LLM_CONTEXT_AUDIT"),
+		slog.String("message", "LLM Context Audit"),
+		slog.String("model", modelName),
+	}
+	if audit != nil {
+		attrs = append(attrs,
+			slog.Int("system_tokens", audit.SystemTokens),
+			slog.Int("tool_tokens", audit.ToolTokens),
+			slog.Int("preamble_tokens", audit.PreambleTokens),
+			slog.Int("rest_of_system_tokens", audit.RestOfSystemTokens),
+			slog.Int("archive_tokens", audit.ArchiveTokens),
+			slog.Int("recent_tokens", audit.RecentTokens),
+			slog.Int("total_input_calc", audit.TotalInputCalc),
+			slog.Bool("is_cacheable_size", audit.IsCacheableSize),
+		)
+	}
+	var actualPrompt, actualCandidates, cachedContent int
+	if resp != nil && resp.UsageMetadata != nil {
+		actualPrompt = int(resp.UsageMetadata.PromptTokenCount)
+		actualCandidates = int(resp.UsageMetadata.CandidatesTokenCount)
+		cachedContent = int(resp.UsageMetadata.CachedContentTokenCount)
+	}
+	attrs = append(attrs,
+		slog.Int("actual_billed_prompt", actualPrompt),
+		slog.Int("actual_candidates", actualCandidates),
+	)
+	if cachedContent > 0 {
+		attrs = append(attrs, slog.Int("cached_content_token_count", cachedContent))
+	}
+	msgParts := []string{"LLM_CONTEXT_AUDIT", "LLM Context Audit", "model=" + modelName,
+		fmt.Sprintf("actual_billed_prompt=%d", actualPrompt)}
+	if audit != nil {
+		msgParts = append(msgParts,
+			fmt.Sprintf("system_tokens=%d", audit.SystemTokens),
+			fmt.Sprintf("tool_tokens=%d", audit.ToolTokens),
+			fmt.Sprintf("preamble_tokens=%d", audit.PreambleTokens),
+			fmt.Sprintf("rest_of_system_tokens=%d", audit.RestOfSystemTokens),
+			fmt.Sprintf("archive_tokens=%d", audit.ArchiveTokens),
+			fmt.Sprintf("recent_tokens=%d", audit.RecentTokens),
+			fmt.Sprintf("total_input_calc=%d", audit.TotalInputCalc),
+			fmt.Sprintf("is_cacheable_size=%v", audit.IsCacheableSize),
+		)
+	}
+	if cachedContent > 0 {
+		msgParts = append(msgParts, fmt.Sprintf("cached_content_token_count=%d", cachedContent))
+	}
+	log.Info(strings.Join(msgParts, " | "), attrs...)
+}
+
 // LogLLMMetrics logs a structured LLM_METRICS line after a GenerateContent/SendMessage call.
 // Message includes key=value so it's visible in Cloud Logging when only the message column is shown.
 func LogLLMMetrics(ctx context.Context, model string, resp *genai.GenerateContentResponse, inputSizeBytes int) {

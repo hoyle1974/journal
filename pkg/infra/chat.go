@@ -3,6 +3,8 @@ package infra
 import (
 	"context"
 	"fmt"
+	"log/slog"
+	"strings"
 
 	"github.com/google/generative-ai-go/genai"
 	"github.com/jackstrohm/jot/pkg/utils"
@@ -80,6 +82,7 @@ func EmptyResponseReason(resp *genai.GenerateContentResponse) string {
 
 // ChatSession manages a multi-turn conversation with Gemini.
 type ChatSession struct {
+	app       *App
 	model     *genai.GenerativeModel
 	session   *genai.ChatSession
 	ctx       context.Context
@@ -125,6 +128,7 @@ func NewChatSession(ctx context.Context, systemPrompt string, tools []*genai.Fun
 	)
 
 	return &ChatSession{
+		app:       app,
 		model:     model,
 		session:   session,
 		ctx:       ctx,
@@ -156,19 +160,34 @@ func sanitizeParts(parts []genai.Part) []genai.Part {
 }
 
 // SendMessage sends a message and returns the response.
+// Before the call it collects context telemetry (token counts by category); after the call it logs a single LLM_CONTEXT_AUDIT line.
 func (cs *ChatSession) SendMessage(ctx context.Context, parts ...genai.Part) (*genai.GenerateContentResponse, error) {
 	ctx, span := StartSpan(ctx, "gemini.send_message")
 	defer span.End()
 
 	sanitized := sanitizeParts(parts)
 	inputSizeBytes := estimatePartsSize(parts)
+
+	// Log full context sent to Gemini (system + history + current turn; excludes tool definitions).
+	contextSent := formatContextSent(cs.model.SystemInstruction, cs.session.History, sanitized)
+	LoggerFrom(ctx).Info("LLM_CONTEXT_SENT | context sent to Gemini (system + history + current)",
+		slog.String("event", "LLM_CONTEXT_SENT"),
+		slog.Int("context_len", len(contextSent)),
+		slog.String("context", contextSent),
+	)
+
+	// Pre-call: token breakdown for context-caching analysis (system, tools, archive, recent+current).
+	audit := CollectContextAudit(ctx, cs.app, cs.model, cs.modelName, cs.session.History, sanitized)
+
 	resp, err := cs.session.SendMessage(ctx, sanitized...)
 	if err != nil {
 		span.RecordError(err)
 		LoggerFrom(ctx).Error("chat message failed", "error", err)
 		return nil, fmt.Errorf("Gemini chat error: %w", err)
 	}
+
 	LogLLMMetrics(ctx, cs.modelName, resp, inputSizeBytes)
+	LogContextAudit(ctx, cs.modelName, audit, resp)
 	return resp, nil
 }
 
@@ -204,6 +223,58 @@ func (cs *ChatSession) AddFunctionResponse(name string, response map[string]any)
 // GetHistory returns the current conversation history.
 func (cs *ChatSession) GetHistory() []*genai.Content {
 	return cs.session.History
+}
+
+// formatPartsToText returns a single string for logging: text parts concatenated, function calls/responses summarized (no tool defs).
+func formatPartsToText(parts []genai.Part) string {
+	var b strings.Builder
+	for _, p := range parts {
+		switch part := p.(type) {
+		case genai.Text:
+			b.WriteString(string(part))
+		case genai.FunctionCall:
+			b.WriteString(fmt.Sprintf("[function_call: %s]", part.Name))
+		case genai.FunctionResponse:
+			b.WriteString(fmt.Sprintf("[tool_result: %s]", part.Name))
+			if len(part.Response) > 0 {
+				b.WriteString(" ")
+				// Preview response (e.g. first 200 chars) to avoid huge logs
+				preview := fmt.Sprintf("%v", part.Response)
+				if len(preview) > 200 {
+					preview = preview[:200] + "..."
+				}
+				b.WriteString(preview)
+			}
+		default:
+			b.WriteString("[part]")
+		}
+	}
+	return b.String()
+}
+
+// formatContextSent builds the full context (system + history + current) sent to Gemini for logging. Excludes tool definitions.
+func formatContextSent(systemInstruction *genai.Content, history []*genai.Content, currentParts []genai.Part) string {
+	var sections []string
+	if systemInstruction != nil && len(systemInstruction.Parts) > 0 {
+		sections = append(sections, "=== system ===", formatPartsToText(systemInstruction.Parts))
+	}
+	if len(history) > 0 {
+		sections = append(sections, "=== history ===")
+		for _, c := range history {
+			if c == nil {
+				continue
+			}
+			role := c.Role
+			if role == "" {
+				role = "unknown"
+			}
+			sections = append(sections, fmt.Sprintf("--- %s ---", role), formatPartsToText(c.Parts))
+		}
+	}
+	if len(currentParts) > 0 {
+		sections = append(sections, "=== current turn ===", formatPartsToText(currentParts))
+	}
+	return strings.Join(sections, "\n")
 }
 
 // TrimHistory keeps only the last n message pairs in history.

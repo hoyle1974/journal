@@ -21,6 +21,7 @@ type ActiveContextItem struct {
 }
 
 // BuildSystemPrompt creates the system prompt with current date context and recent history.
+// For which parts are static vs dynamic (context caching), see docs/context-caching-analysis.md.
 func BuildSystemPrompt(ctx context.Context) string {
 	now := time.Now()
 	today := now.Format("2006-01-02")
@@ -69,28 +70,8 @@ Connect new entries to these contexts when relevant.`, utils.WrapAsUserData(stri
 		}
 	}
 
-	recentContext := ""
-	if entries, err := journal.GetEntries(ctx, 5); err == nil && len(entries) > 0 {
-		var lines []string
-		for _, e := range entries {
-			ts := e.Timestamp
-			if len(ts) > 16 {
-				ts = ts[:16]
-			}
-			content := e.Content
-			if len(content) > 150 {
-				content = content[:147] + "..."
-			}
-			lines = append(lines, fmt.Sprintf("- [%s] %s", ts, content))
-		}
-		recentContext = fmt.Sprintf(`
-
-RECENT HISTORY (last %d entries - ALREADY SAVED, do NOT re-log or re-upsert any of this):
-%s`, len(entries), utils.WrapAsUserData(strings.Join(lines, "\n")))
-	}
-
 	recentConversation := ""
-	if queries, err := journal.GetRecentQueries(ctx, 3); err == nil && len(queries) > 0 {
+	if queries, err := journal.GetRecentQueries(ctx, 5); err == nil && len(queries) > 0 {
 		var lines []string
 		for i := len(queries) - 1; i >= 0; i-- {
 			q := queries[i]
@@ -110,8 +91,8 @@ RECENT HISTORY (last %d entries - ALREADY SAVED, do NOT re-log or re-upsert any 
 		}
 		recentConversation = fmt.Sprintf(`
 
-RECENT CONVERSATION (for pronoun resolution only - ALREADY SAVED, do NOT re-log or re-upsert):
-%s`, utils.WrapAsUserData(strings.Join(lines, "\n\n")))
+RECENT CONVERSATION (last %d Q&A pairs - user question + assistant answer, for pronoun resolution - ALREADY SAVED, do NOT re-log or re-upsert):
+%s`, len(queries), utils.WrapAsUserData(strings.Join(lines, "\n\n")))
 	}
 
 	proactiveSignals := ""
@@ -137,7 +118,8 @@ PROACTIVE ALERTS (Mention these if relevant to the current conversation):
 		knowledgeGapBlock = prompts.FormatKnowledgeGap(utils.WrapAsUserData(strings.Join(gapLines, "\n")))
 	}
 
-	prompt := fmt.Sprintf(prompts.SystemPromptTemplate(), utils.UserDataDelimOpen, utils.UserDataDelimClose, today, currentWeek, lastWeekStr, currentMonth, activeContextsStr, recentContext, recentConversation, proactiveSignals, knowledgeGapBlock, sourceCodeBlock)
-	infra.LoggerFrom(ctx).Debug("system prompt built", "prompt_len", len(prompt), "reason", "inject date, active contexts, recent history, signals, gap block")
+	// Template order: preamble (cacheable) then ======= then dynamic. Placeholders: delimOpen, delimClose, sourceCodeBlock, today, currentWeek, lastWeekStr, currentMonth, activeContextsStr, recentConversation, proactiveSignals, knowledgeGapBlock.
+	prompt := fmt.Sprintf(prompts.SystemPromptTemplate(), utils.UserDataDelimOpen, utils.UserDataDelimClose, sourceCodeBlock, today, currentWeek, lastWeekStr, currentMonth, activeContextsStr, recentConversation, proactiveSignals, knowledgeGapBlock)
+	infra.LoggerFrom(ctx).Debug("system prompt built", "prompt_len", len(prompt), "reason", "inject date, active contexts, recent conversation, signals, gap block")
 	return prompt
 }

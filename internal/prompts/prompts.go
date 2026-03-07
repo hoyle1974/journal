@@ -90,7 +90,8 @@ func initSpecialistMap() {
 	}
 }
 
-// SystemPromptTemplate returns the main FOH system prompt template with 12 %s placeholders (delimOpen, delimClose, today, currentWeek, lastWeekStr, currentMonth, activeContextsStr, recentContext, recentConversation, proactiveSignals, knowledgeGapBlock, sourceCodeBlock).
+// SystemPromptTemplate returns the main FOH system prompt template with 11 %s placeholders.
+// Order: delimOpen, delimClose, sourceCodeBlock (preamble, cacheable), then after "=======": today, currentWeek, lastWeekStr, currentMonth, activeContextsStr, recentConversation, proactiveSignals, knowledgeGapBlock (dynamic).
 func SystemPromptTemplate() string { return systemPromptTxt }
 
 // SourceCodeBlock returns the static source-code block appended to the system prompt.

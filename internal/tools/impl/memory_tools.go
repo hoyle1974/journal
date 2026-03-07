@@ -23,7 +23,7 @@ func init() {
 func registerKnowledgeTools() {
 	tools.Register(&tools.Tool{
 		Name:        "upsert_knowledge",
-		Description: "Add or update a piece of knowledge in the knowledge graph. Use ONLY for NEW facts in the CURRENT user input. NEVER upsert information from RECENT HISTORY or RECENT CONVERSATION - that data is already saved. Node types: 'person', 'project', 'fact', 'preference', 'list_item', 'goal'.",
+		Description: "Add or update a piece of knowledge in the knowledge graph. Use ONLY for NEW facts in the CURRENT user input. NEVER upsert information from RECENT CONVERSATION - that data is already saved. Node types: 'person', 'project', 'fact', 'preference', 'list_item', 'goal'.",
 		Category:    "knowledge",
 		Params: []tools.Param{
 			tools.RequiredStringParam("content", "The fact or information to store (e.g., 'Alice works at Google')"),
