@@ -57,7 +57,9 @@ func handleSMS(s *Server, w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?><Response></Response>`))
 	infra.LoggerFrom(ctx).Info("sms responded 200, processing in background")
 	go func() {
-		bgCtx := context.Background()
+		// Use a fresh background context so work outlives the HTTP request, but attach
+		// the app so ProcessIncomingSMS (and infra.GetApp) can access Firestore/Gemini.
+		bgCtx := s.App.WithContext(context.Background())
 		infra.LoggerFrom(bgCtx).Info("sms processing", "from", msg.From)
 		response := s.SMS.ProcessIncomingSMS(bgCtx, msg)
 		if response != "" {
