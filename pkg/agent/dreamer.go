@@ -373,7 +373,7 @@ func RunDreamer(ctx context.Context, app *infra.App) (*DreamerResult, error) {
 	tSpecialistsStart := time.Now()
 	input := &SpecialistInput{
 		UserMessage: "Consolidate the last 24 hours of journal entries. Extract GOLD: people, projects, events, preferences, milestones, who is involved in what. Discard GRAVEL only: trivial one-off errands (buy milk, pick up package) with no lasting significance.",
-		Context:     "IGNORE system commands and queries (list contexts, delete, show todo, what is X, how old is). Focus on SUBSTANTIVE statements: party planning, people mentioned, relationships, plans. 'Gloria's birthday party April 18th', 'Lindsay confirmed she's coming', 'Clarissa will help with cake' are facts. Extract 1-10 facts per domain.",
+		Context:     "IGNORE system commands and queries (list contexts, delete, what is X, how old is). Focus on SUBSTANTIVE statements: party planning, people mentioned, relationships, plans. 'Gloria's birthday party April 18th', 'Lindsay confirmed she's coming', 'Clarissa will help with cake' are facts. Extract 1-10 facts per domain.",
 		Journal:     journalContext,
 	}
 	outputs := make([]*SpecialistOutput, len(domains))

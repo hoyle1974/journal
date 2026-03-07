@@ -57,7 +57,7 @@ func GetFirestoreClient(ctx context.Context) (*firestore.Client, error) {
 	return app.Firestore(ctx)
 }
 
-// GenerateUUID creates a new UUID for entries/todos.
+// GenerateUUID creates a new UUID for entries.
 func GenerateUUID() string {
 	return uuid.New().String()
 }

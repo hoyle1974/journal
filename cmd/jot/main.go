@@ -271,15 +271,13 @@ func cmdSync() {
 	entries := int(jsonFloat(result, "entries_added"))
 	questions := int(jsonFloat(result, "questions_answered"))
 	actions := int(jsonFloat(result, "actions_executed"))
-	todosCompleted := int(jsonFloat(result, "todos_completed"))
-	todosDeleted := int(jsonFloat(result, "todos_deleted"))
-	total := entries + questions + actions + todosCompleted + todosDeleted
+	total := entries + questions + actions
 
 	if total == 0 {
 		fmt.Println("  Nothing to process")
 	} else {
-		fmt.Printf("  Processed: %d entries, %d questions, %d actions, %d todos done, %d todos deleted\n",
-			entries, questions, actions, todosCompleted, todosDeleted)
+		fmt.Printf("  Processed: %d entries, %d questions, %d actions\n",
+			entries, questions, actions)
 	}
 }
 
