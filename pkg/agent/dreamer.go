@@ -15,7 +15,6 @@ import (
 	"github.com/jackstrohm/jot/pkg/task"
 	"github.com/jackstrohm/jot/pkg/utils"
 	"github.com/jackstrohm/jot/tools"
-	"golang.org/x/sync/errgroup"
 )
 
 const (
@@ -462,41 +461,74 @@ func RunDreamer(ctx context.Context, app *infra.App) (*DreamerResult, error) {
 
 	dreamerModel := app.DreamerModel()
 
-	g, gctx := errgroup.WithContext(ctx)
-	for i, domain := range domains {
-		idx, d := i, domain
-		g.Go(func() error {
-			infra.LoggerFrom(ctx).Info("dreamer specialist start", "domain", d)
-			out, err := RunSpecialist(gctx, d, input, dreamerModel)
-			if err != nil {
-				infra.LoggerFrom(ctx).Warn("dreamer specialist failed", "domain", d, "error", err)
-				return err
-			}
-			outputs[idx] = out
-			infra.LoggerFrom(ctx).Info("dreamer specialist done", "domain", d, "facts", len(out.Facts))
-			return nil
-		})
-	}
-	g.Go(func() error {
-		ctxs, err := RunContextExtractor(gctx, journalContext)
-		if err != nil {
-			infra.LoggerFrom(ctx).Warn("dreamer context extractor failed", "error", err)
-			return nil
-		}
-		impactedContexts = ctxs
-		return nil
-	})
-	g.Go(func() error {
-		analysis, err := RunQueryAnalyzer(gctx, recentQueriesText)
-		if err != nil {
-			infra.LoggerFrom(ctx).Warn("dreamer query analyzer failed", "error", err)
-			return nil
-		}
-		queryAnalysis = analysis
-		return nil
-	})
+	// --- PHASE 1: THE COLLOQUIUM (Discussion Room) ---
+	tColloquiumStart := time.Now()
+	roomTranscript := "Room is open. Initial pass.\n"
+	const maxRoomPasses = 2 // 2 passes allows initial thoughts + 1 round of corrections
 
-	err = g.Wait()
+	for pass := 1; pass <= maxRoomPasses; pass++ {
+		infra.LoggerFrom(ctx).Info("dreamer colloquium pass starting", "pass", pass)
+		var newMessages []string
+		allDone := true
+
+		for _, domain := range domains {
+			msg, isDone, err := RunSpecialistDiscussion(ctx, domain, journalContext, roomTranscript, dreamerModel)
+			if err != nil {
+				infra.LoggerFrom(ctx).Warn("specialist discussion failed", "domain", domain, "error", err)
+				continue // Skip this agent's turn rather than crashing the room
+			}
+			if !isDone {
+				allDone = false
+				newMessages = append(newMessages, fmt.Sprintf("[%s]: %s", domain, msg))
+			} else {
+				infra.LoggerFrom(ctx).Debug("specialist is done", "domain", domain)
+			}
+		}
+
+		if len(newMessages) > 0 {
+			roomTranscript += fmt.Sprintf("\n--- Pass %d ---\n%s\n", pass, strings.Join(newMessages, "\n"))
+		}
+
+		if allDone {
+			infra.LoggerFrom(ctx).Info("all specialists declared DONE early", "pass", pass)
+			break
+		}
+	}
+	infra.LoggerFrom(ctx).Info("dreamer colloquium finished", "duration_ms", time.Since(tColloquiumStart).Milliseconds())
+
+	// Attach the final transcript to the input for the final extraction phase
+	input.RoomContext = roomTranscript
+	infra.LoggerFrom(ctx).Info("dreamer colloquium room_transcript", "room_transcript", roomTranscript)
+
+	// --- PHASE 2: FINAL EXTRACTION (sequential) ---
+	// 2a. Final Specialist Extraction
+	for i, d := range domains {
+		infra.LoggerFrom(ctx).Info("dreamer final extraction start", "domain", d)
+		out, runErr := RunSpecialist(ctx, d, input, dreamerModel)
+		if runErr != nil {
+			infra.LoggerFrom(ctx).Warn("dreamer specialist extraction failed", "domain", d, "error", runErr)
+			if err == nil {
+				err = runErr
+			}
+			continue
+		}
+		outputs[i] = out
+		infra.LoggerFrom(ctx).Info("dreamer specialist extraction done", "domain", d, "facts", len(out.Facts))
+	}
+
+	// 2b. Context Extractor
+	if ctxs, runErr := RunContextExtractor(ctx, journalContext); runErr != nil {
+		infra.LoggerFrom(ctx).Warn("dreamer context extractor failed", "error", runErr)
+	} else {
+		impactedContexts = ctxs
+	}
+
+	// 2c. Query Analyzer
+	if analysis, runErr := RunQueryAnalyzer(ctx, recentQueriesText); runErr != nil {
+		infra.LoggerFrom(ctx).Warn("dreamer query analyzer failed", "error", runErr)
+	} else {
+		queryAnalysis = analysis
+	}
 	if err != nil {
 		anyOk := false
 		for i := 0; i < len(domains); i++ {

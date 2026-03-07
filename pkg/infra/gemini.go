@@ -296,12 +296,13 @@ func extractTextFromResponse(resp *genai.GenerateContentResponse) string {
 	if candidate.Content == nil || len(candidate.Content.Parts) == 0 {
 		return ""
 	}
+	var sb strings.Builder
 	for _, part := range candidate.Content.Parts {
 		if text, ok := part.(genai.Text); ok {
-			return string(text)
+			sb.WriteString(string(text))
 		}
 	}
-	return ""
+	return sb.String()
 }
 
 // ExtractText extracts text content from a Gemini response.

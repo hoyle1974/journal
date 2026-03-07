@@ -187,6 +187,7 @@ type SpecialistInput struct {
 	UserMessage string
 	Context     string
 	Journal     string
+	RoomContext string // Contains the transcript of the colleagues' discussion
 }
 
 // SpecialistOutput is a specialist's response.
@@ -204,6 +205,68 @@ var specialistSystemPrompts = map[Domain]string{
 	DomainThought:      prompts.Specialist("thought"),
 	DomainSelfModel:    prompts.Specialist("selfmodel"),
 	DomainEvolution:    prompts.Specialist("evolution"),
+}
+
+// RunSpecialistDiscussion runs a single specialist in "Chat" mode for the Colloquium Room.
+// Returns the agent's message, a boolean indicating if they are "DONE", and an error.
+func RunSpecialistDiscussion(ctx context.Context, domain Domain, journalContext string, roomTranscript string, modelOverride string) (string, bool, error) {
+	ctx, span := infra.StartSpan(ctx, "agent.discuss."+string(domain))
+	defer span.End()
+
+	app := infra.GetApp(ctx)
+	if app == nil {
+		return "", false, fmt.Errorf("no app in context")
+	}
+	client, err := app.Gemini(ctx)
+	if err != nil {
+		return "", false, infra.WrapLLMError(err)
+	}
+
+	modelName := app.QueryModel()
+	if modelOverride != "" {
+		modelName = app.DreamerModel()
+	}
+	model := client.GenerativeModel(modelName)
+	model.SetMaxOutputTokens(512) // Keep discussions concise
+
+	baseSysPrompt := specialistSystemPrompts[domain]
+
+	systemPrompt := baseSysPrompt + `
+
+*** FORMATTING OVERRIDE ***
+IGNORE any instructions above about outputting JSON, arrays, or specific fields like 'facts:'. Do NOT use JSON arrays.
+
+You are currently in a colloquium room with other specialist AI agents. Analyze the journal for your domain. Read the Room Transcript to see what your colleagues have said.
+Briefly state your findings, point out details others missed, or correct colleagues if they misinterpreted something. Write 2-4 PLAIN TEXT conversational sentences ONLY.
+
+If you completely agree with the current room state and have ABSOLUTELY NOTHING new to add or correct, reply with exactly the word: DONE` + prompts.DataSafety()
+
+	model.SystemInstruction = &genai.Content{Parts: []genai.Part{genai.Text(systemPrompt)}}
+
+	userPrompt := fmt.Sprintf("Journal Context:\n%s\n\nRoom Transcript so far:\n%s",
+		utils.WrapAsUserData(utils.SanitizePrompt(journalContext)),
+		utils.WrapAsUserData(utils.SanitizePrompt(roomTranscript)))
+
+	infra.LoggerFrom(ctx).Info("specialist discussion request", "domain", domain, "journal_context", journalContext, "room_transcript", roomTranscript)
+
+	apiCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	defer cancel()
+
+	infra.GeminiCallsTotal.Inc()
+	resp, err := model.GenerateContent(apiCtx, genai.Text(userPrompt))
+	if err != nil {
+		return "", false, infra.WrapLLMError(err)
+	}
+
+	text := strings.TrimSpace(infra.ExtractTextFromResponse(resp))
+
+	// Clean up the text to check if the LLM just output "DONE"
+	checkText := strings.ToUpper(strings.ReplaceAll(text, ".", ""))
+	checkText = strings.ReplaceAll(checkText, "\"", "")
+	isDone := checkText == "DONE"
+	infra.LoggerFrom(ctx).Info("specialist discussion response", "domain", domain, "response", text, "is_done", isDone)
+
+	return text, isDone, nil
 }
 
 // EvolutionAuditOutput is the Cognitive Engineer's nightly analysis.
@@ -283,7 +346,7 @@ func RunEvolutionAudit(ctx context.Context, queriesText, journalSummary string) 
 	return out, nil
 }
 
-// RunSpecialist runs a single specialist agent. modelOverride: if non-empty, use Dreamer model.
+// RunSpecialist runs a single specialist agent for final JSON extraction.
 func RunSpecialist(ctx context.Context, domain Domain, input *SpecialistInput, modelOverride string) (*SpecialistOutput, error) {
 	ctx, span := infra.StartSpan(ctx, "agent."+string(domain))
 	defer span.End()
@@ -304,6 +367,7 @@ func RunSpecialist(ctx context.Context, domain Domain, input *SpecialistInput, m
 %s
 
 %s`, utils.WrapAsUserData(utils.SanitizePrompt(input.UserMessage)), utils.WrapAsUserData(utils.SanitizePrompt(input.Context)))
+
 	if input.Journal != "" {
 		prompt = fmt.Sprintf(`User message:
 %s
@@ -312,6 +376,11 @@ Recent journal context:
 %s
 
 %s`, utils.WrapAsUserData(utils.SanitizePrompt(input.UserMessage)), utils.WrapAsUserData(utils.SanitizePrompt(input.Journal)), utils.WrapAsUserData(utils.SanitizePrompt(input.Context)))
+	}
+
+	// Inject the room discussion if it exists
+	if input.RoomContext != "" {
+		prompt += fmt.Sprintf("\n\nColloquium Room Discussion (Your colleagues' notes):\n%s\n\nReview this discussion. Use it to resolve conflicts, fix assumptions, and refine your final extraction. Do not extract facts that your colleagues have proven wrong.", utils.WrapAsUserData(utils.SanitizePrompt(input.RoomContext)))
 	}
 
 	infra.LoggerFrom(ctx).Info("specialist prompt", "domain", domain, "prompt_len", len(prompt), "prompt", prompt)
@@ -365,6 +434,8 @@ Recent journal context:
 	text := infra.ExtractTextFromResponse(resp)
 	totalMs := time.Since(t0).Milliseconds()
 	infra.LoggerFrom(ctx).Info("specialist total", "domain", domain, "total_ms", totalMs, "client_ms", clientMs, "api_ms", apiMs)
+	infra.LoggerFrom(ctx).Info("specialist response", "domain", domain, "response_len", len(text), "response", text)
+
 	var parsed struct {
 		Summary  string   `json:"summary"`
 		Facts    []string `json:"facts"`
@@ -376,13 +447,13 @@ Recent journal context:
 		Entities []string `json:"entities"`
 	}](text, []string{"summary", "facts", "entities"})
 	if parsedOut == nil {
-		infra.LoggerFrom(ctx).Warn("specialist output parse failed", "domain", domain, "error", parseErr, "raw", utils.TruncateString(text, 500))
+		infra.LoggerFrom(ctx).Warn("specialist output parse failed", "domain", domain, "error", parseErr, "raw_response_len", len(text), "raw", text)
 		return &SpecialistOutput{Domain: domain, Summary: strings.TrimSpace(text)}, nil
 	}
 	parsed = *parsedOut
 
 	if len(parsed.Facts) == 0 {
-		infra.LoggerFrom(ctx).Info("specialist returned 0 facts", "domain", domain, "summary", utils.TruncateString(parsed.Summary, 150), "raw_response", utils.TruncateString(text, 500))
+		infra.LoggerFrom(ctx).Info("specialist returned 0 facts", "domain", domain, "summary", parsed.Summary, "raw_response_len", len(text), "raw_response", text)
 	}
 
 	return &SpecialistOutput{
