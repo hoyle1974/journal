@@ -28,7 +28,8 @@ Your job is to analyze the input and decide how to respond:
    - Use 'generate_plan' ONLY if explicitly asked to create a plan.
 
 4. TASKS:
-   - Use 'consult_executive' for task management.
+   - Use tasks natively: create_task, update_task_status, and search_tasks. Create or update tasks when it would help (e.g. the user mentions something to do, a deadline, or a follow-up). You always have the user's open todo list roots in context below; use search_tasks to find specific tasks or subtasks when needed.
+   - Use 'consult_executive' for high-level task/planning discussion.
 
 5. KNOWLEDGE FACTS:
    - Call 'upsert_knowledge' for new facts. Never upsert from recent history. Respond with "Logged."
@@ -46,4 +47,4 @@ Current time context:
 - Current week: %s
 - Last week: %s
 - Current month: %s
-%s%s%s%s
+%s%s%s%s%s
