@@ -10,8 +10,8 @@ import (
 	"log/slog"
 )
 
-// AppLike is the interface the HTTP layer needs from the app (Firestore, Gemini, pools, context attachment).
-// Implemented by *jot.App so that this package does not import jot.
+// AppLike is the interface the HTTP layer needs from the app (Firestore, Gemini, pools, context attachment, task enqueue).
+// Implemented by *infra.App (via jot) so that handlers can enqueue Cloud Tasks (e.g. process-sms-query).
 type AppLike interface {
 	Firestore(context.Context) (*firestore.Client, error)
 	Gemini(context.Context) (*genai.Client, error)
@@ -22,6 +22,8 @@ type AppLike interface {
 	SubmitGDocLog(ctx context.Context, msg string)
 	WaitForBackgroundTasks()
 	WithContext(ctx context.Context) context.Context
+	// EnqueueTask enqueues a Cloud Task that POSTs payload to endpoint. Returns nil if JOT_API_URL or Cloud Tasks are unavailable.
+	EnqueueTask(ctx context.Context, endpoint string, payload map[string]interface{}) error
 }
 
 // RouterFunc is the function that routes requests to handlers. It receives the Server so handlers can use s.App and s.Config.

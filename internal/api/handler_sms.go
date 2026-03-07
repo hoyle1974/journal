@@ -56,20 +56,32 @@ func handleSMS(s *Server, w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?><Response><Message>Got it!</Message></Response>`))
 	infra.LoggerFrom(ctx).Info("sms responded 200, processing in background")
+
+	// Prefer Cloud Task so the query runs in a request-scoped context (Cloud Run keeps that request alive until the reply is sent).
+	// Response delivery: task handler runs FOH and sends the answer via SendSMS to the user's phone.
+	payload := map[string]interface{}{
+		"from":        msg.From,
+		"body":        msg.Body,
+		"message_sid": msg.MessageSid,
+	}
+	enqErr := s.App.EnqueueTask(ctx, "/internal/process-sms-query", payload)
+	if enqErr == nil {
+		infra.LoggerFrom(ctx).Debug("sms enqueued for process-sms-query", "from", msg.From)
+		return
+	}
+	// Fallback: run in goroutine when Cloud Tasks unavailable (e.g. local dev) so we still deliver the reply.
+	infra.LoggerFrom(ctx).Warn("sms task enqueue failed, processing in goroutine", "from", msg.From, "error", enqErr)
 	go func() {
-		// Use a fresh background context so work outlives the HTTP request, but attach
-		// the app so ProcessIncomingSMS (and infra.GetApp) can access Firestore/Gemini.
 		bgCtx := s.App.WithContext(context.Background())
-		infra.LoggerFrom(bgCtx).Info("sms processing", "from", msg.From)
+		infra.LoggerFrom(bgCtx).Info("sms processing (goroutine fallback)", "from", msg.From)
 		response := s.SMS.ProcessIncomingSMS(bgCtx, msg)
-		if response != "" {
-			if err := s.SMS.SendSMS(bgCtx, msg.From, response); err != nil {
-				infra.LoggerFrom(bgCtx).Error("sms reply failed", "to", msg.From, "error", err)
-			} else {
-				infra.LoggerFrom(bgCtx).Info("sms reply sent", "to", msg.From, "preview", utils.TruncateString(response, 60))
-			}
+		if response == "" {
+			response = "I couldn't process that. Please try again."
+		}
+		if err := s.SMS.SendSMS(bgCtx, msg.From, response); err != nil {
+			infra.LoggerFrom(bgCtx).Error("sms reply failed", "to", msg.From, "error", err)
 		} else {
-			infra.LoggerFrom(bgCtx).Info("sms processed", "from", msg.From, "reply", "none")
+			infra.LoggerFrom(bgCtx).Info("sms reply sent", "to", msg.From, "preview", utils.TruncateString(response, 60))
 		}
 	}()
 }

@@ -24,15 +24,8 @@ func ProcessIncomingSMS(ctx context.Context, msg *infra.TwilioWebhookRequest) st
 		"body_length", len(text),
 	)
 
-	if strings.HasPrefix(text, "?") {
-		query := strings.TrimSpace(strings.TrimPrefix(text, "?"))
-		if query == "" {
-			return "Please include a question after the ?"
-		}
-		return processQuerySMS(ctx, query, msg.From)
-	}
-
-	return processEntrySMS(ctx, text, msg.From)
+	// Same as jot app default: plain text is always treated as a query (FOH). No "?" required.
+	return processQuerySMS(ctx, text, msg.From)
 }
 
 func processQuerySMS(ctx context.Context, query, from string) string {

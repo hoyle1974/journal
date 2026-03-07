@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	cloudtasks "cloud.google.com/go/cloudtasks/apiv2"
 	"cloud.google.com/go/cloudtasks/apiv2/cloudtaskspb"
@@ -14,7 +15,11 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 )
 
+// maxCreateTaskDeadline is the maximum request deadline Cloud Tasks accepts for CreateTask RPCs (30s).
+const maxCreateTaskDeadline = 30 * time.Second
+
 // EnqueueTask creates a Cloud Task that POSTs the given payload as JSON to the API at endpoint.
+// Uses a context with at most 30s deadline for the CreateTask RPC; Cloud Tasks rejects RPC deadlines longer than 30s.
 func EnqueueTask(ctx context.Context, cfg *config.Config, endpoint string, payload map[string]interface{}) error {
 	if cfg == nil {
 		return fmt.Errorf("config is required")
@@ -29,7 +34,11 @@ func EnqueueTask(ctx context.Context, cfg *config.Config, endpoint string, paylo
 		return fmt.Errorf("marshal task payload: %w", err)
 	}
 
-	tasksClient, err := cloudtasks.NewClient(ctx)
+	// Cloud Tasks API rejects CreateTask when the request deadline is more than 30s in the future.
+	enqueueCtx, cancel := context.WithTimeout(ctx, maxCreateTaskDeadline)
+	defer cancel()
+
+	tasksClient, err := cloudtasks.NewClient(enqueueCtx)
 	if err != nil {
 		return fmt.Errorf("create Cloud Tasks client: %w", err)
 	}
@@ -62,7 +71,7 @@ func EnqueueTask(ctx context.Context, cfg *config.Config, endpoint string, paylo
 		},
 	}
 
-	_, err = tasksClient.CreateTask(ctx, &cloudtaskspb.CreateTaskRequest{
+	_, err = tasksClient.CreateTask(enqueueCtx, &cloudtaskspb.CreateTaskRequest{
 		Parent: parent,
 		Task:   task,
 	})

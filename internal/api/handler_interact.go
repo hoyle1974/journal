@@ -54,6 +54,8 @@ func handleLog(s *Server, w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, map[string]interface{}{"success": true, "uuid": entryUUID, "message": "Entry logged successfully"})
 }
 
+// handleQuery runs the FOH and delivers the answer to the API client as JSON.
+// SMS callers use a Cloud Task (process-sms-query) which runs FOH and delivers the answer via SendSMS.
 func handleQuery(s *Server, w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	path := pathForLog(r.URL.Path)

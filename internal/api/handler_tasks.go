@@ -58,6 +58,56 @@ func handleProcessEntry(s *Server, w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+// handleProcessSMSQuery runs the query for an incoming SMS (FOH) and sends the reply via Twilio.
+// Invoked by a Cloud Task enqueued from the SMS webhook so the work runs in a request-scoped context (Cloud Run keeps the request alive until done).
+func handleProcessSMSQuery(s *Server, w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	path := pathForLog(r.URL.Path)
+	LogHandlerRequest(ctx, r.Method, path)
+	if r.Method != http.MethodPost {
+		LogHandlerResponse(ctx, r.Method, path, http.StatusMethodNotAllowed, "error", "Method not allowed")
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
+		return
+	}
+	var data struct {
+		From       string `json:"from"`
+		Body       string `json:"body"`
+		MessageSid string `json:"message_sid"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+		LogHandlerResponse(ctx, r.Method, path, http.StatusBadRequest, "error", "Invalid JSON")
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("Invalid JSON: %v", err)})
+		return
+	}
+	if data.From == "" || data.Body == "" {
+		LogHandlerResponse(ctx, r.Method, path, http.StatusBadRequest, "error", "from and body are required")
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "from and body are required"})
+		return
+	}
+	msg := &infra.TwilioWebhookRequest{
+		MessageSid: data.MessageSid,
+		From:       data.From,
+		To:         "",
+		Body:       data.Body,
+	}
+	LogHandlerRequest(ctx, r.Method, path, "from", data.From, "message_sid", data.MessageSid, "body_length", len(data.Body))
+	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
+	defer cancel()
+	response := s.SMS.ProcessIncomingSMS(ctx, msg)
+	if response == "" {
+		response = "I couldn't process that. Please try again."
+	}
+	if err := s.SMS.SendSMS(ctx, data.From, response); err != nil {
+		infra.LoggerFrom(ctx).Error("process-sms-query: send reply failed", "to", data.From, "error", err)
+		LogHandlerResponse(ctx, r.Method, path, http.StatusInternalServerError, "error", err.Error())
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to send SMS reply"})
+		return
+	}
+	infra.LoggerFrom(ctx).Info("process-sms-query: reply sent", "to", data.From, "preview", utils.TruncateString(response, 60))
+	LogHandlerResponse(ctx, r.Method, path, http.StatusOK, "status", "ok", "to", data.From)
+	WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
 func handleSaveQuery(s *Server, w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	path := pathForLog(r.URL.Path)

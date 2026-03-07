@@ -96,6 +96,8 @@ func Router(s *Server, w http.ResponseWriter, r *http.Request) {
 		handleBackfillEmbeddings(s, rw, reqWithCtx)
 	case path == "/internal/process-entry":
 		handleProcessEntry(s, rw, reqWithCtx)
+	case path == "/internal/process-sms-query":
+		handleProcessSMSQuery(s, rw, reqWithCtx)
 	case path == "/internal/save-query":
 		handleSaveQuery(s, rw, reqWithCtx)
 	default:
