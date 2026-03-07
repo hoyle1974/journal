@@ -54,7 +54,7 @@ func handleSMS(s *Server, w http.ResponseWriter, r *http.Request) {
 	LogHandlerResponse(ctx, r.Method, path, http.StatusOK, "status", "accepted", "from", msg.From)
 	w.Header().Set("Content-Type", "text/xml")
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?><Response></Response>`))
+	w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?><Response><Message>Got it!</Message></Response>`))
 	infra.LoggerFrom(ctx).Info("sms responded 200, processing in background")
 	go func() {
 		// Use a fresh background context so work outlives the HTTP request, but attach
