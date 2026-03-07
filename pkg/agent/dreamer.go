@@ -7,11 +7,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/generative-ai-go/genai"
 	"github.com/jackstrohm/jot/internal/prompts"
 	"github.com/jackstrohm/jot/pkg/infra"
 	"github.com/jackstrohm/jot/pkg/journal"
 	"github.com/jackstrohm/jot/pkg/memory"
+	"github.com/jackstrohm/jot/pkg/task"
 	"github.com/jackstrohm/jot/pkg/utils"
+	"github.com/jackstrohm/jot/tools"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -21,6 +24,7 @@ const (
 	DreamerWeightBoostPerDup      = 0.1
 	DreamerSynthesisNewLogsThreshold = 3  // run synthesis if this many new entries since last
 	DreamerSynthesisStaleHours    = 48   // high-significance contexts re-synthesize if older than this
+	DreamerTaskPhaseMaxIterations = 5   // max tool-call rounds in dreamer task phase
 )
 
 // DreamerInputs holds loaded data for a dream run.
@@ -267,6 +271,81 @@ func writeDreamNarrative(ctx context.Context, app *infra.App, in *dreamNarrative
 	return nil
 }
 
+const dreamerTaskPhaseSystemPrompt = `You are the dreamer's task phase. You have access to create_task, update_task_status, and search_tasks.
+Given the journal context and current open todo roots below, create or update tasks when you infer something the user should track: follow-ups, deadlines, open loops, or commitments mentioned in the last 24h.
+Use search_tasks first if you need to see existing tasks. Only create or update when clearly useful; do not create trivial or duplicate tasks. Reply briefly after tool use; no need to narrate.`
+
+// runDreamerTaskPhase runs a short agentic loop with task tools so the dreamer can create/update tasks from the night's consolidation.
+func runDreamerTaskPhase(ctx context.Context, journalContext string, entryUUIDs []string) {
+	ctx, span := infra.StartSpan(ctx, "cron.dreamer_task_phase")
+	defer span.End()
+
+	taskToolDefs := tools.GetDefinitionsByCategory("task")
+	if len(taskToolDefs) == 0 {
+		infra.LoggerFrom(ctx).Debug("dreamer task phase: no task tools registered, skipping")
+		return
+	}
+
+	// Link created tasks to the most recent entry in the window (newest first).
+	if len(entryUUIDs) > 0 {
+		ctx = WithCurrentEntryUUID(ctx, entryUUIDs[0])
+	}
+
+	openRootsSummary := ""
+	if roots, err := task.GetOpenRootTasks(ctx, 20); err == nil && len(roots) > 0 {
+		openRootsSummary = "\n\nCurrent open todo list roots:\n" + task.FormatTasksForContext(roots, 1500)
+	}
+
+	journalPreview := journalContext
+	if len(journalPreview) > 3500 {
+		journalPreview = utils.TruncateToMaxBytes(journalPreview, 3500) + "\n... (truncated)"
+	}
+	userMsg := "Journal context from the last 24h (consolidated by the dreamer):\n" + utils.WrapAsUserData(utils.SanitizePrompt(journalPreview)) + openRootsSummary + "\n\nCreate or update tasks if anything here warrants tracking. Use tools as needed."
+
+	session, err := infra.NewChatSession(ctx, dreamerTaskPhaseSystemPrompt, taskToolDefs)
+	if err != nil {
+		infra.LoggerFrom(ctx).Warn("dreamer task phase: failed to create session", "error", err)
+		span.RecordError(err)
+		return
+	}
+
+	infra.LoggerFrom(ctx).Info("dreamer task phase starting", "tool_count", len(taskToolDefs))
+	var resp *genai.GenerateContentResponse
+	resp, err = session.SendMessage(ctx, genai.Text(userMsg))
+	if err != nil {
+		infra.LoggerFrom(ctx).Warn("dreamer task phase: send failed", "error", err)
+		span.RecordError(err)
+		return
+	}
+
+	iteration := 1
+	for iteration < DreamerTaskPhaseMaxIterations && infra.HasFunctionCalls(resp) {
+		functionCalls := infra.ExtractFunctionCalls(resp)
+		var parts []genai.Part
+		for _, fc := range functionCalls {
+			args := make(map[string]interface{})
+			for k, v := range fc.Args {
+				args[k] = v
+			}
+			toolResult := tools.Execute(ctx, fc.Name, args)
+			infra.LoggerFrom(ctx).Debug("dreamer task phase tool", "tool", fc.Name, "success", toolResult.Success)
+			parts = append(parts, genai.FunctionResponse{
+				Name:     fc.Name,
+				Response: map[string]any{"result": utils.SanitizePrompt(toolResult.Result)},
+			})
+		}
+		resp, err = session.SendMessage(ctx, parts...)
+		if err != nil {
+			infra.LoggerFrom(ctx).Warn("dreamer task phase: send after tools failed", "error", err)
+			span.RecordError(err)
+			return
+		}
+		iteration++
+	}
+	infra.LoggerFrom(ctx).Info("dreamer task phase completed", "iterations", iteration)
+	span.SetAttributes(map[string]string{"iterations": fmt.Sprintf("%d", iteration)})
+}
+
 func extractDreamerPersonaFacts(outputs []*SpecialistOutput, domains []Domain) []string {
 	const personaPrefix = "PERSONA: "
 	var personaFacts []string
@@ -510,6 +589,9 @@ func RunDreamer(ctx context.Context, app *infra.App) (*DreamerResult, error) {
 	}); err != nil {
 		infra.LoggerFrom(ctx).Warn("dreamer narrative failed", "error", err)
 	}
+
+	// Let the dreamer create or update tasks from the night's journal (tool-calling phase).
+	runDreamerTaskPhase(ctx, journalContext, entryUUIDs)
 
 	infra.LoggerFrom(ctx).Info("dreamer completed", "entries_processed", len(entryUUIDs), "facts_extracted", totalFacts, "facts_written", written, "contexts_synthesized", synthesized, "total_ms", time.Since(tDreamStart).Milliseconds(), "msg", fmt.Sprintf("dreamer completed: %d entries -> %d extracted -> %d written, %d contexts synthesized in %dms", len(entryUUIDs), totalFacts, written, synthesized, time.Since(tDreamStart).Milliseconds()))
 	span.SetAttributes(map[string]string{

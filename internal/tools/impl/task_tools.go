@@ -2,12 +2,25 @@ package impl
 
 import (
 	"context"
+	"strings"
 
 	"github.com/jackstrohm/jot/pkg/agent"
 	"github.com/jackstrohm/jot/pkg/infra"
 	"github.com/jackstrohm/jot/pkg/task"
 	"github.com/jackstrohm/jot/tools"
 )
+
+// parseCommaSeparatedIDs splits s by comma and returns non-empty trimmed UUIDs.
+func parseCommaSeparatedIDs(s string) []string {
+	var out []string
+	for _, part := range strings.Split(s, ",") {
+		id := strings.TrimSpace(part)
+		if id != "" {
+			out = append(out, id)
+		}
+	}
+	return out
+}
 
 func init() {
 	registerTaskTools()
@@ -48,7 +61,94 @@ func registerTaskTools() {
 			if err != nil {
 				return tools.Fail("Error creating task: %v", err)
 			}
+			if dueDate != "" {
+				return tools.OK("Task created (ID: %s, due: %s)", uuid, dueDate)
+			}
 			return tools.OK("Task created (ID: %s)", uuid)
+		},
+	})
+
+	tools.Register(&tools.Tool{
+		Name:        "get_task",
+		Description: "Get full details of a single task by ID (content, status, due_date, system_prompt, journal_entry_ids, memory_node_ids). Use when the user asks for due dates or details of a specific task, or before updating backlinks.",
+		Category:    "task",
+		Params: []tools.Param{
+			tools.RequiredStringParam("task_id", "Task UUID"),
+		},
+		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
+			taskID, ok := args.RequiredString("task_id")
+			if !ok {
+				return tools.MissingParam("task_id")
+			}
+			t, err := task.GetTask(ctx, taskID)
+			if err != nil {
+				return tools.Fail("Error fetching task: %v", err)
+			}
+			due := t.DueDate
+			if due == "" {
+				due = "(not set)"
+			}
+			journalIDs := strings.Join(t.JournalEntryIDs, ",")
+			if journalIDs == "" {
+				journalIDs = "(none)"
+			}
+			memoryIDs := strings.Join(t.MemoryNodeIDs, ",")
+			if memoryIDs == "" {
+				memoryIDs = "(none)"
+			}
+			return tools.OK("Task %s: status=%s due=%s content=%s system_prompt=%s journal_entry_ids=%s memory_node_ids=%s", t.UUID, t.Status, due, t.Content, t.SystemPrompt, journalIDs, memoryIDs)
+		},
+	})
+
+	tools.Register(&tools.Tool{
+		Name:        "update_task",
+		Description: "Update a task's editable fields. Provide task_id and any of: content, parent_id, due_date (YYYY-MM-DD or empty to clear), system_prompt; or add/remove journal or memory backlinks (comma-separated UUIDs). Only provided fields are changed. Use update_task_status to change status.",
+		Category:    "task",
+		Params: []tools.Param{
+			tools.RequiredStringParam("task_id", "Task UUID"),
+			tools.OptionalStringParam("content", "New task description/title"),
+			tools.OptionalStringParam("parent_id", "New parent task UUID, or empty to make root"),
+			tools.OptionalStringParam("due_date", "Due date (YYYY-MM-DD), or empty to clear"),
+			tools.OptionalStringParam("system_prompt", "Instructions for the LLM when working on this task"),
+			tools.OptionalStringParam("add_journal_entry_ids", "Comma-separated journal entry UUIDs to link to this task"),
+			tools.OptionalStringParam("remove_journal_entry_ids", "Comma-separated journal entry UUIDs to unlink from this task"),
+			tools.OptionalStringParam("add_memory_node_ids", "Comma-separated knowledge node UUIDs to link to this task"),
+			tools.OptionalStringParam("remove_memory_node_ids", "Comma-separated knowledge node UUIDs to unlink from this task"),
+		},
+		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
+			taskID, ok := args.RequiredString("task_id")
+			if !ok {
+				return tools.MissingParam("task_id")
+			}
+			opts := &task.UpdateTaskOpts{
+				Content:      args.OptionalString("content"),
+				ParentID:     args.OptionalString("parent_id"),
+				DueDate:      args.OptionalString("due_date"),
+				SystemPrompt: args.OptionalString("system_prompt"),
+			}
+			if s := args.OptionalString("add_journal_entry_ids"); s != nil && *s != "" {
+				opts.AddJournalEntryIDs = parseCommaSeparatedIDs(*s)
+			}
+			if s := args.OptionalString("remove_journal_entry_ids"); s != nil && *s != "" {
+				opts.RemoveJournalEntryIDs = parseCommaSeparatedIDs(*s)
+			}
+			if s := args.OptionalString("add_memory_node_ids"); s != nil && *s != "" {
+				opts.AddMemoryNodeIDs = parseCommaSeparatedIDs(*s)
+			}
+			if s := args.OptionalString("remove_memory_node_ids"); s != nil && *s != "" {
+				opts.RemoveMemoryNodeIDs = parseCommaSeparatedIDs(*s)
+			}
+			hasEdit := opts.Content != nil || opts.ParentID != nil || opts.DueDate != nil || opts.SystemPrompt != nil ||
+				len(opts.AddJournalEntryIDs) > 0 || len(opts.RemoveJournalEntryIDs) > 0 ||
+				len(opts.AddMemoryNodeIDs) > 0 || len(opts.RemoveMemoryNodeIDs) > 0
+			if !hasEdit {
+				return tools.Fail("provide at least one field to update: content, parent_id, due_date, system_prompt, or add/remove journal/memory IDs")
+			}
+			err := task.UpdateTask(ctx, taskID, opts)
+			if err != nil {
+				return tools.Fail("Error updating task: %v", err)
+			}
+			return tools.OK("Task %s updated", taskID)
 		},
 	})
 
@@ -86,7 +186,7 @@ func registerTaskTools() {
 
 	tools.Register(&tools.Tool{
 		Name:        "search_tasks",
-		Description: "Search tasks by semantic similarity to the query. Optionally filter by status (pending, active, completed, abandoned). Returns tasks formatted for context.",
+		Description: "Search tasks by semantic similarity to the query. Optionally filter by status (pending, active, completed, abandoned). Returns one line per task: uuid, status, due date (or 'not set'), and content. Use get_task for full details of a single task.",
 		Category:    "task",
 		Params: []tools.Param{
 			tools.RequiredStringParam("query", "Natural language search query"),

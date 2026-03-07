@@ -55,6 +55,8 @@ func TestToolDefinitionsComplete(t *testing.T) {
 		"wikipedia",
 		"web_search",
 		"create_task",
+		"get_task",
+		"update_task",
 		"update_task_status",
 		"search_tasks",
 	}

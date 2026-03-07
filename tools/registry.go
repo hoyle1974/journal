@@ -37,6 +37,20 @@ func GetDefinitions() []*genai.FunctionDeclaration {
 	return definitions
 }
 
+// GetDefinitionsByCategory returns function declarations for tools in the given category (e.g. "task").
+func GetDefinitionsByCategory(category string) []*genai.FunctionDeclaration {
+	registryLock.RLock()
+	defer registryLock.RUnlock()
+
+	var definitions []*genai.FunctionDeclaration
+	for _, tool := range registry {
+		if tool.Category == category {
+			definitions = append(definitions, toolToDeclaration(tool))
+		}
+	}
+	return definitions
+}
+
 // Execute runs a tool by name with the given arguments.
 func Execute(ctx context.Context, name string, arguments map[string]interface{}) Result {
 	registryLock.RLock()
