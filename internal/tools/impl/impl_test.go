@@ -54,6 +54,9 @@ func TestToolDefinitionsComplete(t *testing.T) {
 		"bookmark",
 		"wikipedia",
 		"web_search",
+		"create_task",
+		"update_task_status",
+		"search_tasks",
 	}
 
 	toolDefs := tools.GetDefinitions()
