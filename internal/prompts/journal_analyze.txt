@@ -15,7 +15,7 @@ Analyze the provided journal entry. Extract all entities, tasks, and sentiment d
 4. STATE EXTRACTION: Set "status" to: "Planned", "In-Progress", "Stalled", or "Completed".
 5. OPEN LOOPS: Identify unanswered questions or incomplete tasks. Use priority "low", "med", or "high".
 6. NO HALLUCINATION: If the entry does not mention a status or a person, do not invent one.
-7. TAGS: Use tag_1 through tag_5. Provide 3-5 tags; leave later slots empty if you have fewer. Each tag MUST be 1-3 words, lowercase, under 30 characters (e.g. "introduction", "welcome", "meeting"). No sentences, no meta-commentary.
+7. TAGS: Use tag_1 through tag_5. Provide 3-5 tags; leave later slots empty if you have fewer. Each tag MUST be 1-3 words, lowercase, under 30 characters (e.g. "introduction", "welcome", "meeting"). Do NOT put reasoning, explanations, or meta-commentary in any tag—only short labels. If you cannot summarize in 1-3 words, leave that tag empty.
 
 # Required JSON Structure
 Output a single JSON object only. No markdown, no code fences. Valid JSON only.

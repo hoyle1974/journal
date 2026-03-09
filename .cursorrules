@@ -26,6 +26,10 @@
 - **Requirement:** Wrap all user-origin strings or tool results in `<user_data>` tags using the `WrapAsUserData()` helper.
 - **Rule:** Use `llmjson.RepairAndUnmarshal` for all LLM JSON parsing to handle truncation.
 
+## LLM Structured Output (genai.Schema)
+
+- **Note:** `github.com/google/generative-ai-go/genai.Schema` does **not** support `maxLength` (or similar string-length constraints). Rely on prompt instructions and post-processing (e.g. truncate or drop oversize string fields) when you need bounded string lengths in structured responses.
+
 ## Observability
 
 - **Rule:** Every significant agentic step must be traceable.

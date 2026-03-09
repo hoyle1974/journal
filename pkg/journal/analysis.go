@@ -19,7 +19,11 @@ const (
 	EntityStatusCompleted  = "Completed"
 )
 
-const dateDisplayLen = 10
+const (
+	dateDisplayLen = 10
+	maxTagLen      = 30
+	maxTagWords    = 3
+)
 
 // Entity represents a person, project, or event mentioned in a journal entry.
 type Entity struct {
@@ -90,11 +94,11 @@ func AnalyzeJournalEntry(ctx context.Context, entryContent, entryUUID, entryTime
 			"summary":   {Type: genai.TypeString},
 			"mood":      {Type: genai.TypeString},
 			"category":  {Type: genai.TypeString, Enum: []string{"work", "personal", "health", "finance", "logistics"}},
-			"tag_1":     {Type: genai.TypeString, Description: "Tag 1 of 5. 1-3 words, lowercase. Leave empty if fewer than 5 tags."},
-			"tag_2":     {Type: genai.TypeString, Description: "Tag 2 of 5."},
-			"tag_3":     {Type: genai.TypeString, Description: "Tag 3 of 5."},
-			"tag_4":     {Type: genai.TypeString, Description: "Tag 4 of 5. Optional."},
-			"tag_5":     {Type: genai.TypeString, Description: "Tag 5 of 5. Optional."},
+			"tag_1":     {Type: genai.TypeString, Description: "Tag 1 of 5. 1-3 words, lowercase, max 30 chars. No sentences or reasoning."},
+			"tag_2":     {Type: genai.TypeString, Description: "Tag 2 of 5. 1-3 words, lowercase, max 30 chars. No sentences or reasoning."},
+			"tag_3":     {Type: genai.TypeString, Description: "Tag 3 of 5. 1-3 words, lowercase, max 30 chars. No sentences or reasoning."},
+			"tag_4":     {Type: genai.TypeString, Description: "Tag 4 of 5. 1-3 words, lowercase, max 30 chars. Leave empty if not needed."},
+			"tag_5":     {Type: genai.TypeString, Description: "Tag 5 of 5. 1-3 words, lowercase, max 30 chars. Leave empty if not needed."},
 			"open_loops": {
 				Type: genai.TypeArray,
 				Items: &genai.Schema{
@@ -149,11 +153,9 @@ func AnalyzeJournalEntry(ctx context.Context, entryContent, entryUUID, entryTime
 		Entities:  raw.Entities,
 		OpenLoops: raw.OpenLoops,
 	}
-	const maxTagLen = 50
 	for _, t := range []string{raw.Tag1, raw.Tag2, raw.Tag3, raw.Tag4, raw.Tag5} {
-		t = strings.TrimSpace(t)
-		if t != "" && len(t) <= maxTagLen {
-			analysis.Tags = append(analysis.Tags, t)
+		if cleaned := sanitizeTag(t); cleaned != "" {
+			analysis.Tags = append(analysis.Tags, cleaned)
 		}
 	}
 	for i := range analysis.Entities {
@@ -169,6 +171,30 @@ func AnalyzeJournalEntry(ctx context.Context, entryContent, entryUUID, entryTime
 	}
 	analysis.SourceID = entryUUID
 	return analysis, nil
+}
+
+// sanitizeTag returns a tag suitable for storage, or empty string to drop.
+// Drops tags that are over maxTagLen, have more than maxTagWords, or contain sentence-like or reasoning content.
+func sanitizeTag(t string) string {
+	t = strings.TrimSpace(t)
+	if t == "" {
+		return ""
+	}
+	if len(t) > maxTagLen {
+		return ""
+	}
+	if strings.Contains(t, ". ") {
+		return ""
+	}
+	// Drop meta-commentary / reasoning (e.g. "drop-off - status? not for gideon")
+	if strings.Contains(t, "?") || strings.Contains(t, " - ") {
+		return ""
+	}
+	words := strings.Fields(t)
+	if len(words) > maxTagWords {
+		return ""
+	}
+	return t
 }
 
 // NormalizeEntityStatus maps LLM output to canonical status.

@@ -111,7 +111,13 @@ func RunQueryWithDebug(ctx context.Context, app *infra.App, question, source str
 	infra.LoggerFrom(ctx).Debug("FOH: system prompt built", "prompt_len", len(systemPrompt), "reason", "inject date, contexts, recent history")
 	logDebug("[prompt] %s", systemPrompt)
 
-	toolDefs := tools.GetDefinitions()
+	useCompactTools := app.Config() != nil && app.Config().UseCompactTools
+	var toolDefs []*genai.FunctionDeclaration
+	if useCompactTools {
+		toolDefs = tools.GetDefinitionsForCore() // Map vs Manual: only semantic_search, upsert_knowledge, discovery_search (~300 tokens)
+	} else {
+		toolDefs = tools.GetDefinitions()
+	}
 	session, err := infra.NewChatSession(ctx, systemPrompt, toolDefs)
 	if err != nil {
 		infra.ErrorsTotal.Inc()
@@ -123,8 +129,8 @@ func RunQueryWithDebug(ctx context.Context, app *infra.App, question, source str
 			DebugLogs:  debugLogs,
 		}
 	}
-	logDebug("[init] Chat session created with %d tools", len(toolDefs))
-	infra.LoggerFrom(ctx).Debug("FOH: sending question to LLM", "tool_count", len(toolDefs), "reason", "first turn")
+	logDebug("[init] Chat session created with %d tools (compact=%v)", len(toolDefs), useCompactTools)
+	infra.LoggerFrom(ctx).Debug("FOH: sending question to LLM", "tool_count", len(toolDefs), "compact_tools", useCompactTools, "reason", "first turn")
 
 	iteration := 0
 	emptyContentRetries := 0
@@ -151,14 +157,78 @@ func RunQueryWithDebug(ctx context.Context, app *infra.App, question, source str
 	infra.LoggerFrom(ctx).Debug("FOH: iteration 1 response received", "reason", "initial LLM turn")
 
 	for iteration < MaxIterations {
-		hasCalls := infra.HasFunctionCalls(resp)
+		var hasCalls bool
+		var answerText string
+		if useCompactTools {
+			// Map vs Manual: core tools (semantic_search, upsert_knowledge, discovery_search) come as native function calls; rest via JSON.
+			var discoveredToolName string
+			var discoveredToolArgs map[string]interface{}
+			if infra.HasFunctionCalls(resp) {
+				hasCalls = true
+			} else {
+				answerText = infra.ExtractTextFromResponse(resp)
+				discoveredToolName, discoveredToolArgs, hasCalls = ParseStructuredToolCall(answerText)
+			}
+			if hasCalls && !infra.HasFunctionCalls(resp) {
+				// Discovered tool invoked via JSON block
+				logDebug("[iter %d] LLM response: discovered tool_call=%s", iteration, discoveredToolName)
+				infra.LoggerFrom(ctx).Debug("FOH: discovered tool call (JSON)", "iter", iteration, "tool", discoveredToolName)
+				infra.ToolCallsTotal.Inc()
+				toolResult := tools.Execute(ctx, discoveredToolName, discoveredToolArgs)
+				toolCalls = append(toolCalls, map[string]interface{}{
+					"tool":           discoveredToolName,
+					"arguments":      discoveredToolArgs,
+					"success":        toolResult.Success,
+					"result_preview": utils.TruncateString(toolResult.Result, 200),
+				})
+				searchTools := map[string]bool{
+					"semantic_search": true, "get_entity_network": true, "search_entries": true,
+					"get_entries_by_date_range": true, "query_entities": true, "wikipedia": true,
+					"web_search": true, "list_knowledge": true,
+					"consult_anthropologist": true, "consult_architect": true, "consult_executive": true, "consult_philosopher": true,
+				}
+				if searchTools[discoveredToolName] {
+					res := strings.ToLower(strings.TrimSpace(toolResult.Result))
+					if strings.Contains(res, "no results found") || strings.Contains(res, "no information found") ||
+						strings.Contains(res, "no semantic matches found") || strings.Contains(res, "no entries found") ||
+						strings.Contains(res, "no queries found") || strings.Contains(res, "no entity found") ||
+						strings.Contains(res, "no wikipedia") || strings.Contains(res, "no definition found for") {
+						knowledgeGapDetected = true
+					}
+				}
+				resultMsg := "Tool result (" + discoveredToolName + "): " + toolResult.Result
+				resp, err = session.SendMessage(ctx, genai.Text(utils.SanitizePrompt(resultMsg)))
+				if err != nil {
+					infra.ErrorsTotal.Inc()
+					span.RecordError(err)
+					return &QueryResult{
+						Answer:     fmt.Sprintf("Error calling Gemini API: %v", infra.WrapLLMError(err)),
+						Iterations: iteration,
+						ToolCalls:  toolCalls,
+						Error:      true,
+						DebugLogs:  debugLogs,
+					}
+				}
+				iteration++
+				infra.GeminiCallsTotal.Inc()
+				session.TrimHistory(MaxMessagePairs)
+				logDebug("[iter %d] tool_result sent to LLM", iteration)
+				continue
+			}
+			// hasCalls true with native FunctionCalls: fall through to native execution below
+		} else {
+			hasCalls = infra.HasFunctionCalls(resp)
+			if !hasCalls {
+				answerText = infra.ExtractTextFromResponse(resp)
+			}
+		}
+
 		logDebug("[iter %d] LLM response: has_function_calls=%v", iteration, hasCalls)
 		infra.LoggerFrom(ctx).Debug("FOH: iteration decision", "iter", iteration, "has_function_calls", hasCalls, "reason", "decompose: LLM either answers or calls tools")
 
 		if !hasCalls {
-			text := infra.ExtractTextFromResponse(resp)
-			if text != "" {
-				answer := strings.TrimSpace(text)
+			if answerText != "" {
+				answer := strings.TrimSpace(answerText)
 
 				if pass, reason, err := runReflectionCheck(ctx, app, answer, question); err == nil && !pass {
 					infra.LoggerFrom(ctx).Debug("FOH: reflection check failed", "reason", reason, "action", "revising answer against semantic memory")
@@ -234,9 +304,9 @@ func RunQueryWithDebug(ctx context.Context, app *infra.App, question, source str
 				resp = resp2
 			}
 			if iteration > 1 {
-				logDebug("[done] LLM returned empty content after tool execution, defaulting to Logged.")
+				logDebug("[done] LLM returned empty content after tool execution, defaulting to short summary.")
 				return &QueryResult{
-					Answer:     "Logged. (No further information found)",
+					Answer:     "Saved.",
 					Iterations: iteration,
 					ToolCalls:  toolCalls,
 					Error:      false,

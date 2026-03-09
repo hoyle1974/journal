@@ -292,6 +292,9 @@ func runDreamerTaskPhase(ctx context.Context, journalContext string, entryUUIDs 
 		return
 	}
 
+	app := infra.GetApp(ctx)
+	useCompactTools := app != nil && app.Config() != nil && app.Config().UseCompactTools
+
 	// Link created tasks to the most recent entry in the window (newest first).
 	if len(entryUUIDs) > 0 {
 		ctx = WithCurrentEntryUUID(ctx, entryUUIDs[0])
@@ -308,14 +311,24 @@ func runDreamerTaskPhase(ctx context.Context, journalContext string, entryUUIDs 
 	}
 	userMsg := "Journal context from the last 24h (consolidated by the dreamer):\n" + utils.WrapAsUserData(utils.SanitizePrompt(journalPreview)) + openRootsSummary + "\n\nCreate or update tasks if anything here warrants tracking. Use tools as needed."
 
-	session, err := infra.NewChatSession(ctx, dreamerTaskPhaseSystemPrompt, taskToolDefs)
+	systemPrompt := dreamerTaskPhaseSystemPrompt
+	if useCompactTools {
+		systemPrompt += "\n\n---\n## TOOLS (compact)\nTo call a tool, respond with ONLY a fenced JSON block (```json ... ```): {\"tool\": \"tool_name\", \"args\": {\"param\": \"value\", ...}}.\n\n" + tools.GetCompactDirectoryByCategory("task")
+		infra.LoggerFrom(ctx).Debug("dreamer task phase: compact tools mode")
+	}
+
+	var toolDefs []*genai.FunctionDeclaration
+	if !useCompactTools {
+		toolDefs = taskToolDefs
+	}
+	session, err := infra.NewChatSession(ctx, systemPrompt, toolDefs)
 	if err != nil {
 		infra.LoggerFrom(ctx).Warn("dreamer task phase: failed to create session", "error", err)
 		span.RecordError(err)
 		return
 	}
 
-	infra.LoggerFrom(ctx).Info("dreamer task phase starting", "tool_count", len(taskToolDefs))
+	infra.LoggerFrom(ctx).Info("dreamer task phase starting", "tool_count", len(toolDefs), "compact_tools", useCompactTools)
 	var resp *genai.GenerateContentResponse
 	resp, err = session.SendMessage(ctx, genai.Text(userMsg))
 	if err != nil {
@@ -325,7 +338,29 @@ func runDreamerTaskPhase(ctx context.Context, journalContext string, entryUUIDs 
 	}
 
 	iteration := 1
-	for iteration < DreamerTaskPhaseMaxIterations && infra.HasFunctionCalls(resp) {
+	for iteration < DreamerTaskPhaseMaxIterations {
+		if useCompactTools {
+			text := infra.ExtractTextFromResponse(resp)
+			toolName, toolArgs, found := ParseStructuredToolCall(text)
+			if !found {
+				break
+			}
+			infra.ToolCallsTotal.Inc()
+			toolResult := tools.Execute(ctx, toolName, toolArgs)
+			infra.LoggerFrom(ctx).Debug("dreamer task phase tool", "tool", toolName, "success", toolResult.Success)
+			resultMsg := "Tool result (" + toolName + "): " + toolResult.Result
+			resp, err = session.SendMessage(ctx, genai.Text(utils.SanitizePrompt(resultMsg)))
+			if err != nil {
+				infra.LoggerFrom(ctx).Warn("dreamer task phase: send after tools failed", "error", err)
+				span.RecordError(err)
+				return
+			}
+			iteration++
+			continue
+		}
+		if !infra.HasFunctionCalls(resp) {
+			break
+		}
 		functionCalls := infra.ExtractFunctionCalls(resp)
 		var parts []genai.Part
 		for _, fc := range functionCalls {
