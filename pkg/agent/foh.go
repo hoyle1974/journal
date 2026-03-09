@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/generative-ai-go/genai"
 	"github.com/jackstrohm/jot/internal/prompts"
+	"github.com/jackstrohm/jot/llmjson"
 	"github.com/jackstrohm/jot/pkg/infra"
 	"github.com/jackstrohm/jot/pkg/utils"
 	"github.com/jackstrohm/jot/tools"
@@ -521,10 +522,28 @@ func runReflectionCheck(ctx context.Context, app *infra.App, answer, question st
 		Pass   bool   `json:"pass"`
 		Reason string `json:"reason"`
 	}
-	if json.Unmarshal([]byte(text), &out) != nil {
-		return true, "", nil
+	if json.Unmarshal([]byte(text), &out) == nil {
+		return out.Pass, out.Reason, nil
 	}
-	return out.Pass, out.Reason, nil
+	// Strip preamble (e.g. "Here is the JSON requested:\n```json") and repair truncated JSON.
+	if idx := strings.Index(text, "{"); idx >= 0 {
+		text = strings.TrimSpace(text[idx:])
+	}
+	if llmjson.RepairAndUnmarshal(text, &out) == nil {
+		return out.Pass, out.Reason, nil
+	}
+	// Best-effort: extract pass and reason from malformed or truncated response.
+	partial, _ := llmjson.PartialUnmarshalObject(text, []string{"pass", "reason"})
+	if len(partial) > 0 {
+		if raw, ok := partial["pass"]; ok && len(raw) > 0 {
+			_ = json.Unmarshal(raw, &out.Pass)
+		}
+		if raw, ok := partial["reason"]; ok && len(raw) > 0 {
+			_ = json.Unmarshal(raw, &out.Reason)
+		}
+		return out.Pass, out.Reason, nil
+	}
+	return true, "", nil
 }
 
 func runReflectionRevision(ctx context.Context, session *infra.ChatSession, question, previousAnswer, reason string) string {

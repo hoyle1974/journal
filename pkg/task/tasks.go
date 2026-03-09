@@ -21,7 +21,7 @@ const (
 	StatusAbandoned = "abandoned"
 )
 
-const reflectionSystemPrompt = `You are a summarizer. Given context about why a task was completed or abandoned, output exactly 1-2 short sentences suitable for a journal reflection. No preamble or quotes.`
+const reflectionSystemPrompt = `You are a summarizer. Given context about why a task was completed or abandoned, output exactly 1-2 short sentences of plain prose suitable for a journal reflection. Output plain text only—no JSON, no arrays, no code, no numbers or brackets. No preamble or quotes.`
 
 // CreateTask creates a task in Firestore, generates an embedding for Content+SystemPrompt, and returns the task UUID.
 func CreateTask(ctx context.Context, t *Task) (string, error) {
@@ -156,7 +156,8 @@ func UpdateTaskStatus(ctx context.Context, uuid, newStatus, reflectionReason str
 	}
 
 	summary = utils.TruncateString(strings.TrimSpace(summary), 500)
-	if summary == "" {
+	// Reject malformed output (e.g. model returned "[ 1 ]" or JSON); fall back to reason.
+	if summary == "" || strings.HasPrefix(summary, "[") || strings.HasPrefix(summary, "{") {
 		summary = reflectionReason
 	}
 

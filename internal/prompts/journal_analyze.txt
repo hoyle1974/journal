@@ -15,6 +15,7 @@ Analyze the provided journal entry. Extract all entities, tasks, and sentiment d
 4. STATE EXTRACTION: For each entity, set "status" to exactly one of: "Planned", "In-Progress", "Stalled", "Completed". Map from context: planning/not started -> Planned; ongoing/active -> In-Progress; blocked/paused -> Stalled; done/finished -> Completed. Use "In-Progress" when status is unclear.
 5. OPEN LOOPS: Identify any unanswered questions, incomplete tasks, or "remind me" style statements. Use priority "low", "med", or "high".
 6. NO HALLUCINATION: If the entry does not mention a status or a person, do not invent one.
+7. TAGS: Limit to at most 15 tags; include only the most relevant. Do not repeat or expand into long lists.
 
 # Required JSON Structure
 Output a single JSON object only. Do not use markdown, code fences, or headers. Valid JSON only.
