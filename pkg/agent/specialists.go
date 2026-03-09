@@ -38,14 +38,7 @@ func RunEvaluatorExtract(ctx context.Context, content string) (*EvaluatorExtract
 	if app == nil {
 		return nil, fmt.Errorf("no app in context")
 	}
-	client, err := app.Gemini(ctx)
-	if err != nil {
-		return nil, err
-	}
-	model := client.GenerativeModel(app.QueryModel())
-	model.ResponseMIMEType = "application/json" // JSON mode for structured output
-	model.SetMaxOutputTokens(1024)
-	model.ResponseSchema = &genai.Schema{
+	schema := &genai.Schema{
 		Type: genai.TypeObject,
 		Properties: map[string]*genai.Schema{
 			"significance":  {Type: genai.TypeNumber, Description: "0.0-1.0. High: emotional, milestones, new people. Low: routine logistics."},
@@ -54,7 +47,6 @@ func RunEvaluatorExtract(ctx context.Context, content string) (*EvaluatorExtract
 		},
 	}
 	systemPrompt := prompts.Evaluator() + prompts.DataSafety()
-	model.SystemInstruction = &genai.Content{Parts: []genai.Part{genai.Text(systemPrompt)}}
 	prompt := ""
 	node, _, err := memory.FindContextByName(ctx, "user_profile")
 	if err == nil && node != nil && node.Content != "" {
@@ -67,8 +59,15 @@ func RunEvaluatorExtract(ctx context.Context, content string) (*EvaluatorExtract
 	bgCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
+	req := &infra.LLMRequest{
+		SystemPrompt:   systemPrompt,
+		Parts:          []genai.Part{genai.Text(prompt)},
+		Model:          app.Config().GeminiModel,
+		GenConfig:      &infra.GenConfig{MaxOutputTokens: 1024, ResponseMIMEType: "application/json"},
+		ResponseSchema: schema,
+	}
 	infra.GeminiCallsTotal.Inc()
-	resp, err := model.GenerateContent(bgCtx, genai.Text(prompt))
+	resp, err := app.Dispatch(bgCtx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -217,18 +216,6 @@ func RunSpecialistDiscussion(ctx context.Context, domain Domain, journalContext 
 	if app == nil {
 		return "", false, fmt.Errorf("no app in context")
 	}
-	client, err := app.Gemini(ctx)
-	if err != nil {
-		return "", false, infra.WrapLLMError(err)
-	}
-
-	modelName := app.QueryModel()
-	if modelOverride != "" {
-		modelName = app.DreamerModel()
-	}
-	model := client.GenerativeModel(modelName)
-	model.SetMaxOutputTokens(512) // Keep discussions concise
-
 	baseSysPrompt := specialistSystemPrompts[domain]
 
 	systemPrompt := baseSysPrompt + `
@@ -241,8 +228,6 @@ Briefly state your findings, point out details others missed, or correct colleag
 
 If you completely agree with the current room state and have ABSOLUTELY NOTHING new to add or correct, reply with exactly the word: DONE` + prompts.DataSafety()
 
-	model.SystemInstruction = &genai.Content{Parts: []genai.Part{genai.Text(systemPrompt)}}
-
 	userPrompt := fmt.Sprintf("Journal Context:\n%s\n\nRoom Transcript so far:\n%s",
 		utils.WrapAsUserData(utils.SanitizePrompt(journalContext)),
 		utils.WrapAsUserData(utils.SanitizePrompt(roomTranscript)))
@@ -252,8 +237,18 @@ If you completely agree with the current room state and have ABSOLUTELY NOTHING 
 	apiCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
 
+	model := app.Config().GeminiModel
+	if modelOverride != "" {
+		model = app.Config().DreamerModel
+	}
+	req := &infra.LLMRequest{
+		SystemPrompt: systemPrompt,
+		Parts:        []genai.Part{genai.Text(userPrompt)},
+		Model:        model,
+		GenConfig:    &infra.GenConfig{MaxOutputTokens: 512},
+	}
 	infra.GeminiCallsTotal.Inc()
-	resp, err := model.GenerateContent(apiCtx, genai.Text(userPrompt))
+	resp, err := app.Dispatch(apiCtx, req)
 	if err != nil {
 		return "", false, infra.WrapLLMError(err)
 	}
@@ -286,15 +281,7 @@ func RunEvolutionAudit(ctx context.Context, queriesText, journalSummary string) 
 	if app == nil {
 		return nil, fmt.Errorf("no app in context")
 	}
-	client, err := app.Gemini(ctx)
-	if err != nil {
-		return nil, infra.WrapLLMError(err)
-	}
-	model := client.GenerativeModel(app.DreamerModel())
-	model.ResponseMIMEType = "application/json" // JSON mode for structured output
-	model.SetMaxOutputTokens(2048)
-	model.SetTopP(0.9) // Slight penalty for repetition (SDK has no frequency_penalty)
-	model.ResponseSchema = &genai.Schema{
+	schema := &genai.Schema{
 		Type: genai.TypeObject,
 		Properties: map[string]*genai.Schema{
 			"summary":            {Type: genai.TypeString, Description: "Architectural health check: 1-3 sentences on overall system friction."},
@@ -304,18 +291,22 @@ func RunEvolutionAudit(ctx context.Context, queriesText, journalSummary string) 
 		},
 	}
 	systemPrompt := specialistSystemPrompts[DomainEvolution] + prompts.DataSafety()
-	model.SystemInstruction = &genai.Content{Parts: []genai.Part{genai.Text(systemPrompt)}}
-
 	userPrompt := "Analyze the following user-assistant interaction log for Process Friction. Identify tool efficacy issues, knowledge gaps, and propose concrete improvements (new tools or Go code changes).\n\nRECENT QUERIES AND ANSWERS:\n" + utils.WrapAsUserData(utils.SanitizePrompt(queriesText))
 	if journalSummary != "" {
 		userPrompt += "\n\nRECENT JOURNAL THEMES (for context):\n" + utils.WrapAsUserData(utils.SanitizePrompt(journalSummary))
 	}
-
+	req := &infra.LLMRequest{
+		SystemPrompt:   systemPrompt,
+		Parts:         []genai.Part{genai.Text(userPrompt)},
+		Model:         app.Config().DreamerModel,
+		GenConfig:     &infra.GenConfig{MaxOutputTokens: 2048, TopP: 0.9, ResponseMIMEType: "application/json"},
+		ResponseSchema: schema,
+	}
 	apiCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
 	infra.GeminiCallsTotal.Inc()
-	resp, err := model.GenerateContent(apiCtx, genai.Text(userPrompt))
+	resp, err := app.Dispatch(apiCtx, req)
 	if err != nil {
 		span.RecordError(err)
 		return nil, infra.WrapLLMError(err)
@@ -356,11 +347,7 @@ func RunSpecialist(ctx context.Context, domain Domain, input *SpecialistInput, m
 	if app == nil {
 		return nil, fmt.Errorf("no app in context")
 	}
-	client, err := app.Gemini(ctx)
 	clientMs := time.Since(t0).Milliseconds()
-	if err != nil {
-		return nil, infra.WrapLLMError(err)
-	}
 	infra.LoggerFrom(ctx).Info("specialist client_ready", "domain", domain, "client_ms", clientMs)
 
 	prompt := fmt.Sprintf(`User message:
@@ -385,15 +372,11 @@ Recent journal context:
 
 	infra.LoggerFrom(ctx).Info("specialist prompt", "domain", domain, "prompt_len", len(prompt), "prompt", prompt)
 
-	modelName := app.QueryModel()
+	model := app.Config().GeminiModel
 	if modelOverride != "" {
-		modelName = app.DreamerModel()
+		model = app.Config().DreamerModel
 	}
-	model := client.GenerativeModel(modelName)
-	model.ResponseMIMEType = "application/json" // JSON mode for structured output
-	model.SetMaxOutputTokens(2048)
-	model.SetTopP(0.9) // Reduce repetition / infinite loops in entities
-	model.ResponseSchema = &genai.Schema{
+	schema := &genai.Schema{
 		Type: genai.TypeObject,
 		Properties: map[string]*genai.Schema{
 			"summary":  {Type: genai.TypeString},
@@ -401,18 +384,25 @@ Recent journal context:
 			"entities": {Type: genai.TypeArray, Items: &genai.Schema{Type: genai.TypeString}},
 		},
 	}
-
-	// Streamline output: cap facts and summary so response fits token limit and stays valid JSON.
-	systemPrompt := specialistSystemPrompts[domain] + "\n\nOutput at most 5 facts. Keep summary to 1-2 sentences. Prefer quality over quantity; avoid repeating similar entities." + prompts.DataSafety()
-	model.SystemInstruction = &genai.Content{Parts: []genai.Part{genai.Text(systemPrompt)}}
+	systemPrompt := specialistSystemPrompts[domain] +
+		"\n\nCRITICAL: Output at most 5 facts. Use the format '[CATEGORY] Subject: Detail'. " +
+		"Keep summaries to 1-2 sentences. Avoid conversational filler." +
+		prompts.DataSafety()
+	req := &infra.LLMRequest{
+		SystemPrompt:   systemPrompt,
+		Parts:          []genai.Part{genai.Text(prompt)},
+		Model:          model,
+		GenConfig:      &infra.GenConfig{MaxOutputTokens: 2048, TopP: 0.9, ResponseMIMEType: "application/json"},
+		ResponseSchema: schema,
+	}
 
 	apiCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
 	infra.GeminiCallsTotal.Inc()
-	infra.LoggerFrom(ctx).Info("specialist api_call_start", "domain", domain, "model", modelName)
+	infra.LoggerFrom(ctx).Info("specialist api_call_start", "domain", domain, "model", model)
 	t1 := time.Now()
-	resp, err := model.GenerateContent(apiCtx, genai.Text(utils.SanitizePrompt(prompt)))
+	resp, err := app.Dispatch(apiCtx, req)
 	apiMs := time.Since(t1).Milliseconds()
 
 	if err != nil && (errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "context deadline exceeded")) {
@@ -420,7 +410,7 @@ Recent journal context:
 		apiCtx2, cancel2 := context.WithTimeout(ctx, 60*time.Second)
 		defer cancel2()
 		t1 = time.Now()
-		resp, err = model.GenerateContent(apiCtx2, genai.Text(utils.SanitizePrompt(prompt)))
+		resp, err = app.Dispatch(apiCtx2, req)
 		apiMs = time.Since(t1).Milliseconds()
 	}
 
@@ -475,31 +465,26 @@ func RunContextExtractor(ctx context.Context, journalContext string) ([]string, 
 	if app == nil {
 		return nil, fmt.Errorf("no app in context")
 	}
-	client, err := app.Gemini(ctx)
-	if err != nil {
-		return nil, infra.WrapLLMError(err)
-	}
-
-	model := client.GenerativeModel(app.DreamerModel())
-	model.ResponseMIMEType = "application/json" // JSON mode for structured output
-	model.SetMaxOutputTokens(1024)
-	model.SetTopP(0.9)
-	model.ResponseSchema = &genai.Schema{
+	schema := &genai.Schema{
 		Type: genai.TypeObject,
 		Properties: map[string]*genai.Schema{
 			"impacted_contexts": {Type: genai.TypeArray, Items: &genai.Schema{Type: genai.TypeString}},
 		},
 	}
-	model.SystemInstruction = &genai.Content{Parts: []genai.Part{genai.Text(contextExtractorPrompt + prompts.DataSafety())}}
-
 	userPrompt := "Journal entries:\n" + utils.WrapAsUserData(utils.SanitizePrompt(journalContext))
-
+	req := &infra.LLMRequest{
+		SystemPrompt:   contextExtractorPrompt + prompts.DataSafety(),
+		Parts:         []genai.Part{genai.Text(userPrompt)},
+		Model:         app.Config().DreamerModel,
+		GenConfig:     &infra.GenConfig{MaxOutputTokens: 1024, TopP: 0.9, ResponseMIMEType: "application/json"},
+		ResponseSchema: schema,
+	}
 	apiCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 
 	infra.GeminiCallsTotal.Inc()
 	infra.LoggerFrom(ctx).Info("context_extractor api_call_start", "journal_len", len(journalContext))
-	resp, err := model.GenerateContent(apiCtx, genai.Text(userPrompt))
+	resp, err := app.Dispatch(apiCtx, req)
 	if err != nil {
 		span.RecordError(err)
 		return nil, infra.WrapLLMError(err)
@@ -535,31 +520,26 @@ func RunQueryAnalyzer(ctx context.Context, recentQueriesText string) (string, er
 	if app == nil {
 		return "", fmt.Errorf("no app in context")
 	}
-	client, err := app.Gemini(ctx)
-	if err != nil {
-		return "", infra.WrapLLMError(err)
-	}
-
-	model := client.GenerativeModel(app.DreamerModel())
-	model.ResponseMIMEType = "application/json" // JSON mode for structured output
-	model.SetMaxOutputTokens(1024)
-	model.SetTopP(0.9)
-	model.ResponseSchema = &genai.Schema{
+	schema := &genai.Schema{
 		Type: genai.TypeObject,
 		Properties: map[string]*genai.Schema{
 			"query_analysis": {Type: genai.TypeString, Description: "Analysis: semantic clusters, knowledge gaps, curiosity trends"},
 		},
 	}
-	model.SystemInstruction = &genai.Content{Parts: []genai.Part{genai.Text(queryAnalyzerPrompt + prompts.DataSafety())}}
-
 	userPrompt := "Recent queries:\n" + utils.WrapAsUserData(utils.SanitizePrompt(recentQueriesText))
-
+	req := &infra.LLMRequest{
+		SystemPrompt:   queryAnalyzerPrompt + prompts.DataSafety(),
+		Parts:         []genai.Part{genai.Text(userPrompt)},
+		Model:         app.Config().DreamerModel,
+		GenConfig:     &infra.GenConfig{MaxOutputTokens: 1024, TopP: 0.9, ResponseMIMEType: "application/json"},
+		ResponseSchema: schema,
+	}
 	apiCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 
 	infra.GeminiCallsTotal.Inc()
 	infra.LoggerFrom(ctx).Info("query_analyzer api_call_start", "queries_len", len(recentQueriesText))
-	resp, err := model.GenerateContent(apiCtx, genai.Text(userPrompt))
+	resp, err := app.Dispatch(apiCtx, req)
 	if err != nil {
 		span.RecordError(err)
 		return "", infra.WrapLLMError(err)
@@ -594,15 +574,7 @@ func DecomposeMessage(ctx context.Context, userMessage string) ([]Domain, error)
 	if app == nil {
 		return nil, fmt.Errorf("no app in context")
 	}
-	client, err := app.Gemini(ctx)
-	if err != nil {
-		return nil, infra.WrapLLMError(err)
-	}
-
-	model := client.GenerativeModel(app.QueryModel())
-	model.ResponseMIMEType = "application/json" // JSON mode for structured output
-	model.SetMaxOutputTokens(1024)
-	model.ResponseSchema = &genai.Schema{
+	schema := &genai.Schema{
 		Type: genai.TypeObject,
 		Properties: map[string]*genai.Schema{
 			"domains": {
@@ -614,14 +586,17 @@ func DecomposeMessage(ctx context.Context, userMessage string) ([]Domain, error)
 			},
 		},
 	}
-
 	systemPrompt := prompts.Router() + prompts.DataSafety()
-	model.SystemInstruction = &genai.Content{Parts: []genai.Part{genai.Text(systemPrompt)}}
-
 	prompt := fmt.Sprintf("User message:\n%s\n\nWhich domains to consult?", utils.WrapAsUserData(utils.SanitizePrompt(userMessage)))
-
+	req := &infra.LLMRequest{
+		SystemPrompt:   systemPrompt,
+		Parts:         []genai.Part{genai.Text(prompt)},
+		Model:         app.Config().GeminiModel,
+		GenConfig:     &infra.GenConfig{MaxOutputTokens: 1024, ResponseMIMEType: "application/json"},
+		ResponseSchema: schema,
+	}
 	infra.GeminiCallsTotal.Inc()
-	resp, err := model.GenerateContent(ctx, genai.Text(prompt))
+	resp, err := app.Dispatch(ctx, req)
 	if err != nil {
 		span.RecordError(err)
 		return nil, infra.WrapLLMError(err)

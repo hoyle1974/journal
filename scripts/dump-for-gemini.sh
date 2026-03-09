@@ -27,7 +27,6 @@ SKIP_FILES='\.env$|\.env\.|\.pem$|\.key$|credentials\.json|service-account.*\.js
 # Extensions to include: code, scripts, config, and embedded content (prompts, HTML)
 EXTS='\.go$|\.sh$|\.md$|\.txt$|\.html$|\.mod$|\.sum$'
 
-echo "Prepare for me to ask questions about this codebase:"
 echo "# JOT codebase dump for Gemini"
 echo "# Generated: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "# Root: $ROOT"

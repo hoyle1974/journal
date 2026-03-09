@@ -634,20 +634,12 @@ func analyzeForNewContext(ctx context.Context, entryContent string) (bool, strin
 		return false, "", nil
 	}
 
-	client, err := infra.GetGeminiClient(ctx)
-	if err != nil {
-		infra.LoggerFrom(ctx).Warn("failed to get Gemini client for context analysis", "error", err)
+	app := infra.GetApp(ctx)
+	if app == nil || getConfigFromCtx(ctx) == nil {
+		infra.LoggerFrom(ctx).Warn("failed to get app for context analysis")
 		return false, "", nil
 	}
-
-	modelName := "gemini-2.0-flash"
-	if cfg := getConfigFromCtx(ctx); cfg != nil && cfg.GeminiModel != "" {
-		modelName = infra.GetEffectiveModel(ctx, cfg.GeminiModel)
-	}
-	model := client.GenerativeModel(modelName)
-	model.ResponseMIMEType = "application/json"
-	model.SetMaxOutputTokens(512)
-	model.ResponseSchema = &genai.Schema{
+	schema := &genai.Schema{
 		Type: genai.TypeObject,
 		Properties: map[string]*genai.Schema{
 			"is_project_or_plan": {
@@ -665,10 +657,14 @@ func analyzeForNewContext(ctx context.Context, entryContent string) (bool, strin
 			},
 		},
 	}
-
 	prompt := prompts.FormatContextAnalyze(utils.WrapAsUserData(utils.SanitizePrompt(entryContent)))
-
-	resp, err := model.GenerateContent(ctx, genai.Text(prompt))
+	req := &infra.LLMRequest{
+		Parts:           []genai.Part{genai.Text(prompt)},
+		Model:           app.Config().GeminiModel,
+		GenConfig:       &infra.GenConfig{MaxOutputTokens: 512, ResponseMIMEType: "application/json"},
+		ResponseSchema:  schema,
+	}
+	resp, err := app.Dispatch(ctx, req)
 	if err != nil {
 		infra.LoggerFrom(ctx).Warn("context analysis failed", "error", err)
 		return false, "", nil

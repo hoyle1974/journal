@@ -353,7 +353,7 @@ func QuerySimilarNodes(ctx context.Context, queryVector []float32, limit int) ([
 			}
 		}
 		scores = append(scores, score)
-		infra.LogFoundNode(ctx, n.UUID, score, truncateForLog(n.Content, 50))
+		infra.LogFoundNode(ctx, n.UUID, score, n.Content)
 	}
 
 	infra.LogRAGQuality(ctx, limit, scores)

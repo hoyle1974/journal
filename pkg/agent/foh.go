@@ -496,14 +496,7 @@ func runReflectionCheck(ctx context.Context, app *infra.App, answer, question st
 	if app == nil {
 		return true, "", nil
 	}
-	client, err := app.Gemini(ctx)
-	if err != nil {
-		return true, "", err
-	}
-	model := client.GenerativeModel(app.QueryModel())
-	model.ResponseMIMEType = "application/json"
-	model.SetMaxOutputTokens(256)
-	model.ResponseSchema = &genai.Schema{
+	schema := &genai.Schema{
 		Type: genai.TypeObject,
 		Properties: map[string]*genai.Schema{
 			"pass":   {Type: genai.TypeBoolean, Description: "true if the answer is consistent and not cluttered with Gravel"},
@@ -512,8 +505,14 @@ func runReflectionCheck(ctx context.Context, app *infra.App, answer, question st
 		Required: []string{"pass", "reason"},
 	}
 	prompt := prompts.FormatReflectionCheck(utils.SanitizePrompt(answer), utils.SanitizePrompt(semanticMemory))
+	req := &infra.LLMRequest{
+		Parts:           []genai.Part{genai.Text(prompt)},
+		Model:           app.Config().GeminiModel,
+		GenConfig:       &infra.GenConfig{MaxOutputTokens: 256, ResponseMIMEType: "application/json"},
+		ResponseSchema:  schema,
+	}
 	infra.GeminiCallsTotal.Inc()
-	resp, err := model.GenerateContent(ctx, genai.Text(prompt))
+	resp, err := app.Dispatch(ctx, req)
 	if err != nil {
 		return true, "", err
 	}

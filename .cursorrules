@@ -12,6 +12,7 @@
 - **Rule:** No `fmt.Print` or raw `slog` global calls.
 - **Requirement:** Always use `LoggerFrom(ctx)` to ensure logs are request-scoped and forwarded to the Google Doc correctly.
 - **Pattern:** `LoggerFrom(ctx).Info("message", "key", value)`.
+- **Rule:** Debug logs must not truncate content. When logging at Debug level, pass the full string (e.g. full node/entry text, full query, full block content). Do not use `TruncateString`, `truncateForLog`, or manual slicing with `...` for values included in `LoggerFrom(ctx).Debug(...)` calls. Info/Warn/Error may still use truncated previews for long values.
 
 ## LLM Tooling
 

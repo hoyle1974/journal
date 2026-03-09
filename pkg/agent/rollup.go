@@ -51,14 +51,7 @@ func runRollUpLLM(ctx context.Context, app *infra.App, periodLabel, analysesText
 	if app == nil {
 		return "", nil, fmt.Errorf("no app in context")
 	}
-	client, err := app.Gemini(ctx)
-	if err != nil {
-		return "", nil, err
-	}
-	model := client.GenerativeModel(app.DreamerModel())
-	model.ResponseMIMEType = "application/json"
-	model.SetMaxOutputTokens(1024)
-	model.ResponseSchema = &genai.Schema{
+	schema := &genai.Schema{
 		Type: genai.TypeObject,
 		Properties: map[string]*genai.Schema{
 			"summary":            {Type: genai.TypeString},
@@ -68,11 +61,16 @@ func runRollUpLLM(ctx context.Context, app *infra.App, periodLabel, analysesText
 		},
 	}
 	userPrompt := prompts.FormatRollUp(periodLabel, utils.WrapAsUserData(utils.SanitizePrompt(analysesText)))
-
+	req := &infra.LLMRequest{
+		Parts:           []genai.Part{genai.Text(userPrompt)},
+		Model:           app.Config().DreamerModel,
+		GenConfig:       &infra.GenConfig{MaxOutputTokens: 1024, ResponseMIMEType: "application/json"},
+		ResponseSchema:  schema,
+	}
 	apiCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 	infra.GeminiCallsTotal.Inc()
-	resp, err := model.GenerateContent(apiCtx, genai.Text(userPrompt))
+	resp, err := app.Dispatch(apiCtx, req)
 	if err != nil {
 		return "", nil, infra.WrapLLMError(err)
 	}

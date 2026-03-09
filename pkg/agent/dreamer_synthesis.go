@@ -52,14 +52,7 @@ func RunGapDetection(ctx context.Context, journalContext string, entryUUIDs []st
 		relevantKnowledge = utils.TruncateToMaxBytes(relevantKnowledge, 4000) + "\n... (truncated)"
 	}
 
-	client, err := infra.GetGeminiClient(ctx)
-	if err != nil {
-		return err
-	}
-	model := client.GenerativeModel(infra.GetEffectiveModel(ctx, app.Config().DreamerModel))
-	model.ResponseMIMEType = "application/json"
-	model.SetMaxOutputTokens(1024)
-	model.ResponseSchema = &genai.Schema{
+	schema := &genai.Schema{
 		Type: genai.TypeArray,
 		Items: &genai.Schema{
 			Type: genai.TypeObject,
@@ -71,11 +64,16 @@ func RunGapDetection(ctx context.Context, journalContext string, entryUUIDs []st
 		},
 	}
 	userPrompt := prompts.FormatGapDetector(utils.WrapAsUserData(utils.SanitizePrompt(journalContext)), utils.WrapAsUserData(relevantKnowledge))
-
+	req := &infra.LLMRequest{
+		Parts:           []genai.Part{genai.Text(userPrompt)},
+		Model:           app.Config().DreamerModel,
+		GenConfig:       &infra.GenConfig{MaxOutputTokens: 1024, ResponseMIMEType: "application/json"},
+		ResponseSchema:  schema,
+	}
 	apiCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
 	infra.GeminiCallsTotal.Inc()
-	resp, err := model.GenerateContent(apiCtx, genai.Text(userPrompt))
+	resp, err := app.Dispatch(apiCtx, req)
 	if err != nil {
 		span.RecordError(err)
 		return infra.WrapLLMError(err)

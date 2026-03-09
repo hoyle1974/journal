@@ -120,11 +120,7 @@ func QuerySimilarEntries(ctx context.Context, queryVector []float32, limit int) 
 			}
 		}
 		scores = append(scores, score)
-		textPreview := content
-		if len(textPreview) > 50 {
-			textPreview = textPreview[:47] + "..."
-		}
-		infra.LogFoundEntry(ctx, doc.Ref.ID, score, textPreview)
+		infra.LogFoundEntry(ctx, doc.Ref.ID, score, content)
 	}
 	infra.LogRAGQuality(ctx, limit, scores)
 	span.SetAttributes(map[string]string{"results_count": fmt.Sprintf("%d", len(entries))})

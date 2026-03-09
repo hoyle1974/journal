@@ -176,6 +176,8 @@ func (cs *ChatSession) SendMessage(ctx context.Context, parts ...genai.Part) (*g
 		slog.Int("context_len", len(contextSent)),
 		slog.String("context", contextSent),
 	)
+	hasTools := len(cs.model.Tools) > 0
+	LogLLMRequest(ctx, cs.modelName, contextSent, hasTools)
 
 	// Pre-call: token breakdown for context-caching analysis (system, tools, archive, recent+current).
 	audit := CollectContextAudit(ctx, cs.app, cs.model, cs.modelName, cs.session.History, sanitized)
@@ -187,6 +189,7 @@ func (cs *ChatSession) SendMessage(ctx context.Context, parts ...genai.Part) (*g
 		return nil, fmt.Errorf("Gemini chat error: %w", err)
 	}
 
+	LogLLMResponse(ctx, resp)
 	LogLLMMetrics(ctx, cs.modelName, resp, inputSizeBytes)
 	LogContextAudit(ctx, cs.modelName, audit, resp)
 	return resp, nil

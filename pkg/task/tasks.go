@@ -84,7 +84,7 @@ func CreateTask(ctx context.Context, t *Task) (string, error) {
 		return "", err
 	}
 
-	infra.LoggerFrom(ctx).Debug("task created", "uuid", uuid, "content_preview", utils.TruncateString(t.Content, 50))
+	infra.LoggerFrom(ctx).Debug("task created", "uuid", uuid, "content", t.Content)
 	span.SetAttributes(map[string]string{"uuid": uuid})
 	return uuid, nil
 }

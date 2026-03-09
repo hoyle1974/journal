@@ -33,102 +33,149 @@ func BuildSystemPrompt(ctx context.Context) string {
 	lastWeekStr := fmt.Sprintf("%d-W%02d", lastWeek.Year(), lastWeekNum)
 	currentMonth := now.Format("2006-01")
 
-	activeContextsStr := ""
-	nodes, metas, err := memory.GetActiveContexts(ctx, 5)
-	if err == nil && len(nodes) > 0 {
-		items := make([]ActiveContextItem, 0, len(nodes))
-		for i, n := range nodes {
-			if i >= len(metas) {
-				break
-			}
-			items = append(items, ActiveContextItem{
-				ContextName: metas[i].ContextName,
-				Relevance:   metas[i].Relevance,
-				Content:     n.Content,
-			})
+	// 1. Active Contexts
+	nodes, metas, _ := memory.GetActiveContexts(ctx, 5)
+	activeContextItems := make([]ActiveContextItem, 0, len(nodes))
+	for i := range nodes {
+		if i >= len(metas) {
+			break
 		}
-		if len(items) > 0 {
-			var lines []string
-			for _, item := range items {
-				if item.Relevance < 0.4 {
-					continue
-				}
-				content := item.Content
-				if strings.EqualFold(item.ContextName, "user_profile") || strings.EqualFold(item.ContextName, "system_evolution") || item.Relevance > 0.75 {
-					lines = append(lines, fmt.Sprintf("[HIGH] %s: %s", item.ContextName, content))
-				} else {
-					tldr := utils.FirstSentence(content, 80)
-					lines = append(lines, fmt.Sprintf("[MED] %s: %s", item.ContextName, tldr))
-				}
-			}
-			if len(lines) > 0 {
-				activeContextsStr = fmt.Sprintf(`
-
-ACTIVE CONTEXTS (ongoing projects/plans the user is working on):
-%s
-Connect new entries to these contexts when relevant.`, utils.WrapAsUserData(strings.Join(lines, "\n")))
-			}
-		}
+		activeContextItems = append(activeContextItems, ActiveContextItem{
+			ContextName: metas[i].ContextName,
+			Relevance:   metas[i].Relevance,
+			Content:     nodes[i].Content,
+		})
+	}
+	activeContextsStr := formatContextSection(activeContextItems)
+	activeContextsWrapped := activeContextsStr
+	if activeContextsStr != "" {
+		activeContextsWrapped = utils.WrapAsUserData(activeContextsStr)
 	}
 
-	recentConversation := ""
-	if queries, err := journal.GetRecentQueries(ctx, 5); err == nil && len(queries) > 0 {
-		var lines []string
-		for i := len(queries) - 1; i >= 0; i-- {
-			q := queries[i]
-			question := q.Question
-			if len(question) > 100 {
-				question = question[:97] + "..."
-			}
-			answer := q.Answer
-			if len(answer) > 150 {
-				answer = answer[:147] + "..."
-			}
-			ts := q.Timestamp
-			if len(ts) > 16 {
-				ts = ts[:16]
-			}
-			lines = append(lines, fmt.Sprintf("[%s] User: %s\nAssistant: %s", ts, question, answer))
-		}
-		recentConversation = fmt.Sprintf(`
-
-RECENT CONVERSATION (last %d Q&A pairs - user question + assistant answer, for pronoun resolution - ALREADY SAVED, do NOT re-log or re-upsert):
-%s`, len(queries), utils.WrapAsUserData(strings.Join(lines, "\n\n")))
+	// 2. Recent Conversation
+	queries, _ := journal.GetRecentQueries(ctx, 5)
+	recentConversation := formatConversationSection(queries)
+	recentConversationWrapped := recentConversation
+	if recentConversation != "" {
+		recentConversationWrapped = utils.WrapAsUserData(recentConversation)
 	}
 
+	// 3. Proactive Alerts
 	proactiveSignals := ""
+	proactiveSignalsWrapped := ""
 	if signals, err := memory.GetActiveSignals(ctx, 3); err == nil && signals != "" {
-		proactiveSignals = fmt.Sprintf(`
-
-PROACTIVE ALERTS (Mention these if relevant to the current conversation):
-%s`, utils.WrapAsUserData(signals))
+		proactiveSignals = formatAlertsSection(signals)
+		proactiveSignalsWrapped = utils.WrapAsUserData(proactiveSignals)
 	}
 
 	sourceCodeBlock := prompts.SourceCodeBlock()
 
-	knowledgeGapBlock := ""
-	if gapQueries, err := journal.GetRecentGapQueries(ctx, 5); err == nil && len(gapQueries) > 0 {
-		var gapLines []string
-		for _, q := range gapQueries {
-			question := q.Question
-			if len(question) > 120 {
-				question = question[:117] + "..."
-			}
-			gapLines = append(gapLines, "- "+question)
-		}
-		knowledgeGapBlock = prompts.FormatKnowledgeGap(utils.WrapAsUserData(strings.Join(gapLines, "\n")))
+	// 4. Knowledge Gaps
+	gapQueries, _ := journal.GetRecentGapQueries(ctx, 3)
+	knowledgeGapBlock := formatKnowledgeGapSection(gapQueries)
+	knowledgeGapBlockWrapped := knowledgeGapBlock
+	if knowledgeGapBlock != "" {
+		knowledgeGapBlockWrapped = utils.WrapAsUserData(knowledgeGapBlock)
 	}
 
-	openTodoBlock := ""
-	if roots, err := task.GetOpenRootTasks(ctx, 25); err == nil && len(roots) > 0 {
-		openTodoBlock = fmt.Sprintf(`
-
-OPEN TODO LIST ROOTS (root-level tasks you are tracking — use create_task/update_task_status/search_tasks as needed):
-%s`, utils.WrapAsUserData(task.FormatTasksForContext(roots, 2500)))
+	// 5. Open Tasks (root)
+	roots, _ := task.GetOpenRootTasks(ctx, 15)
+	openTodoBlock := formatTodoSection(roots)
+	openTodoBlockWrapped := openTodoBlock
+	if openTodoBlock != "" {
+		openTodoBlockWrapped = utils.WrapAsUserData(openTodoBlock)
 	}
+
+	// Log the actual injected context at Info so it appears in production (e.g. tail.sh / LLM_CONTEXT_SENT).
+	injectedSections := strings.TrimSpace(activeContextsStr + recentConversation + proactiveSignals + knowledgeGapBlock + openTodoBlock)
+	if injectedSections == "" {
+		injectedSections = "(no dynamic sections)"
+	}
+	infra.LoggerFrom(ctx).Info("LLM_CONTEXT_SENT | injected context sections (Contexts, Conversation, Alerts, Gaps, Tasks)",
+		"event", "LLM_CONTEXT_SENT",
+		"context_sections", injectedSections)
 
 	// Template order: preamble (cacheable) then ======= then dynamic. Placeholders: delimOpen, delimClose, sourceCodeBlock, today, currentWeek, lastWeekStr, currentMonth, activeContextsStr, recentConversation, proactiveSignals, knowledgeGapBlock, openTodoBlock.
-	prompt := fmt.Sprintf(prompts.SystemPromptTemplate(), utils.UserDataDelimOpen, utils.UserDataDelimClose, sourceCodeBlock, today, currentWeek, lastWeekStr, currentMonth, activeContextsStr, recentConversation, proactiveSignals, knowledgeGapBlock, openTodoBlock)
+	prompt := fmt.Sprintf(prompts.SystemPromptTemplate(), utils.UserDataDelimOpen, utils.UserDataDelimClose, sourceCodeBlock, today, currentWeek, lastWeekStr, currentMonth, activeContextsWrapped, recentConversationWrapped, proactiveSignalsWrapped, knowledgeGapBlockWrapped, openTodoBlockWrapped)
 	infra.LoggerFrom(ctx).Debug("system prompt built", "prompt_len", len(prompt), "reason", "inject date, active contexts, recent conversation, signals, gap block, open todo roots")
 	return prompt
+}
+
+// formatContextSection builds the ACTIVE CONTEXTS block with --- and ## header; tag by name/relevance, Briefing for content.
+func formatContextSection(items []ActiveContextItem) string {
+	if len(items) == 0 {
+		return ""
+	}
+	var lines []string
+	for _, item := range items {
+		if item.Relevance < 0.4 {
+			continue
+		}
+		tag := "PROJECT"
+		if strings.Contains(item.ContextName, "user_") {
+			tag = "IDENTITY"
+		}
+		if item.Relevance > 0.8 {
+			tag = "CRITICAL"
+		}
+		content := utils.FirstSentence(item.Content, 150)
+		lines = append(lines, fmt.Sprintf("- [%s] %s (Rel: %.0f%%)\n  Briefing: %s", tag, item.ContextName, item.Relevance*100, content))
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("\n---\n## 🧠 ACTIVE CONTEXTS\n# High-relevance project briefings and situational awareness.\n\n%s", strings.Join(lines, "\n"))
+}
+
+// formatConversationSection builds the RECENT CONVERSATION block with --- and ## header; HH:MM, User/Asst lines.
+func formatConversationSection(queries []journal.QueryLog) string {
+	if len(queries) == 0 {
+		return ""
+	}
+	var lines []string
+	for i := len(queries) - 1; i >= 0; i-- {
+		q := queries[i]
+		ts := q.Timestamp
+		if len(ts) > 16 {
+			ts = ts[11:16] // HH:MM for readability
+		}
+		lines = append(lines, fmt.Sprintf("%s User: %s\n      Asst: %s", ts, utils.TruncateString(q.Question, 100), utils.TruncateString(q.Answer, 150)))
+	}
+	return fmt.Sprintf("\n---\n## 💬 RECENT CONVERSATION\n# Last 5 exchanges for reference and pronoun resolution.\n\n%s", strings.Join(lines, "\n"))
+}
+
+// formatAlertsSection builds the PROACTIVE ALERTS block with --- and ## header.
+func formatAlertsSection(signals string) string {
+	if signals == "" {
+		return ""
+	}
+	return fmt.Sprintf("\n---\n## 🔔 PROACTIVE ALERTS\n# Mention these if relevant to the current conversation.\n\n%s", strings.TrimSpace(signals))
+}
+
+// formatKnowledgeGapSection builds the KNOWLEDGE GAPS block with --- and ## header.
+func formatKnowledgeGapSection(gapQueries []journal.QueryLog) string {
+	if len(gapQueries) == 0 {
+		return ""
+	}
+	var gaps []string
+	for _, g := range gapQueries {
+		gaps = append(gaps, "- "+utils.TruncateString(g.Question, 120))
+	}
+	return fmt.Sprintf("\n---\n## ⚠️ KNOWLEDGE GAPS\n# We looked but found nothing for these; if the user provides information that fills one, save it immediately.\n\n%s", strings.Join(gaps, "\n"))
+}
+
+// formatTodoSection builds the OPEN TASKS (ROOT) block with --- and ## header; short UUID + content.
+func formatTodoSection(roots []task.Task) string {
+	if len(roots) == 0 {
+		return ""
+	}
+	var lines []string
+	for _, t := range roots {
+		shortID := t.UUID
+		if len(shortID) > 6 {
+			shortID = shortID[:6]
+		}
+		lines = append(lines, fmt.Sprintf("- [%s] %s", shortID, t.Content))
+	}
+	return fmt.Sprintf("\n---\n## ✅ OPEN TASKS (ROOT)\n# Primary pending actions from the operation queue.\n\n%s", strings.Join(lines, "\n"))
 }

@@ -83,7 +83,7 @@ func mergeDreamerFacts(ctx context.Context, domains []Domain, outputs []*Special
 			}
 			vec, err := generateEmbedding(ctx, f)
 			if err != nil {
-				infra.LoggerFrom(ctx).Debug("dreamer merge skip embedding", "fact", utils.TruncateString(f, 40), "error", err)
+				infra.LoggerFrom(ctx).Debug("dreamer merge skip embedding", "fact", f, "error", err)
 				continue
 			}
 			flat = append(flat, factWithMeta{fact: f, domain: domain, vec: vec})
@@ -221,13 +221,20 @@ func writeDreamNarrative(ctx context.Context, app *infra.App, in *dreamNarrative
 	defer span.End()
 
 	var parts []string
-	parts = append(parts, fmt.Sprintf("Metrics: %d entries processed, %d facts extracted, %d facts written to memory, %d contexts synthesized.",
-		in.EntriesProcessed, in.FactsExtracted, in.FactsWritten, in.ContextsSynthesized))
+	parts = append(parts, "### 🌅 System Consolidation Report")
+	parts = append(parts, fmt.Sprintf("- **Processed:** %d entries", in.EntriesProcessed))
+	parts = append(parts, fmt.Sprintf("- **Memory Delta:** +%d facts", in.FactsWritten))
+
 	if len(in.PersonaFacts) > 0 {
-		parts = append(parts, "New identity/persona facts committed:\n"+strings.Join(in.PersonaFacts, "\n"))
+		parts = append(parts, "\n### 🆔 Identity Updates")
+		for _, f := range in.PersonaFacts {
+			parts = append(parts, "- "+f)
+		}
 	}
+
 	if in.EvolutionAudit != nil {
-		parts = append(parts, "Cognitive Engineer audit summary: "+in.EvolutionAudit.Summary)
+		parts = append(parts, "\n### 🛠️ System Health (Cognitive Engineer)")
+		parts = append(parts, "> "+in.EvolutionAudit.Summary)
 		if len(in.EvolutionAudit.Facts) > 0 {
 			parts = append(parts, "Friction/gaps: "+strings.Join(in.EvolutionAudit.Facts, "; "))
 		}
@@ -235,7 +242,7 @@ func writeDreamNarrative(ctx context.Context, app *infra.App, in *dreamNarrative
 			parts = append(parts, "Recommended changes: "+strings.Join(in.EvolutionAudit.Entities, "; "))
 		}
 		if len(in.EvolutionAudit.EngineerQuestions) > 0 {
-			parts = append(parts, "Questions for the developer (build these tools or fix these issues): "+strings.Join(in.EvolutionAudit.EngineerQuestions, "\n"))
+			parts = append(parts, "Questions for the developer: "+strings.Join(in.EvolutionAudit.EngineerQuestions, "\n"))
 		}
 	}
 
@@ -354,8 +361,17 @@ func extractDreamerPersonaFacts(outputs []*SpecialistOutput, domains []Domain) [
 		}
 		for _, f := range outputs[i].Facts {
 			f = strings.TrimSpace(f)
+			if f == "" {
+				continue
+			}
+			// New format: [PERSONA] or [PREFERENCE] (State-Aware Fact Blocks)
+			if strings.HasPrefix(f, "[PERSONA]") || strings.HasPrefix(f, "[PREFERENCE]") {
+				personaFacts = append(personaFacts, f)
+				continue
+			}
+			// Legacy format: PERSONA: ...
 			if strings.HasPrefix(f, personaPrefix) {
-				personaFacts = append(personaFacts, strings.TrimSpace(strings.TrimPrefix(f, personaPrefix)))
+				personaFacts = append(personaFacts, "[PERSONA] "+strings.TrimSpace(strings.TrimPrefix(f, personaPrefix)))
 			}
 		}
 		break

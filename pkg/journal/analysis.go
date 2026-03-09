@@ -56,10 +56,10 @@ func AnalyzeJournalEntry(ctx context.Context, entryContent, entryUUID, entryTime
 		return nil, nil
 	}
 
-	client, err := infra.GetGeminiClient(ctx)
-	if err != nil {
-		infra.LoggerFrom(ctx).Warn("journal analysis skipped", "reason", "no gemini client", "error", err)
-		return nil, err
+	app := infra.GetApp(ctx)
+	if app == nil || app.Config() == nil {
+		infra.LoggerFrom(ctx).Warn("journal analysis skipped", "reason", "no app or config")
+		return nil, fmt.Errorf("no app or config")
 	}
 
 	entryDate := entryTimestamp
@@ -70,15 +70,7 @@ func AnalyzeJournalEntry(ctx context.Context, entryContent, entryUUID, entryTime
 		entryDate = "unknown"
 	}
 
-	cfg := infra.GetApp(ctx).Config()
-	if cfg == nil {
-		return nil, fmt.Errorf("no app config")
-	}
-	modelName := infra.GetEffectiveModel(ctx, cfg.GeminiModel)
-	model := client.GenerativeModel(modelName)
-	model.ResponseMIMEType = "application/json"
-	model.SetMaxOutputTokens(1024)
-	model.ResponseSchema = &genai.Schema{
+	schema := &genai.Schema{
 		Type: genai.TypeObject,
 		Properties: map[string]*genai.Schema{
 			"summary":   {Type: genai.TypeString},
@@ -110,9 +102,14 @@ func AnalyzeJournalEntry(ctx context.Context, entryContent, entryUUID, entryTime
 			},
 		},
 	}
-
 	prompt := prompts.FormatJournalAnalyze(entryUUID, entryDate, utils.WrapAsUserData(utils.SanitizePrompt(entryContent)))
-	resp, err := model.GenerateContent(ctx, genai.Text(prompt))
+	req := &infra.LLMRequest{
+		Parts:           []genai.Part{genai.Text(prompt)},
+		Model:           app.Config().GeminiModel,
+		GenConfig:       &infra.GenConfig{MaxOutputTokens: 1024, ResponseMIMEType: "application/json"},
+		ResponseSchema:  schema,
+	}
+	resp, err := app.Dispatch(ctx, req)
 	if err != nil {
 		infra.LoggerFrom(ctx).Warn("journal analysis failed", "error", err)
 		return nil, fmt.Errorf("journal analysis: %w", err)

@@ -446,7 +446,7 @@ func handleSync(s *Server, w http.ResponseWriter, r *http.Request) {
 	// Collect only content before "done." so the trigger text is not included in the parsed block.
 	block := collectSyncBlock(doc, doneStartIndex)
 	if block != nil {
-		infra.LoggerFrom(ctx).Debug("sync block collected", "block_preview", utils.TruncateString(block.text, 120), "start_index", block.startIndex, "end_index", block.endIndex)
+		infra.LoggerFrom(ctx).Debug("sync block collected", "block_text", block.text, "start_index", block.startIndex, "end_index", block.endIndex)
 	} else {
 		infra.LoggerFrom(ctx).Debug("sync block collected", "has_block", false)
 	}

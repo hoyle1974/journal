@@ -201,63 +201,36 @@ func GetEffectiveModel(ctx context.Context, configured string) string {
 // GenConfig holds generation configuration options.
 type GenConfig struct {
 	Temperature      float64
+	TopP             float64 // if > 0, set on model (e.g. 0.9)
 	MaxOutputTokens  int
 	ModelOverride    string // if non-empty, use this model
 	ResponseMIMEType string // if non-empty, request JSON or other
 }
 
 // GenerateContentSimple generates content without tools.
+// All calls go through the central dispatcher (App.Dispatch) for standardized DEBUG logging of request/response.
 func GenerateContentSimple(ctx context.Context, systemPrompt, userPrompt string, cfg *config.Config, genConfig *GenConfig) (string, error) {
 	ctx, span := StartSpan(ctx, "gemini.generate_simple")
 	defer span.End()
 
-	client, err := GetGeminiClient(ctx)
-	if err != nil {
-		span.RecordError(err)
-		return "", err
+	app := GetApp(ctx)
+	if app == nil || cfg == nil {
+		return "", fmt.Errorf("no app or config in context")
 	}
-
-	effectiveModel := GetEffectiveModel(ctx, cfg.GeminiModel)
-	if genConfig != nil && genConfig.ModelOverride != "" {
-		effectiveModel = GetEffectiveModel(ctx, genConfig.ModelOverride)
+	req := &LLMRequest{
+		SystemPrompt: systemPrompt,
+		Parts:        []genai.Part{genai.Text(userPrompt)},
+		Model:        cfg.GeminiModel,
+		GenConfig:    genConfig,
 	}
-	model := client.GenerativeModel(effectiveModel)
-
-	if systemPrompt != "" {
-		model.SystemInstruction = &genai.Content{
-			Parts: []genai.Part{genai.Text(utils.SanitizePrompt(systemPrompt))},
-		}
-	}
-
-	if genConfig != nil {
-		if genConfig.Temperature > 0 {
-			model.SetTemperature(float32(genConfig.Temperature))
-		}
-		if genConfig.MaxOutputTokens > 0 {
-			model.SetMaxOutputTokens(int32(genConfig.MaxOutputTokens))
-		}
-		if genConfig.ResponseMIMEType != "" {
-			model.ResponseMIMEType = genConfig.ResponseMIMEType
-		}
-	}
-
-	span.SetAttributes(map[string]string{
-		"model":      effectiveModel,
-		"prompt_len": fmt.Sprintf("%d", len(userPrompt)),
-		"has_system": fmt.Sprintf("%t", systemPrompt != ""),
-	})
-
-	resp, err := model.GenerateContent(ctx, genai.Text(utils.SanitizePrompt(userPrompt)))
+	resp, err := app.Dispatch(ctx, req)
 	if err != nil {
 		span.RecordError(err)
 		LoggerFrom(ctx).Error("gemini generation failed", "error", err)
 		return "", WrapLLMError(fmt.Errorf("Gemini API error: %w", err))
 	}
-
-	LogLLMMetrics(ctx, effectiveModel, resp, len(systemPrompt)+len(userPrompt))
 	text := extractTextFromResponse(resp)
 	span.SetAttributes(map[string]string{"response_len": fmt.Sprintf("%d", len(text))})
-
 	return text, nil
 }
 

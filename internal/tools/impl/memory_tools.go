@@ -11,7 +11,6 @@ import (
 	"github.com/jackstrohm/jot/pkg/infra"
 	"github.com/jackstrohm/jot/pkg/journal"
 	"github.com/jackstrohm/jot/pkg/memory"
-	"github.com/jackstrohm/jot/pkg/utils"
 	"github.com/jackstrohm/jot/tools"
 )
 
@@ -70,9 +69,9 @@ func registerKnowledgeTools() {
 			limit := args.IntBounded("limit", 10, 1, 20)
 			sourceText := args.String("source_text", "")
 			template := args.String("template", "")
-			logArgs := []interface{}{"query_preview", utils.TruncateString(query, 80), "limit", limit, "reason", "vector+keyword search over knowledge and entries"}
+			logArgs := []interface{}{"query_preview", query, "limit", limit, "reason", "vector+keyword search over knowledge and entries"}
 			if sourceText != "" {
-				logArgs = append(logArgs, "source_text", utils.TruncateString(sourceText, 80))
+				logArgs = append(logArgs, "source_text", sourceText)
 			}
 			if template != "" {
 				logArgs = append(logArgs, "template", template)
