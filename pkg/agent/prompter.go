@@ -164,18 +164,15 @@ func formatKnowledgeGapSection(gapQueries []journal.QueryLog) string {
 	return fmt.Sprintf("\n---\n## ⚠️ KNOWLEDGE GAPS\n# We looked but found nothing for these; if the user provides information that fills one, save it immediately.\n\n%s", strings.Join(gaps, "\n"))
 }
 
-// formatTodoSection builds the OPEN TASKS (ROOT) block with --- and ## header; short UUID + content.
+// formatTodoSection builds the OPEN TASKS (ROOT) block with --- and ## header; full task UUID + content.
+// Full UUIDs are required so update_task_status/update_task find the Firestore document (doc ID is the full UUID).
 func formatTodoSection(roots []task.Task) string {
 	if len(roots) == 0 {
 		return ""
 	}
 	var lines []string
 	for _, t := range roots {
-		shortID := t.UUID
-		if len(shortID) > 6 {
-			shortID = shortID[:6]
-		}
-		lines = append(lines, fmt.Sprintf("- [%s] %s", shortID, t.Content))
+		lines = append(lines, fmt.Sprintf("- [%s] %s", t.UUID, t.Content))
 	}
 	return fmt.Sprintf("\n---\n## ✅ OPEN TASKS (ROOT)\n# Primary pending actions from the operation queue.\n\n%s", strings.Join(lines, "\n"))
 }
