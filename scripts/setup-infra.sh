@@ -1,26 +1,24 @@
 #!/bin/bash
-#
-# Set up GCP infrastructure for Jot (Cloud Tasks, Scheduler, APIs).
-# Run when (re)starting the project.
-#
-# Creates:
-# - Cloud Tasks queue for debounced sync
-# - Cloud Scheduler jobs for daily dream, weekly janitor
-# - Sets up Drive Watch for Google Doc changes (optional)
-#
 set -e
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
-if [ -f .env ]; then
-  set -a
-  # shellcheck source=.env
-  source .env
-  set +a
+# Determine environment
+ENV_TARGET="${1:-dev}"
+ENV_FILE=".env"
+if [ "$ENV_TARGET" == "prod" ]; then
+    ENV_FILE=".env.prod"
 fi
 
-PROJECT="${GOOGLE_CLOUD_PROJECT:?Set GOOGLE_CLOUD_PROJECT (e.g. export GOOGLE_CLOUD_PROJECT=your-project-id)}"
+if [ -f "$ENV_FILE" ]; then
+    echo -e "Loading config from $ENV_FILE"
+    set -a
+    source "$ENV_FILE"
+    set +a
+fi
+
+PROJECT="${GOOGLE_CLOUD_PROJECT:?Set GOOGLE_CLOUD_PROJECT in $ENV_FILE}"
 REGION="us-central1"
 
 # Colors
@@ -48,13 +46,34 @@ gcloud config set project $PROJECT 2>/dev/null
 # =============================================================================
 echo -e "${CYAN}Enabling required APIs...${NC}"
 gcloud services enable \
+    artifactregistry.googleapis.com \
     cloudfunctions.googleapis.com \
     cloudtasks.googleapis.com \
     cloudscheduler.googleapis.com \
     firestore.googleapis.com \
     docs.googleapis.com \
     drive.googleapis.com \
+    aiplatform.googleapis.com \
     --quiet
+
+# =============================================================================
+# Artifact Registry Setup
+# =============================================================================
+echo -e "${CYAN}Setting up Artifact Registry...${NC}"
+
+REPO_NAME="jot"
+
+# Check if repository exists, create if not
+if gcloud artifacts repositories describe $REPO_NAME --location=$REGION 2>/dev/null; then
+    echo -e "${YELLOW}Repository $REPO_NAME already exists${NC}"
+else
+    gcloud artifacts repositories create $REPO_NAME \
+        --repository-format=docker \
+        --location=$REGION \
+        --description="Jot Docker repository" \
+        --quiet
+    echo -e "${GREEN}Repository $REPO_NAME created${NC}"
+fi
 
 echo -e "${GREEN}APIs enabled${NC}"
 echo ""

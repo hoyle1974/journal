@@ -1,25 +1,30 @@
 #!/bin/bash
-#
-# Tail logs from the running Cloud Run service (Google Cloud Logging).
-# Uses "gcloud logging read" in a poll loop (no log-streaming component needed).
-# Shows structured (slog) logs as [LEVEL] msg; truncates long HTML/noise so app logs are visible.
-# Requires: gcloud CLI, same GOOGLE_CLOUD_PROJECT as deploy. Optional: jq (for best display).
-#
 set -e
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
-if [ -f .env ]; then
-  set -a
-  # shellcheck source=.env
-  source .env
-  set +a
+# --- NEW ENVIRONMENT HANDLING ---
+ENV_TARGET="${1:-dev}"
+ENV_FILE=".env"
+if [ "$ENV_TARGET" == "prod" ]; then
+    ENV_FILE=".env.prod"
+    echo -e "\033[1;33mTailing PRODUCTION logs...\033[0m"
+else
+    echo -e "\033[1;33mTailing DEVELOPMENT logs...\033[0m"
 fi
 
-PROJECT="${GOOGLE_CLOUD_PROJECT:?Set GOOGLE_CLOUD_PROJECT in .env or export GOOGLE_CLOUD_PROJECT=your-project-id}"
+if [ -f "$ENV_FILE" ]; then
+    set -a
+    source "$ENV_FILE"
+    set +a
+fi
+# --------------------------------
+
+PROJECT="${GOOGLE_CLOUD_PROJECT:?Set GOOGLE_CLOUD_PROJECT in $ENV_FILE}"
 SERVICE_NAME="${SERVICE_NAME:-jot-api-go}"
 REGION="${REGION:-us-central1}"
+# ... rest of the existing script ...
 # Match deploy.sh: same region and service so we read logs from the revision that serves requests.
 FILTER="resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"$SERVICE_NAME\" AND resource.labels.location=\"$REGION\""
 POLL_SEC="${LOG_TAIL_POLL_SEC:-2}"

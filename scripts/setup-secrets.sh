@@ -1,21 +1,30 @@
 #!/bin/bash
-#
-# Set up secrets in Google Secret Manager.
-# Run when (re)starting the project.
-#
 set -e
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
-if [ -f .env ]; then
-  set -a
-  # shellcheck source=.env
-  source .env
-  set +a
+# Determine environment
+ENV_TARGET="${1:-dev}"
+ENV_FILE=".env"
+if [ "$ENV_TARGET" == "prod" ]; then
+    ENV_FILE=".env.prod"
 fi
 
-PROJECT="${GOOGLE_CLOUD_PROJECT:?Set GOOGLE_CLOUD_PROJECT (e.g. export GOOGLE_CLOUD_PROJECT=your-project-id)}"
+# LOAD TARGET ENV ONLY
+if [ -f "$ENV_FILE" ]; then
+    echo -e "Targeting $ENV_TARGET using $ENV_FILE"
+    set -a
+    source "$ENV_FILE"
+    set +a
+else
+    if [ "$ENV_TARGET" == "prod" ]; then
+        echo "Error: .env.prod not found. Create it with GOOGLE_CLOUD_PROJECT=your-prod-id"
+        exit 1
+    fi
+fi
+
+PROJECT="${GOOGLE_CLOUD_PROJECT:?Set GOOGLE_CLOUD_PROJECT}"
 REGION="us-central1"
 
 # Colors

@@ -29,8 +29,20 @@ var (
 )
 
 func init() {
-	godotenv.Load()
+	// 1. Determine which .env file to load based on the profile
+	profile := os.Getenv("JOT_PROFILE")
+	envFile := ".env"
+	if profile == "prod" {
+		envFile = ".env.prod"
+	}
 
+	// 2. Load the specific environment file
+	err := godotenv.Load(envFile)
+	if err != nil && profile == "prod" {
+		fmt.Printf("Warning: Failed to load %s. Ensure it exists for production use.\n", envFile)
+	}
+
+	// 3. Populate config vars
 	APIBaseURL = getEnv("JOT_API_URL", "")
 	APIKey = os.Getenv("JOT_API_KEY")
 

@@ -125,7 +125,7 @@ func AnalyzeJournalEntry(ctx context.Context, entryContent, entryUUID, entryTime
 		return nil, fmt.Errorf("journal analysis parse: %w", parseErr)
 	}
 	// Cap tags to prevent runaway output (e.g. hundreds of near-duplicate tags).
-	const maxTags = 20
+	const maxTags = 5
 	if len(analysis.Tags) > maxTags {
 		analysis.Tags = analysis.Tags[:maxTags]
 	}

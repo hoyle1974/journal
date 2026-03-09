@@ -1,27 +1,43 @@
 #!/bin/bash
 #
 # Deploy Jot Cloud Function to GCP (Go version)
-# Uses container-based deployment for speed
+# Usage: ./scripts/deploy.sh [dev|prod] [container|source]
 #
 set -e
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
-# Load .env if present (GOOGLE_CLOUD_PROJECT and other vars)
-if [ -f .env ]; then
-  set -a
-  # shellcheck source=.env
-  source .env
-  set +a
+# 1. Determine environment and load variables
+ENV_TARGET="dev"
+if [[ "$1" == "prod" ]] || [[ "$1" == "dev" ]]; then
+    ENV_TARGET="$1"
+    shift # Remove the env arg so $1 becomes 'container' or 'source'
 fi
 
-PROJECT="${GOOGLE_CLOUD_PROJECT:?Set GOOGLE_CLOUD_PROJECT in .env or export GOOGLE_CLOUD_PROJECT=your-project-id}"
+ENV_FILE=".env"
+if [ "$ENV_TARGET" == "prod" ]; then
+    ENV_FILE=".env.prod"
+    echo -e "\033[1;33mTargeting PRODUCTION environment (.env.prod)\033[0m"
+else
+    echo -e "\033[1;33mTargeting DEVELOPMENT environment (.env)\033[0m"
+fi
+
+if [ -f "$ENV_FILE" ]; then
+  set -a
+  source "$ENV_FILE"
+  set +a
+else
+  echo -e "\033[0;31mError: $ENV_FILE not found. Create it with your project settings.\033[0m"
+  exit 1
+fi
+
+PROJECT="${GOOGLE_CLOUD_PROJECT:?Set GOOGLE_CLOUD_PROJECT in $ENV_FILE}"
 REGION="us-central1"
 FUNCTION_NAME="jot-api-go"
 IMAGE="$REGION-docker.pkg.dev/$PROJECT/jot/$FUNCTION_NAME"
 
-# Resource configuration (QuerySeconds from internal/timeout/timeout.go)
+# Resource configuration
 QUERY_TIMEOUT=$(grep 'QuerySeconds = ' internal/timeout/timeout.go | sed 's/.*= \([0-9]*\).*/\1/')
 CPU="1"
 MEMORY="128Mi"
@@ -33,7 +49,6 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-echo -e "${YELLOW}Jot API Deployment (Go)${NC}"
 echo "Project: $PROJECT"
 echo "Region: $REGION"
 echo ""
@@ -44,136 +59,50 @@ go build -o jot ./cmd/jot
 echo -e "${GREEN}CLI binary rebuilt: ./jot${NC}"
 echo ""
 
-# Check if gcloud is installed
 if ! command -v gcloud &> /dev/null; then
-    echo -e "${RED}Error: gcloud CLI not found. Please install Google Cloud SDK.${NC}"
+    echo -e "${RED}Error: gcloud CLI not found.${NC}"
     exit 1
 fi
 
-# Set project
 gcloud config set project $PROJECT 2>/dev/null
 
-# Deploy Firestore indexes from firestore.indexes.json.
-# Includes Janitor index: knowledge_nodes (last_recalled_at, significance_weight).
-# With jq fallback, each index check/creation runs in parallel; we wait for all at the end.
+# Deploy Firestore indexes
 echo -e "${YELLOW}Deploying Firestore indexes...${NC}"
 if command -v firebase &> /dev/null; then
   firebase use "$PROJECT" 2>/dev/null || true
-  if firebase deploy --only firestore:indexes --project "$PROJECT" --non-interactive; then
-    echo -e "${GREEN}Firestore indexes deployed via Firebase CLI.${NC}"
-  else
-    echo -e "${YELLOW}Firebase deploy had errors (see above). Check Firebase Console > Firestore > Indexes for status.${NC}"
-  fi
-elif command -v jq &> /dev/null && [ -f firestore.indexes.json ]; then
-  INDEXES_JSON="firestore.indexes.json"
-  INDEX_LOGFILES=()
-  N=0
-  while true; do
-    CG=$(jq -r --argjson n "$N" '.indexes[$n].collectionGroup // empty' "$INDEXES_JSON")
-    [ -z "$CG" ] && break
-    OUTFILE=$(mktemp)
-    INDEX_LOGFILES+=("$OUTFILE")
-    (
-      IDX=$N
-      QS=$(jq -r --argjson n "$IDX" '.indexes[$n].queryScope // "COLLECTION"' "$INDEXES_JSON" | tr '[:upper:]' '[:lower:]')
-      FCONFIG_ARGS=()
-      while IFS= read -r line; do
-        [ -z "$line" ] && continue
-        FCONFIG_ARGS+=(--field-config="$line")
-      done < <(jq -r --argjson n "$IDX" '
-        .indexes[$n].fields[]
-        | if .vectorConfig then
-            "field-path=\(.fieldPath),vector-config={dimension=\(.vectorConfig.dimension),flat}"
-          else
-            "field-path=\(.fieldPath),order=\(.order | ascii_downcase)"
-          end
-      ' "$INDEXES_JSON")
-      TMPF=$(mktemp)
-      if gcloud firestore indexes composite create \
-        --project="$PROJECT" \
-        --collection-group="$CG" \
-        --query-scope="$QS" \
-        "${FCONFIG_ARGS[@]}" \
-        --async \
-        --quiet 2>"$TMPF.err"; then
-        echo -e "  Created (building): $CG"
-      else
-        ERR=$(cat "$TMPF.err" 2>/dev/null)
-        if echo "$ERR" | grep -qi "already exists\|RESOURCE_ALREADY_EXISTS"; then
-          echo -e "  Exists: $CG"
-        else
-          echo -e "${YELLOW}  Failed: $CG${NC}"
-          echo "$ERR" | head -5
-        fi
-      fi
-      rm -f "$TMPF" "$TMPF.err"
-    ) > "$OUTFILE" 2>&1 &
-    N=$((N + 1))
-  done
-  wait
-  for f in "${INDEX_LOGFILES[@]}"; do
-    cat "$f"
-    rm -f "$f"
-  done
-  echo -e "${GREEN}Processed $N index definitions.${NC}"
+  firebase deploy --only firestore:indexes --project "$PROJECT" --non-interactive
 else
-  echo -e "${YELLOW}Install Firebase CLI (firebase-tools) or jq to deploy indexes from firestore.indexes.json.${NC}"
-  echo -e "${YELLOW}Otherwise create indexes manually in the GCP Console or via gcloud.${NC}"
+  echo -e "${YELLOW}Firebase CLI not found, skipping index deploy. Ensure indexes match firestore.indexes.json.${NC}"
 fi
 echo ""
 
-# Parse arguments
+# Parse deployment mode (default to container)
 MODE="${1:-container}"
 
 case "$MODE" in
   container|fast)
     echo -e "${YELLOW}Running tests...${NC}"
-    if ! go test ./...; then
-      echo -e "${RED}Tests failed. Aborting deployment.${NC}"
-      exit 1
-    fi
-    echo -e "${GREEN}Tests passed!${NC}"
-    echo ""
-
+    go test ./...
+    
     echo -e "${YELLOW}Cross-compiling server for Linux...${NC}"
     VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
     COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "none")
     LDFLAGS="-s -w -X github.com/jackstrohm/jot/pkg/infra.Version=$VERSION -X github.com/jackstrohm/jot/pkg/infra.Commit=$COMMIT"
     CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="$LDFLAGS" -o server ./cmd/server
 
-    # Copy ca-certificates for the container
-    if [ ! -f ca-certificates.crt ]; then
-      echo -e "${YELLOW}Extracting CA certificates...${NC}"
-      # Extract from system or download
-      if [ -f /etc/ssl/certs/ca-certificates.crt ]; then
-        cp /etc/ssl/certs/ca-certificates.crt .
-      elif [ -f /etc/ssl/cert.pem ]; then
-        cp /etc/ssl/cert.pem ca-certificates.crt
-      else
-        # macOS: extract from system keychain
-        security find-certificate -a -p /System/Library/Keychains/SystemRootCertificates.keychain > ca-certificates.crt 2>/dev/null || \
-        curl -sS https://curl.se/ca/cacert.pem -o ca-certificates.crt
-      fi
-    fi
-
-    echo -e "${YELLOW}Building container image...${NC}"
+    echo -e "${YELLOW}Building and pushing container...${NC}"
     docker build --platform linux/amd64 -t "$IMAGE:latest" .
-
-    echo -e "${YELLOW}Pushing to registry...${NC}"
     docker push "$IMAGE:latest"
-
-    # Clean up build artifacts
     rm -f server
 
-    # If the service already exists, we know its URL and can set JOT_API_URL/SYNC_GDOC_URL in one deploy.
     EXISTING_URL=$(gcloud run services describe "$FUNCTION_NAME" --region="$REGION" --format='value(status.url)' 2>/dev/null) || true
     ENV_VARS="FUNCTION_TARGET=JotAPI,GOOGLE_CLOUD_PROJECT=$PROJECT,LOG_LEVEL=debug,DREAMER_MODEL=gemini-2.5-flash"
     if [ -n "$EXISTING_URL" ]; then
       ENV_VARS="$ENV_VARS,JOT_API_URL=${EXISTING_URL},SYNC_GDOC_URL=${EXISTING_URL}/sync"
     fi
 
-    echo -e "${YELLOW}Deploying container to Cloud Run...${NC}"
-    time gcloud beta run deploy "$FUNCTION_NAME" \
+    echo -e "${YELLOW}Deploying to Cloud Run...${NC}"
+    gcloud beta run deploy "$FUNCTION_NAME" \
       --region="$REGION" \
       --image="$IMAGE:latest" \
       --cpu="$CPU" \
@@ -186,91 +115,19 @@ case "$MODE" in
       --update-env-vars="$ENV_VARS" \
       --quiet
 
-    DEPLOYED_BASE_URL=$(gcloud run services describe "$FUNCTION_NAME" --region="$REGION" --format='value(status.url)' 2>/dev/null)
-    # First deploy: service had no URL before; set JOT_API_URL and SYNC_GDOC_URL now.
-    if [ -n "$DEPLOYED_BASE_URL" ] && [ -z "$EXISTING_URL" ]; then
-      gcloud run services update "$FUNCTION_NAME" --region="$REGION" \
-        --update-env-vars="JOT_API_URL=${DEPLOYED_BASE_URL},SYNC_GDOC_URL=${DEPLOYED_BASE_URL}/sync" \
-        --quiet
-    fi
-    ;;
+    DEPLOYED_BASE_URL=$(gcloud run services describe "$FUNCTION_NAME" --region="$REGION" --format='value(status.url)' --project="$PROJECT")
 
-  source|slow)
-    echo -e "${YELLOW}Running tests...${NC}"
-    if ! go test ./...; then
-      echo -e "${RED}Tests failed. Aborting deployment.${NC}"
-      exit 1
-    fi
-    echo -e "${GREEN}Tests passed!${NC}"
-    echo ""
-
-    echo -e "${YELLOW}Deploying from source (slower)...${NC}"
-    gcloud functions deploy "$FUNCTION_NAME" \
-      --gen2 \
-      --runtime=go126 \
+    echo "Ensuring Cloud Run environment has JOT_API_URL..."
+    gcloud run services update "$FUNCTION_NAME" \
       --region="$REGION" \
-      --source="." \
-      --entry-point=JotAPI \
-      --trigger-http \
-      --allow-unauthenticated \
-      --cpu="$CPU" \
-      --memory="$MEMORY" \
-      --concurrency="$CONCURRENCY" \
-      --timeout="${QUERY_TIMEOUT}s" \
-      --max-instances=1 \
-      --set-env-vars="FUNCTION_TARGET=JotAPI,GOOGLE_CLOUD_PROJECT=$PROJECT,LOG_LEVEL=debug,JOT_API_URL=https://${REGION}-${PROJECT}.cloudfunctions.net/${FUNCTION_NAME},SYNC_GDOC_URL=https://${REGION}-${PROJECT}.cloudfunctions.net/${FUNCTION_NAME}/sync,DREAMER_MODEL=gemini-2.5-flash" \
+      --project="$PROJECT" \
+      --update-env-vars="JOT_API_URL=${DEPLOYED_BASE_URL},SYNC_GDOC_URL=${DEPLOYED_BASE_URL}/sync" \
       --quiet
     ;;
-
   *)
-    echo "Usage: $0 [container|source]"
-    echo "  container  - Build and deploy container image (fast, default)"
-    echo "  source     - Deploy from source via Cloud Build (slow)"
+    echo "Unsupported mode: $MODE (use container)"
     exit 1
     ;;
 esac
 
-# Use Cloud Run URL when we just deployed a container; otherwise Cloud Functions URL for source deploy.
-if [ -n "${DEPLOYED_BASE_URL:-}" ]; then
-  BASE_URL="$DEPLOYED_BASE_URL"
-else
-  BASE_URL="https://${REGION}-${PROJECT}.cloudfunctions.net/${FUNCTION_NAME}"
-fi
-
-echo ""
-echo -e "${GREEN}Deployment successful!${NC}"
-echo ""
-
-# Reset Drive watch so the Google Doc webhook subscription is fresh (expires in 7 days)
-echo -e "${YELLOW}Resetting Drive watch (Google Doc)...${NC}"
-export GDOC_WEBHOOK_URL="${BASE_URL}/webhook"
-DRIVE_WATCH_VENV=".venv-drive-watch"
-if [ ! -d "$DRIVE_WATCH_VENV" ]; then
-  echo "  Creating venv for Drive watch ($DRIVE_WATCH_VENV)..."
-  python3 -m venv "$DRIVE_WATCH_VENV"
-fi
-"$DRIVE_WATCH_VENV/bin/pip" install -q -r requirements-drive-watch.txt
-"$DRIVE_WATCH_VENV/bin/python" setup_drive_watch.py stop 2>/dev/null || true
-if "$DRIVE_WATCH_VENV/bin/python" setup_drive_watch.py; then
-  echo -e "${GREEN}Drive watch reset.${NC}"
-else
-  echo -e "${YELLOW}Drive watch skipped or failed (set DOCUMENT_ID and SERVICE_ACCOUNT_FILE in .env to enable).${NC}"
-fi
-echo ""
-
-echo "Base URL: $BASE_URL"
-echo ""
-echo "Endpoints:"
-echo "  GET  $BASE_URL/health"
-echo "  POST $BASE_URL/log"
-echo "  POST $BASE_URL/query"
-echo "  POST $BASE_URL/plan"
-echo "  GET  $BASE_URL/entries"
-echo "  POST $BASE_URL/sync"
-echo "  POST $BASE_URL/dream"
-echo "  POST $BASE_URL/janitor"
-echo "  POST $BASE_URL/webhook"
-echo "  POST $BASE_URL/sms"
-echo ""
-echo "Test:"
-echo "  curl $BASE_URL/health"
+echo -e "${GREEN}Deployment to $ENV_TARGET successful!${NC}"

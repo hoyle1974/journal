@@ -1,5 +1,6 @@
 # Credentials and secrets
 credentials.json
+credentials-*.json
 *.pem
 *.key
 service-account*.json
