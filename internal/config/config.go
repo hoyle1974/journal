@@ -7,9 +7,11 @@ import (
 	"os"
 	"strings"
 
-	"github.com/joho/godotenv"
 	secretmanager "cloud.google.com/go/secretmanager/apiv1"
 	"cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
+	"github.com/joho/godotenv"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // Config holds configuration loaded from environment and Secret Manager.
@@ -54,10 +56,13 @@ func Load() (*Config, error) {
 	cfg.JotAPIKey = loadSecret(cfg.GoogleCloudProject, "JOT_API_KEY")
 	cfg.GeminiModel = normalizeToFlash(loadEnv("GEMINI_MODEL", "gemini-2.5-flash"))
 	cfg.DreamerModel = normalizeToFlash(loadEnv("DREAMER_MODEL", "gemini-2.5-flash"))
-	cfg.TwilioAccountSID = loadSecret(cfg.GoogleCloudProject, "TWILIO_ACCOUNT_SID")
-	cfg.TwilioAuthToken = loadSecret(cfg.GoogleCloudProject, "TWILIO_AUTH_TOKEN")
-	cfg.TwilioPhoneNumber = loadSecretWithDefault(cfg.GoogleCloudProject, "TWILIO_PHONE_NUMBER", "")
-	cfg.AllowedPhoneNumber = loadSecretWithDefault(cfg.GoogleCloudProject, "ALLOWED_PHONE_NUMBER", "")
+	// Only load Twilio secrets if at least one Twilio env var is set; otherwise skip Secret Manager to avoid NotFound warnings.
+	if twilioWanted() {
+		cfg.TwilioAccountSID = loadSecretOptional(cfg.GoogleCloudProject, "TWILIO_ACCOUNT_SID")
+		cfg.TwilioAuthToken = loadSecretOptional(cfg.GoogleCloudProject, "TWILIO_AUTH_TOKEN")
+		cfg.TwilioPhoneNumber = loadSecretOptionalWithDefault(cfg.GoogleCloudProject, "TWILIO_PHONE_NUMBER", "")
+		cfg.AllowedPhoneNumber = loadSecretOptionalWithDefault(cfg.GoogleCloudProject, "ALLOWED_PHONE_NUMBER", "")
+	}
 
 	cfg.Env = loadEnv("JOT_ENV", loadEnv("GO_ENV", ""))
 	if cfg.Env == "" {
@@ -78,6 +83,14 @@ func loadEnv(key, defaultValue string) string {
 	return defaultValue
 }
 
+// twilioWanted returns true if any Twilio-related env var is set (caller intends to use Twilio).
+func twilioWanted() bool {
+	return os.Getenv("TWILIO_ACCOUNT_SID") != "" ||
+		os.Getenv("TWILIO_AUTH_TOKEN") != "" ||
+		os.Getenv("TWILIO_PHONE_NUMBER") != "" ||
+		os.Getenv("ALLOWED_PHONE_NUMBER") != ""
+}
+
 func normalizeToFlash(model string) string {
 	if model == "" {
 		return "gemini-2.5-flash"
@@ -90,6 +103,41 @@ func normalizeToFlash(model string) string {
 
 func loadSecretWithDefault(projectID, secretID, defaultValue string) string {
 	if v := loadSecret(projectID, secretID); v != "" {
+		return v
+	}
+	return defaultValue
+}
+
+// loadSecretOptional is like loadSecret but does not log when the secret is not found (NotFound).
+// Use for optional features (e.g. Twilio) so production logs are not spammed.
+func loadSecretOptional(projectID, secretID string) string {
+	if v := os.Getenv(secretID); v != "" {
+		return v
+	}
+	if projectID == "" {
+		return ""
+	}
+	ctx := context.Background()
+	client, err := secretmanager.NewClient(ctx)
+	if err != nil {
+		log.Printf("Warning: Failed to create Secret Manager client: %v", err)
+		return ""
+	}
+	defer client.Close()
+	name := fmt.Sprintf("projects/%s/secrets/%s/versions/latest", projectID, secretID)
+	req := &secretmanagerpb.AccessSecretVersionRequest{Name: name}
+	result, err := client.AccessSecretVersion(ctx, req)
+	if err != nil {
+		if status.Code(err) != codes.NotFound {
+			log.Printf("Warning: Failed to load secret %s from Secret Manager: %v", secretID, err)
+		}
+		return ""
+	}
+	return string(result.Payload.Data)
+}
+
+func loadSecretOptionalWithDefault(projectID, secretID, defaultValue string) string {
+	if v := loadSecretOptional(projectID, secretID); v != "" {
 		return v
 	}
 	return defaultValue

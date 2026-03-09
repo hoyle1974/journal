@@ -113,16 +113,16 @@ case "$MODE" in
       --allow-unauthenticated \
       --execution-environment=gen1 \
       --update-env-vars="$ENV_VARS" \
-      --quiet
+      --verbosity=debug
 
     DEPLOYED_BASE_URL=$(gcloud run services describe "$FUNCTION_NAME" --region="$REGION" --format='value(status.url)' --project="$PROJECT")
 
-    echo "Ensuring Cloud Run environment has JOT_API_URL..."
-    gcloud run services update "$FUNCTION_NAME" \
-      --region="$REGION" \
-      --project="$PROJECT" \
-      --update-env-vars="JOT_API_URL=${DEPLOYED_BASE_URL},SYNC_GDOC_URL=${DEPLOYED_BASE_URL}/sync" \
-      --quiet
+    #echo "Ensuring Cloud Run environment has JOT_API_URL..."
+    #gcloud run services update "$FUNCTION_NAME" \
+      #--region="$REGION" \
+      #--project="$PROJECT" \
+      #--update-env-vars="JOT_API_URL=${DEPLOYED_BASE_URL},SYNC_GDOC_URL=${DEPLOYED_BASE_URL}/sync" \
+      #--verbosity=debug
     ;;
   *)
     echo "Unsupported mode: $MODE (use container)"

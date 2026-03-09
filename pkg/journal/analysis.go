@@ -47,6 +47,20 @@ type JournalAnalysis struct {
 	SourceID  string     `json:"source_id"`
 }
 
+// journalAnalysisRaw is the LLM response shape: tags as tag_1..tag_5 to force a fixed number of slots (genai has no MaxItems).
+type journalAnalysisRaw struct {
+	Summary   string     `json:"summary"`
+	Mood      string     `json:"mood"`
+	Category  string     `json:"category"`
+	Tag1      string     `json:"tag_1"`
+	Tag2      string     `json:"tag_2"`
+	Tag3      string     `json:"tag_3"`
+	Tag4      string     `json:"tag_4"`
+	Tag5      string     `json:"tag_5"`
+	Entities  []Entity   `json:"entities"`
+	OpenLoops []OpenLoop `json:"open_loops"`
+}
+
 // AnalyzeJournalEntry uses Gemini with JSON schema to analyze a journal entry.
 func AnalyzeJournalEntry(ctx context.Context, entryContent, entryUUID, entryTimestamp string) (*JournalAnalysis, error) {
 	ctx, span := infra.StartSpan(ctx, "journal.analyze")
@@ -76,7 +90,11 @@ func AnalyzeJournalEntry(ctx context.Context, entryContent, entryUUID, entryTime
 			"summary":   {Type: genai.TypeString},
 			"mood":      {Type: genai.TypeString},
 			"category":  {Type: genai.TypeString, Enum: []string{"work", "personal", "health", "finance", "logistics"}},
-			"tags":      {Type: genai.TypeArray, Items: &genai.Schema{Type: genai.TypeString}},
+			"tag_1":     {Type: genai.TypeString, Description: "Tag 1 of 5. 1-3 words, lowercase. Leave empty if fewer than 5 tags."},
+			"tag_2":     {Type: genai.TypeString, Description: "Tag 2 of 5."},
+			"tag_3":     {Type: genai.TypeString, Description: "Tag 3 of 5."},
+			"tag_4":     {Type: genai.TypeString, Description: "Tag 4 of 5. Optional."},
+			"tag_5":     {Type: genai.TypeString, Description: "Tag 5 of 5. Optional."},
 			"open_loops": {
 				Type: genai.TypeArray,
 				Items: &genai.Schema{
@@ -104,10 +122,10 @@ func AnalyzeJournalEntry(ctx context.Context, entryContent, entryUUID, entryTime
 	}
 	prompt := prompts.FormatJournalAnalyze(entryUUID, entryDate, utils.WrapAsUserData(utils.SanitizePrompt(entryContent)))
 	req := &infra.LLMRequest{
-		Parts:           []genai.Part{genai.Text(prompt)},
-		Model:           app.Config().GeminiModel,
-		GenConfig:       &infra.GenConfig{MaxOutputTokens: 1024, ResponseMIMEType: "application/json"},
-		ResponseSchema:  schema,
+		Parts:          []genai.Part{genai.Text(prompt)},
+		Model:          app.Config().GeminiModel,
+		GenConfig:      &infra.GenConfig{MaxOutputTokens: 1024, ResponseMIMEType: "application/json"},
+		ResponseSchema: schema,
 	}
 	resp, err := app.Dispatch(ctx, req)
 	if err != nil {
@@ -116,18 +134,27 @@ func AnalyzeJournalEntry(ctx context.Context, entryContent, entryUUID, entryTime
 	}
 
 	jsonText := infra.ExtractText(resp)
-	analysis, parseErr := llmjson.ParseLLMResponse[JournalAnalysis](jsonText, []string{"summary", "mood", "category", "tags", "entities", "open_loops"})
-	if analysis == nil {
+	raw, parseErr := llmjson.ParseLLMResponse[journalAnalysisRaw](jsonText, []string{"summary", "mood", "category", "tag_1", "tag_2", "tag_3", "tag_4", "tag_5", "entities", "open_loops"})
+	if raw == nil {
 		if parseErr == nil {
 			parseErr = fmt.Errorf("parse failed")
 		}
 		infra.LoggerFrom(ctx).Warn("failed to parse journal analysis response", "error", parseErr)
 		return nil, fmt.Errorf("journal analysis parse: %w", parseErr)
 	}
-	// Cap tags to prevent runaway output (e.g. hundreds of near-duplicate tags).
-	const maxTags = 5
-	if len(analysis.Tags) > maxTags {
-		analysis.Tags = analysis.Tags[:maxTags]
+	analysis := &JournalAnalysis{
+		Summary:   raw.Summary,
+		Mood:      raw.Mood,
+		Category:  raw.Category,
+		Entities:  raw.Entities,
+		OpenLoops: raw.OpenLoops,
+	}
+	const maxTagLen = 50
+	for _, t := range []string{raw.Tag1, raw.Tag2, raw.Tag3, raw.Tag4, raw.Tag5} {
+		t = strings.TrimSpace(t)
+		if t != "" && len(t) <= maxTagLen {
+			analysis.Tags = append(analysis.Tags, t)
+		}
 	}
 	for i := range analysis.Entities {
 		if analysis.Entities[i].SourceID == "" {

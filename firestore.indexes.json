@@ -17,6 +17,19 @@
       "collectionGroup": "knowledge_nodes",
       "queryScope": "COLLECTION",
       "fields": [
+        {
+          "fieldPath": "embedding",
+          "vectorConfig": {
+            "dimension": 768,
+            "flat": {}
+          }
+        }
+      ]
+    },
+    {
+      "collectionGroup": "knowledge_nodes",
+      "queryScope": "COLLECTION",
+      "fields": [
         { "fieldPath": "significance_weight", "order": "ASCENDING" },
         { "fieldPath": "last_recalled_at", "order": "ASCENDING" }
       ]
