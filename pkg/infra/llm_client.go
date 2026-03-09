@@ -10,6 +10,15 @@ import (
 	"github.com/jackstrohm/jot/pkg/utils"
 )
 
+// DefaultMaxOutputTokens is used when GenConfig.MaxOutputTokens is 0 or unset,
+// so we never leave the model with an API/SDK default that can truncate at ~5-9 tokens.
+const DefaultMaxOutputTokens = 8192
+
+// MinMaxOutputTokens is a floor so we never send a value the API might truncate with (e.g. 1–10).
+// Note: Logs confirm we send 256/512 here, but Gemini API can still return FinishReasonMaxTokens at ~5–9
+// completion tokens (known API/SDK behavior). See e.g. googleapis/python-genai#782, Gemini troubleshooting.
+const MinMaxOutputTokens = 4096
+
 // LLMRequest is the unified request structure for the dispatcher.
 // Used for single-shot calls; multi-turn uses ChatSession which shares the same logging helpers.
 type LLMRequest struct {
@@ -94,6 +103,12 @@ func (a *App) Dispatch(ctx context.Context, req *LLMRequest) (*genai.GenerateCon
 		modelName = a.EffectiveModel(req.GenConfig.ModelOverride)
 	}
 	model := client.GenerativeModel(modelName)
+	model.SafetySettings = []*genai.SafetySetting{
+		{Category: genai.HarmCategoryHarassment, Threshold: genai.HarmBlockNone},
+		{Category: genai.HarmCategoryHateSpeech, Threshold: genai.HarmBlockNone},
+		{Category: genai.HarmCategorySexuallyExplicit, Threshold: genai.HarmBlockNone},
+		{Category: genai.HarmCategoryDangerousContent, Threshold: genai.HarmBlockNone},
+	}
 
 	if req.SystemPrompt != "" {
 		model.SystemInstruction = &genai.Content{
@@ -110,12 +125,21 @@ func (a *App) Dispatch(ctx context.Context, req *LLMRequest) (*genai.GenerateCon
 		if req.GenConfig.TopP > 0 {
 			model.SetTopP(float32(req.GenConfig.TopP))
 		}
-		if req.GenConfig.MaxOutputTokens > 0 {
-			model.SetMaxOutputTokens(int32(req.GenConfig.MaxOutputTokens))
+		maxOut := req.GenConfig.MaxOutputTokens
+		if maxOut <= 0 {
+			maxOut = DefaultMaxOutputTokens
 		}
+		if maxOut < MinMaxOutputTokens {
+			maxOut = MinMaxOutputTokens
+		}
+		model.SetMaxOutputTokens(int32(maxOut))
+		LoggerFrom(ctx).Debug("dispatch gen_config", "max_output_tokens", maxOut, "model", modelName)
 		if req.GenConfig.ResponseMIMEType != "" {
 			model.ResponseMIMEType = req.GenConfig.ResponseMIMEType
 		}
+	} else {
+		model.SetMaxOutputTokens(DefaultMaxOutputTokens)
+		LoggerFrom(ctx).Debug("dispatch gen_config", "max_output_tokens", DefaultMaxOutputTokens, "model", modelName, "reason", "no_gen_config")
 	}
 	if req.ResponseSchema != nil {
 		model.ResponseSchema = req.ResponseSchema
