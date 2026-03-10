@@ -87,6 +87,10 @@ func LogLLMResponse(ctx context.Context, llmCorrelationID string, resp *genai.Ge
 	if llmCorrelationID != "" {
 		attrs = append(attrs, slog.String("llm_correlation_id", llmCorrelationID))
 	}
+	// When the model returned tool calls, resp.Text() is empty and the SDK may log a warning; this is expected.
+	if text == "" && HasFunctionCalls(resp) {
+		attrs = append(attrs, slog.String("response_type", "tool_calls_only"))
+	}
 	LoggerFrom(ctx).Debug("LLM_RAW_RESPONSE", attrs...)
 }
 
