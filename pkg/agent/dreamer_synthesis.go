@@ -8,13 +8,14 @@ import (
 	"time"
 
 	"cloud.google.com/go/firestore"
-	"github.com/google/generative-ai-go/genai"
+	"google.golang.org/genai"
 	"github.com/jackstrohm/jot/internal/prompts"
 	"github.com/jackstrohm/jot/llmjson"
 	"github.com/jackstrohm/jot/pkg/infra"
 	"github.com/jackstrohm/jot/pkg/journal"
 	"github.com/jackstrohm/jot/pkg/memory"
 	"github.com/jackstrohm/jot/pkg/utils"
+	"github.com/jackstrohm/jot/tools"
 )
 
 type gapDetectItem struct {
@@ -52,6 +53,8 @@ func RunGapDetection(ctx context.Context, journalContext string, entryUUIDs []st
 		relevantKnowledge = utils.TruncateToMaxBytes(relevantKnowledge, 4000) + "\n... (truncated)"
 	}
 
+	// Inject app capabilities so the gap-detector LLM knows what Jot can do (entry points, agents, memory, tools).
+	capabilitiesAndTools := prompts.AppCapabilities() + "\n\n## Existing tools (compact)\n" + tools.GetCompactDirectory()
 	schema := &genai.Schema{
 		Type: genai.TypeArray,
 		Items: &genai.Schema{
@@ -63,11 +66,14 @@ func RunGapDetection(ctx context.Context, journalContext string, entryUUIDs []st
 			},
 		},
 	}
-	userPrompt := prompts.FormatGapDetector(utils.WrapAsUserData(utils.SanitizePrompt(journalContext)), utils.WrapAsUserData(relevantKnowledge))
+	userPrompt := prompts.FormatGapDetector(
+		utils.WrapAsUserData(utils.SanitizePrompt(journalContext)),
+		utils.WrapAsUserData(relevantKnowledge),
+		utils.WrapAsUserData(capabilitiesAndTools))
 	req := &infra.LLMRequest{
-		Parts:           []genai.Part{genai.Text(userPrompt)},
+		Parts:           []*genai.Part{{Text: userPrompt}},
 		Model:           app.Config().DreamerModel,
-		GenConfig:       &infra.GenConfig{MaxOutputTokens: 1024, ResponseMIMEType: "application/json"},
+		GenConfig:       &infra.GenConfig{MaxOutputTokens: 1024, ResponseMIMEType: infra.MIMETypeJSON},
 		ResponseSchema:  schema,
 	}
 	apiCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
@@ -170,7 +176,28 @@ func RunEvolutionSynthesis(ctx context.Context, journalSummary string) (*Evoluti
 		journalForEvolution = journalSummary
 	}
 
-	audit, err := RunEvolutionAudit(ctx, queriesText, journalForEvolution)
+	// Big Picture: pass user persona and active contexts so the Auditor can reason about mission-level gaps.
+	personaContent := ""
+	if node, _, err := memory.FindContextByName(ctx, "user_profile"); err == nil && node != nil && node.Content != "" {
+		personaContent = node.Content
+	}
+	activeContextsSummary := ""
+	if nodes, metas, err := memory.GetActiveContexts(ctx, 10); err == nil && len(nodes) > 0 {
+		var lines []string
+		for i := range nodes {
+			if i >= len(metas) {
+				break
+			}
+			name := metas[i].ContextName
+			content := nodes[i].Content
+			first := utils.FirstSentence(content, 120)
+			lines = append(lines, fmt.Sprintf("%s: %s", name, first))
+		}
+		activeContextsSummary = strings.Join(lines, "\n")
+	}
+
+	toolManifest := tools.GetCompactDirectory()
+	audit, err := RunEvolutionAudit(ctx, queriesText, journalForEvolution, toolManifest, personaContent, activeContextsSummary)
 	if err != nil {
 		return nil, err
 	}

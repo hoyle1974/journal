@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/firestore"
-	"github.com/google/generative-ai-go/genai"
+	"google.golang.org/genai"
 	"github.com/jackstrohm/jot/internal/config"
 	"github.com/jackstrohm/jot/internal/prompts"
 	"github.com/jackstrohm/jot/llmjson"
@@ -659,9 +659,9 @@ func analyzeForNewContext(ctx context.Context, entryContent string) (bool, strin
 	}
 	prompt := prompts.FormatContextAnalyze(utils.WrapAsUserData(utils.SanitizePrompt(entryContent)))
 	req := &infra.LLMRequest{
-		Parts:           []genai.Part{genai.Text(prompt)},
+		Parts:           []*genai.Part{{Text: prompt}},
 		Model:           app.Config().GeminiModel,
-		GenConfig:       &infra.GenConfig{MaxOutputTokens: 512, ResponseMIMEType: "application/json"},
+		GenConfig:       &infra.GenConfig{MaxOutputTokens: 512, ResponseMIMEType: infra.MIMETypeJSON},
 		ResponseSchema:  schema,
 	}
 	resp, err := app.Dispatch(ctx, req)

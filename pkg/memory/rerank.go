@@ -36,7 +36,7 @@ func RerankNodes(ctx context.Context, query string, nodes []KnowledgeNode, topN 
 		return firstN(nodes, topN), nil
 	}
 	jsonText, err := infra.GenerateContentSimple(ctx, rerankSystemPrompt, userPrompt, cfg, &infra.GenConfig{
-		ResponseMIMEType: "application/json",
+		ResponseMIMEType: infra.MIMETypeJSON,
 		MaxOutputTokens:  512,
 	})
 	if err != nil {

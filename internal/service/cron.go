@@ -70,6 +70,10 @@ func RunJanitor(ctx context.Context) (int, error) {
 		}
 
 		data := doc.Data()
+		nodeType := infra.GetStringField(data, "node_type")
+		if nodeType == memory.NodeTypeIdentity || nodeType == memory.NodeTypeUserIdentity {
+			continue // Never delete or archive identity / user_identity nodes
+		}
 		projectID := memory.GetLinkedCompletedProjectID(ctx, data)
 		if projectID != "" {
 			content := infra.GetStringField(data, "content")

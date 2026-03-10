@@ -25,3 +25,6 @@ Valid JSON only. A single array of objects. No markdown, no code fences.
 
 ## Relevant knowledge
 %s
+
+## System Capabilities (what Jot can do + existing tools)
+%s

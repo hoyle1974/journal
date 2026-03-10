@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/generative-ai-go/genai"
+	"google.golang.org/genai"
 	"github.com/jackstrohm/jot/internal/prompts"
 	"github.com/jackstrohm/jot/llmjson"
 	"github.com/jackstrohm/jot/pkg/infra"
@@ -24,9 +24,11 @@ const ProactiveAlertSignificanceThreshold = 0.8
 
 // EvaluatorExtract holds the result of running the evaluator LLM on an entry (no storage).
 type EvaluatorExtract struct {
-	Significance float64
-	Domain       string
-	FactToStore  string
+	Significance      float64
+	Domain            string
+	FactToStore       string
+	FutureCommitment  float64 // 0-1: extent to which the entry expresses a commitment to do something
+	CommitmentIntent  string  // one sentence describing the action, if future_commitment is high
 }
 
 // RunEvaluatorExtract runs the evaluator LLM on content and returns significance, domain, and fact_to_store.
@@ -41,9 +43,11 @@ func RunEvaluatorExtract(ctx context.Context, content string) (*EvaluatorExtract
 	schema := &genai.Schema{
 		Type: genai.TypeObject,
 		Properties: map[string]*genai.Schema{
-			"significance":  {Type: genai.TypeNumber, Description: "0.0-1.0. High: emotional, milestones, new people. Low: routine logistics."},
-			"domain":        {Type: genai.TypeString, Enum: []string{"relationship", "work", "task", "thought"}},
-			"fact_to_store": {Type: genai.TypeString, Description: "Single distilled fact to store, or empty if nothing worth keeping"},
+			"significance":       {Type: genai.TypeNumber, Description: "0.0-1.0. High: emotional, milestones, new people. Low: routine logistics."},
+			"domain":             {Type: genai.TypeString, Enum: []string{"relationship", "work", "task", "thought"}},
+			"fact_to_store":      {Type: genai.TypeString, Description: "Single distilled fact to store, or empty if nothing worth keeping"},
+			"future_commitment":  {Type: genai.TypeNumber, Description: "0.0-1.0. High when entry expresses something user will do or needs to do (I need to..., I will...)."},
+			"commitment_intent":  {Type: genai.TypeString, Description: "One sentence describing the action to take, or empty if no commitment."},
 		},
 	}
 	systemPrompt := prompts.Evaluator() + prompts.DataSafety()
@@ -61,9 +65,9 @@ func RunEvaluatorExtract(ctx context.Context, content string) (*EvaluatorExtract
 
 	req := &infra.LLMRequest{
 		SystemPrompt:   systemPrompt,
-		Parts:          []genai.Part{genai.Text(prompt)},
+		Parts:          []*genai.Part{{Text: prompt}},
 		Model:          app.Config().GeminiModel,
-		GenConfig:      &infra.GenConfig{MaxOutputTokens: 1024, ResponseMIMEType: "application/json"},
+		GenConfig:      &infra.GenConfig{MaxOutputTokens: 1024, ResponseMIMEType: infra.MIMETypeJSON},
 		ResponseSchema: schema,
 	}
 	infra.GeminiCallsTotal.Inc()
@@ -73,18 +77,22 @@ func RunEvaluatorExtract(ctx context.Context, content string) (*EvaluatorExtract
 	}
 	text := infra.ExtractTextFromResponse(resp)
 	type evaluatorOut struct {
-		Significance float64 `json:"significance"`
-		Domain       string  `json:"domain"`
-		FactToStore  string  `json:"fact_to_store"`
+		Significance      float64 `json:"significance"`
+		Domain            string  `json:"domain"`
+		FactToStore       string  `json:"fact_to_store"`
+		FutureCommitment  float64 `json:"future_commitment"`
+		CommitmentIntent  string  `json:"commitment_intent"`
 	}
-	parsed, _ := llmjson.ParseLLMResponse[evaluatorOut](text, []string{"significance", "domain", "fact_to_store"})
+	parsed, _ := llmjson.ParseLLMResponse[evaluatorOut](text, []string{"significance", "domain", "fact_to_store", "future_commitment", "commitment_intent"})
 	if parsed == nil {
 		return nil, nil
 	}
 	out := &EvaluatorExtract{
-		Significance: parsed.Significance,
-		Domain:       parsed.Domain,
-		FactToStore:  strings.TrimSpace(parsed.FactToStore),
+		Significance:     parsed.Significance,
+		Domain:           parsed.Domain,
+		FactToStore:      strings.TrimSpace(parsed.FactToStore),
+		FutureCommitment: parsed.FutureCommitment,
+		CommitmentIntent: strings.TrimSpace(parsed.CommitmentIntent),
 	}
 	if out.Significance < 0 {
 		out.Significance = 0
@@ -95,22 +103,34 @@ func RunEvaluatorExtract(ctx context.Context, content string) (*EvaluatorExtract
 	if out.Domain == "" {
 		out.Domain = "thought"
 	}
+	if out.FutureCommitment < 0 {
+		out.FutureCommitment = 0
+	}
+	if out.FutureCommitment > 1 {
+		out.FutureCommitment = 1
+	}
 	return out, nil
 }
 
-// RunEvaluator assigns significance to a new entry and optionally upserts high-value facts.
-func RunEvaluator(ctx context.Context, app *infra.App, content, entryUUID, timestamp string) {
+// AgencyTaskCommitmentThreshold is the minimum future_commitment score to auto-create a task from an entry.
+const AgencyTaskCommitmentThreshold = 0.6
+
+// MinCommitmentIntentLen is the minimum length of commitment_intent to auto-create a task (avoid vague commitments).
+const MinCommitmentIntentLen = 10
+
+// RunEvaluator assigns significance to a new entry, optionally upserts high-value facts, and returns the extract for agency (task creation).
+func RunEvaluator(ctx context.Context, app *infra.App, content, entryUUID, timestamp string) (*EvaluatorExtract, error) {
 	ctx, span := infra.StartSpan(ctx, "evaluator.run")
 	defer span.End()
 
 	parsed, err := RunEvaluatorExtract(ctx, content)
 	if err != nil {
 		infra.LoggerFrom(ctx).Warn("evaluator skipped", "entry_uuid", entryUUID, "reason", "extract failed", "error", err)
-		return
+		return nil, err
 	}
 	if parsed == nil {
 		infra.LoggerFrom(ctx).Info("evaluator skipped", "entry_uuid", entryUUID, "reason", "content too short or unparseable")
-		return
+		return nil, nil
 	}
 
 	factStored := false
@@ -139,6 +159,7 @@ func RunEvaluator(ctx context.Context, app *infra.App, content, entryUUID, times
 	}
 	infra.LoggerFrom(ctx).Info("evaluator", "entry_uuid", entryUUID, "significance", parsed.Significance, "threshold_for_alert", ProactiveAlertSignificanceThreshold, "status", status, "domain", parsed.Domain, "fact_stored", factStored)
 	_ = timestamp
+	return parsed, nil
 }
 
 const proactiveInsightPrompt = `Based on this highly significant journal entry, generate exactly one insightful follow-up question or brief observation. Output only that single question or observation—no preamble, no numbering.`
@@ -243,7 +264,7 @@ If you completely agree with the current room state and have ABSOLUTELY NOTHING 
 	}
 	req := &infra.LLMRequest{
 		SystemPrompt: systemPrompt,
-		Parts:        []genai.Part{genai.Text(userPrompt)},
+		Parts:        []*genai.Part{{Text: userPrompt}},
 		Model:        model,
 		GenConfig:    &infra.GenConfig{MaxOutputTokens: 512},
 	}
@@ -273,7 +294,8 @@ type EvolutionAuditOutput struct {
 }
 
 // RunEvolutionAudit runs the Cognitive Engineer on recent queries.
-func RunEvolutionAudit(ctx context.Context, queriesText, journalSummary string) (*EvolutionAuditOutput, error) {
+// personaBriefing and activeContextsSummary are optional "Big Picture" context so the Auditor can suggest mission-level improvements, not just tactical fixes.
+func RunEvolutionAudit(ctx context.Context, queriesText, journalSummary, toolManifest, personaBriefing, activeContextsSummary string) (*EvolutionAuditOutput, error) {
 	ctx, span := infra.StartSpan(ctx, "agent.evolution_audit")
 	defer span.End()
 
@@ -290,16 +312,24 @@ func RunEvolutionAudit(ctx context.Context, queriesText, journalSummary string) 
 			"engineer_questions": {Type: genai.TypeArray, Items: &genai.Schema{Type: genai.TypeString}, Description: "Direct, actionable questions to ask the system engineer about building new tools or filling system capability gaps."},
 		},
 	}
-	systemPrompt := specialistSystemPrompts[DomainEvolution] + prompts.DataSafety()
-	userPrompt := "Analyze the following user-assistant interaction log for Process Friction. Identify tool efficacy issues, knowledge gaps, and propose concrete improvements (new tools or Go code changes).\n\nRECENT QUERIES AND ANSWERS:\n" + utils.WrapAsUserData(utils.SanitizePrompt(queriesText))
+	systemPrompt := fmt.Sprintf(prompts.Specialist("evolution"), toolManifest) + prompts.DataSafety()
+	userPrompt := "## SYSTEM CAPABILITIES (Existing Tools):\n" + utils.WrapAsUserData(toolManifest) + "\n\n"
+	if personaBriefing != "" {
+		userPrompt += "## USER PERSONA (who you are serving):\n" + utils.WrapAsUserData(utils.SanitizePrompt(personaBriefing)) + "\n\n"
+	}
+	if activeContextsSummary != "" {
+		userPrompt += "## ACTIVE CONTEXTS (what the system treats as important right now):\n" + utils.WrapAsUserData(utils.SanitizePrompt(activeContextsSummary)) + "\n\n"
+	}
+	userPrompt += "Given the user's stated values and current active contexts above, identify gaps between what the system does and what would make the user more effective. Do not only fix local bugs—consider agency, momentum, and alignment with the user's goals.\n\n"
+	userPrompt += "Analyze the following user-assistant interaction log for Process Friction. Identify tool efficacy issues, knowledge gaps, and propose concrete improvements (new tools or Go code changes).\n\nRECENT QUERIES AND ANSWERS:\n" + utils.WrapAsUserData(utils.SanitizePrompt(queriesText))
 	if journalSummary != "" {
 		userPrompt += "\n\nRECENT JOURNAL THEMES (for context):\n" + utils.WrapAsUserData(utils.SanitizePrompt(journalSummary))
 	}
 	req := &infra.LLMRequest{
 		SystemPrompt:   systemPrompt,
-		Parts:         []genai.Part{genai.Text(userPrompt)},
+		Parts:         []*genai.Part{{Text: userPrompt}},
 		Model:         app.Config().DreamerModel,
-		GenConfig:     &infra.GenConfig{MaxOutputTokens: 2048, TopP: 0.9, ResponseMIMEType: "application/json"},
+		GenConfig:     &infra.GenConfig{MaxOutputTokens: 2048, TopP: 0.9, ResponseMIMEType: infra.MIMETypeJSON},
 		ResponseSchema: schema,
 	}
 	apiCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
@@ -390,9 +420,9 @@ Recent journal context:
 		prompts.DataSafety()
 	req := &infra.LLMRequest{
 		SystemPrompt:   systemPrompt,
-		Parts:          []genai.Part{genai.Text(prompt)},
+		Parts:          []*genai.Part{{Text: prompt}},
 		Model:          model,
-		GenConfig:      &infra.GenConfig{MaxOutputTokens: 2048, TopP: 0.9, ResponseMIMEType: "application/json"},
+		GenConfig:      &infra.GenConfig{MaxOutputTokens: 2048, TopP: 0.9, ResponseMIMEType: infra.MIMETypeJSON},
 		ResponseSchema: schema,
 	}
 
@@ -474,9 +504,9 @@ func RunContextExtractor(ctx context.Context, journalContext string) ([]string, 
 	userPrompt := "Journal entries:\n" + utils.WrapAsUserData(utils.SanitizePrompt(journalContext))
 	req := &infra.LLMRequest{
 		SystemPrompt:   contextExtractorPrompt + prompts.DataSafety(),
-		Parts:         []genai.Part{genai.Text(userPrompt)},
+		Parts:         []*genai.Part{{Text: userPrompt}},
 		Model:         app.Config().DreamerModel,
-		GenConfig:     &infra.GenConfig{MaxOutputTokens: 1024, TopP: 0.9, ResponseMIMEType: "application/json"},
+		GenConfig:     &infra.GenConfig{MaxOutputTokens: 1024, TopP: 0.9, ResponseMIMEType: infra.MIMETypeJSON},
 		ResponseSchema: schema,
 	}
 	apiCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
@@ -529,9 +559,9 @@ func RunQueryAnalyzer(ctx context.Context, recentQueriesText string) (string, er
 	userPrompt := "Recent queries:\n" + utils.WrapAsUserData(utils.SanitizePrompt(recentQueriesText))
 	req := &infra.LLMRequest{
 		SystemPrompt:   queryAnalyzerPrompt + prompts.DataSafety(),
-		Parts:         []genai.Part{genai.Text(userPrompt)},
+		Parts:         []*genai.Part{{Text: userPrompt}},
 		Model:         app.Config().DreamerModel,
-		GenConfig:     &infra.GenConfig{MaxOutputTokens: 1024, TopP: 0.9, ResponseMIMEType: "application/json"},
+		GenConfig:     &infra.GenConfig{MaxOutputTokens: 1024, TopP: 0.9, ResponseMIMEType: infra.MIMETypeJSON},
 		ResponseSchema: schema,
 	}
 	apiCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
@@ -590,9 +620,9 @@ func DecomposeMessage(ctx context.Context, userMessage string) ([]Domain, error)
 	prompt := fmt.Sprintf("User message:\n%s\n\nWhich domains to consult?", utils.WrapAsUserData(utils.SanitizePrompt(userMessage)))
 	req := &infra.LLMRequest{
 		SystemPrompt:   systemPrompt,
-		Parts:         []genai.Part{genai.Text(prompt)},
+		Parts:         []*genai.Part{{Text: prompt}},
 		Model:         app.Config().GeminiModel,
-		GenConfig:     &infra.GenConfig{MaxOutputTokens: 1024, ResponseMIMEType: "application/json"},
+		GenConfig:     &infra.GenConfig{MaxOutputTokens: 1024, ResponseMIMEType: infra.MIMETypeJSON},
 		ResponseSchema: schema,
 	}
 	infra.GeminiCallsTotal.Inc()

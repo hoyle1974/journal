@@ -5,7 +5,7 @@ package tools
 import (
 	"context"
 
-	"github.com/google/generative-ai-go/genai"
+	"google.golang.org/genai"
 )
 
 // Result represents the result of executing a tool.

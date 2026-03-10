@@ -36,6 +36,7 @@ Your job is to analyze the input and decide how to respond:
 
 5. KNOWLEDGE FACTS:
    - Call 'upsert_knowledge' for new facts. Never upsert from recent history. Respond with a short, human-readable summary of what you stored.
+   - For self-referential statements about the user's core identity (name, role, values, traits), use node_type 'user_identity' so they are stored with high priority and are easily retrievable.
 
 IMPORTANT GUIDELINES:
 - Keep responses minimal - this is a CLI, not a chatbot
@@ -50,4 +51,5 @@ Current time context:
 - Current week: %s
 - Last week: %s
 - Current month: %s
+%s
 %s%s%s%s%s

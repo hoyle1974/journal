@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"cloud.google.com/go/firestore"
 	"github.com/jackstrohm/jot/pkg/infra"
 	"github.com/jackstrohm/jot/pkg/journal"
 	"github.com/jackstrohm/jot/pkg/memory"
+	"github.com/jackstrohm/jot/pkg/task"
 )
 
 // ProcessEntry runs evaluator, context detection, journal analysis, and embedding for an entry.
@@ -36,8 +38,25 @@ func ProcessEntry(ctx context.Context, app *infra.App, entryUUID, content, times
 
 	infra.LoggerFrom(ctx).Debug("process-entry: running evaluator", "entry_uuid", entryUUID, "reason", "extract significance and optionally store fact")
 	t0 := time.Now()
-	RunEvaluator(ctx, app, content, entryUUID, timestamp)
+	parsed, err := RunEvaluator(ctx, app, content, entryUUID, timestamp)
 	llm += time.Since(t0)
+	if err != nil {
+		infra.LoggerFrom(ctx).Warn("process-entry: evaluator failed", "entry_uuid", entryUUID, "error", err)
+	}
+	// Agency threshold: auto-create a task when the entry expresses a high future commitment.
+	if parsed != nil && parsed.FutureCommitment >= AgencyTaskCommitmentThreshold && len(strings.TrimSpace(parsed.CommitmentIntent)) >= MinCommitmentIntentLen {
+		taskContent := strings.TrimSpace(parsed.CommitmentIntent)
+		t := &task.Task{
+			Content:          taskContent,
+			Status:           task.StatusPending,
+			JournalEntryIDs:  []string{entryUUID},
+		}
+		if taskUUID, createErr := task.CreateTask(ctx, t); createErr != nil {
+			infra.LoggerFrom(ctx).Warn("process-entry: agency task create failed", "entry_uuid", entryUUID, "error", createErr)
+		} else {
+			infra.LoggerFrom(ctx).Info("process-entry: agency task created", "entry_uuid", entryUUID, "task_uuid", taskUUID, "content", taskContent)
+		}
+	}
 
 	t1 := time.Now()
 	contextUUIDs, err := memory.DetectOrCreateContext(ctx, content, entryUUID)

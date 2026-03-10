@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/generative-ai-go/genai"
+	"google.golang.org/genai"
 	"github.com/jackstrohm/jot/internal/prompts"
 	"github.com/jackstrohm/jot/llmjson"
 	"github.com/jackstrohm/jot/pkg/infra"
@@ -62,9 +62,9 @@ func runRollUpLLM(ctx context.Context, app *infra.App, periodLabel, analysesText
 	}
 	userPrompt := prompts.FormatRollUp(periodLabel, utils.WrapAsUserData(utils.SanitizePrompt(analysesText)))
 	req := &infra.LLMRequest{
-		Parts:           []genai.Part{genai.Text(userPrompt)},
+		Parts:           []*genai.Part{{Text: userPrompt}},
 		Model:           app.Config().DreamerModel,
-		GenConfig:       &infra.GenConfig{MaxOutputTokens: 1024, ResponseMIMEType: "application/json"},
+		GenConfig:       &infra.GenConfig{MaxOutputTokens: 1024, ResponseMIMEType: infra.MIMETypeJSON},
 		ResponseSchema:  schema,
 	}
 	apiCtx, cancel := context.WithTimeout(ctx, 60*time.Second)

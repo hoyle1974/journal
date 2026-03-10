@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/google/generative-ai-go/genai"
+	"google.golang.org/genai"
 )
 
 func TestArgsString(t *testing.T) {

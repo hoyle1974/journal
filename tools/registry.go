@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/google/generative-ai-go/genai"
+	"google.golang.org/genai"
 )
 
 var (

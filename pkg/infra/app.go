@@ -8,8 +8,8 @@ import (
 	"sync"
 
 	"cloud.google.com/go/firestore"
-	"github.com/google/generative-ai-go/genai"
 	"github.com/jackstrohm/jot/internal/config"
+	"google.golang.org/genai"
 	"github.com/panjf2000/ants/v2"
 )
 

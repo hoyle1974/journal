@@ -22,7 +22,7 @@ func init() {
 func registerKnowledgeTools() {
 	tools.Register(&tools.Tool{
 		Name:        "upsert_knowledge",
-		Description: "Add or update a piece of knowledge in the knowledge graph. Use ONLY for NEW facts in the CURRENT user input. NEVER upsert information from RECENT CONVERSATION - that data is already saved. Node types: 'person', 'project', 'fact', 'preference', 'list_item', 'goal'.",
+		Description: "Add or update a piece of knowledge in the knowledge graph. Use ONLY for NEW facts in the CURRENT user input. NEVER upsert information from RECENT CONVERSATION - that data is already saved. Node types: 'person', 'project', 'fact', 'preference', 'list_item', 'goal', 'user_identity'. Use node_type 'user_identity' for self-referential statements about your core identity (e.g. your name, role, values, traits); these are stored with high priority and are easily retrievable.",
 		Category:    "knowledge",
 		Params: []tools.Param{
 			tools.RequiredStringParam("content", "The fact or information to store (e.g., 'Alice works at Google')"),
@@ -159,7 +159,7 @@ func registerKnowledgeTools() {
 
 	tools.Register(&tools.Tool{
 		Name:        "list_knowledge",
-		Description: "List knowledge nodes by type (person, project, fact, preference, etc.).",
+		Description: "List knowledge nodes by type (person, project, fact, preference, user_identity, etc.).",
 		Category:    "knowledge",
 		Params: []tools.Param{
 			tools.OptionalStringParam("node_type", "Filter by node type (leave empty for all types)"),

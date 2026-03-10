@@ -419,7 +419,8 @@ func cmdEdit(limit int) {
 
 func cmdDream() {
 	fmt.Println("Running Dreamer (consolidating last 24h into semantic memory)...")
-	result, headers, err := api.Do("POST", "/dream", nil, time.Duration(timeout.QuerySeconds)*time.Second)
+	fmt.Println("(This may take 3–5 minutes.)")
+	result, headers, err := api.Do("POST", "/dream", nil, time.Duration(timeout.DreamSeconds)*time.Second)
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
 		if strings.Contains(err.Error(), "429") || strings.Contains(err.Error(), "Rate limit") || strings.Contains(err.Error(), "quota") {

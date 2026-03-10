@@ -95,21 +95,27 @@ func UpsertKnowledge(ctx context.Context, content, nodeType, metadata string, jo
 	infra.LoggerFrom(ctx).Debug("embedding generated", "dimensions", len(vector))
 
 	timestamp := time.Now().Format(time.RFC3339)
+	significanceWeight := 0.5
+	domain := "thought"
+	if nodeType == NodeTypeUserIdentity {
+		significanceWeight = 0.95 // Retain identity statements; high recall priority
+		domain = "identity"
+	}
 	data := map[string]interface{}{
 		"content":             content,
 		"node_type":           nodeType,
 		"metadata":            metaToStore,
 		"embedding":           firestore.Vector32(vector),
 		"timestamp":           timestamp,
-		"significance_weight": 0.5,
-		"domain":              "thought",
+		"significance_weight": significanceWeight,
+		"domain":              domain,
 		"last_recalled_at":    timestamp,
 	}
 	if len(journalEntryIDs) > 0 {
 		data["journal_entry_ids"] = journalEntryIDs
 	}
 
-	distanceThreshold := 0.15
+	distanceThreshold := 0.25
 	vectorQuery := client.Collection(KnowledgeCollection).
 		FindNearest("embedding", firestore.Vector32(vector), 1, firestore.DistanceMeasureCosine,
 			&firestore.FindNearestOptions{DistanceThreshold: &distanceThreshold})
@@ -180,7 +186,7 @@ func UpsertSemanticMemory(ctx context.Context, content, nodeType, domain string,
 
 	timestamp := time.Now().Format(time.RFC3339)
 	now := timestamp
-	distanceThreshold := 0.15
+	distanceThreshold := 0.25
 	vectorQuery := client.Collection(KnowledgeCollection).
 		FindNearest("embedding", firestore.Vector32(vector), 1, firestore.DistanceMeasureCosine,
 			&firestore.FindNearestOptions{DistanceThreshold: &distanceThreshold})
@@ -588,6 +594,33 @@ func isCompletedProjectByID(ctx context.Context, id string) bool {
 		return false
 	}
 	return (node.NodeType == "project" || node.NodeType == "goal") && metadataStatus(node.Metadata) == "completed"
+}
+
+// GetUserIdentityNodes returns knowledge nodes of type user_identity, for easy retrieval of self-referential identity statements.
+func GetUserIdentityNodes(ctx context.Context, limit int) ([]KnowledgeNode, error) {
+	client, err := infra.GetFirestoreClient(ctx)
+	if err != nil {
+		return nil, err
+	}
+	query := client.Collection(KnowledgeCollection).
+		Where("node_type", "==", NodeTypeUserIdentity).
+		OrderBy("timestamp", firestore.Desc).
+		Limit(limit)
+	nodes, err := infra.QueryDocuments(ctx, query, func(doc *firestore.DocumentSnapshot) (KnowledgeNode, error) {
+		data := doc.Data()
+		return KnowledgeNode{
+			UUID:            doc.Ref.ID,
+			Content:         infra.GetStringField(data, "content"),
+			NodeType:        infra.GetStringField(data, "node_type"),
+			Metadata:        infra.GetStringField(data, "metadata"),
+			Timestamp:       infra.GetStringField(data, "timestamp"),
+			JournalEntryIDs: infra.GetStringSliceField(data, "journal_entry_ids"),
+		}, nil
+	})
+	if err != nil {
+		return nil, infra.WrapFirestoreIndexError(err)
+	}
+	return nodes, nil
 }
 
 // GetActiveSignals retrieves recent proactive signals (selfmodel thought nodes) for the FOH.

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/generative-ai-go/genai"
+	"google.golang.org/genai"
 	"github.com/jackstrohm/jot/internal/prompts"
 	"github.com/jackstrohm/jot/pkg/infra"
 	"github.com/jackstrohm/jot/pkg/journal"
@@ -282,13 +282,13 @@ Given the journal context and current open todo roots below, create or update ta
 Use search_tasks first if you need to see existing tasks. Only create or update when clearly useful; do not create trivial or duplicate tasks. Reply briefly after tool use; no need to narrate.`
 
 // runDreamerTaskPhase runs a short agentic loop with task tools so the dreamer can create/update tasks from the night's consolidation.
-func runDreamerTaskPhase(ctx context.Context, journalContext string, entryUUIDs []string) {
+func runDreamerTaskPhase(ctx context.Context, dreamerRunID string, journalContext string, entryUUIDs []string) {
 	ctx, span := infra.StartSpan(ctx, "cron.dreamer_task_phase")
 	defer span.End()
 
 	taskToolDefs := tools.GetDefinitionsByCategory("task")
 	if len(taskToolDefs) == 0 {
-		infra.LoggerFrom(ctx).Debug("dreamer task phase: no task tools registered, skipping")
+		infra.LoggerFrom(ctx).Debug("dreamer task phase: no task tools registered, skipping", "dreamer_run_id", dreamerRunID, "phase", "task_phase")
 		return
 	}
 
@@ -314,7 +314,7 @@ func runDreamerTaskPhase(ctx context.Context, journalContext string, entryUUIDs 
 	systemPrompt := dreamerTaskPhaseSystemPrompt
 	if useCompactTools {
 		systemPrompt += "\n\n---\n## TOOLS (compact)\nTo call a tool, respond with ONLY a fenced JSON block (```json ... ```): {\"tool\": \"tool_name\", \"args\": {\"param\": \"value\", ...}}.\n\n" + tools.GetCompactDirectoryByCategory("task")
-		infra.LoggerFrom(ctx).Debug("dreamer task phase: compact tools mode")
+		infra.LoggerFrom(ctx).Debug("dreamer task phase: compact tools mode", "dreamer_run_id", dreamerRunID, "phase", "task_phase")
 	}
 
 	var toolDefs []*genai.FunctionDeclaration
@@ -323,16 +323,16 @@ func runDreamerTaskPhase(ctx context.Context, journalContext string, entryUUIDs 
 	}
 	session, err := infra.NewChatSession(ctx, systemPrompt, toolDefs)
 	if err != nil {
-		infra.LoggerFrom(ctx).Warn("dreamer task phase: failed to create session", "error", err)
+		infra.LoggerFrom(ctx).Warn("dreamer task phase: failed to create session", "dreamer_run_id", dreamerRunID, "phase", "task_phase", "error", err)
 		span.RecordError(err)
 		return
 	}
 
-	infra.LoggerFrom(ctx).Info("dreamer task phase starting", "tool_count", len(toolDefs), "compact_tools", useCompactTools)
+	infra.LoggerFrom(ctx).Info("dreamer task phase starting", "dreamer_run_id", dreamerRunID, "phase", "task_phase", "tool_count", len(toolDefs), "compact_tools", useCompactTools)
 	var resp *genai.GenerateContentResponse
-	resp, err = session.SendMessage(ctx, genai.Text(userMsg))
+	resp, err = session.SendMessage(ctx, &genai.Part{Text: userMsg})
 	if err != nil {
-		infra.LoggerFrom(ctx).Warn("dreamer task phase: send failed", "error", err)
+		infra.LoggerFrom(ctx).Warn("dreamer task phase: send failed", "dreamer_run_id", dreamerRunID, "phase", "task_phase", "error", err)
 		span.RecordError(err)
 		return
 	}
@@ -347,11 +347,11 @@ func runDreamerTaskPhase(ctx context.Context, journalContext string, entryUUIDs 
 			}
 			infra.ToolCallsTotal.Inc()
 			toolResult := tools.Execute(ctx, toolName, toolArgs)
-			infra.LoggerFrom(ctx).Debug("dreamer task phase tool", "tool", toolName, "success", toolResult.Success)
+			infra.LoggerFrom(ctx).Debug("dreamer task phase tool", "dreamer_run_id", dreamerRunID, "phase", "task_phase", "tool", toolName, "success", toolResult.Success)
 			resultMsg := "Tool result (" + toolName + "): " + toolResult.Result
-			resp, err = session.SendMessage(ctx, genai.Text(utils.SanitizePrompt(resultMsg)))
+			resp, err = session.SendMessage(ctx, &genai.Part{Text: utils.SanitizePrompt(resultMsg)})
 			if err != nil {
-				infra.LoggerFrom(ctx).Warn("dreamer task phase: send after tools failed", "error", err)
+				infra.LoggerFrom(ctx).Warn("dreamer task phase: send after tools failed", "dreamer_run_id", dreamerRunID, "phase", "task_phase", "error", err)
 				span.RecordError(err)
 				return
 			}
@@ -362,28 +362,30 @@ func runDreamerTaskPhase(ctx context.Context, journalContext string, entryUUIDs 
 			break
 		}
 		functionCalls := infra.ExtractFunctionCalls(resp)
-		var parts []genai.Part
+		var parts []*genai.Part
 		for _, fc := range functionCalls {
 			args := make(map[string]interface{})
 			for k, v := range fc.Args {
 				args[k] = v
 			}
 			toolResult := tools.Execute(ctx, fc.Name, args)
-			infra.LoggerFrom(ctx).Debug("dreamer task phase tool", "tool", fc.Name, "success", toolResult.Success)
-			parts = append(parts, genai.FunctionResponse{
-				Name:     fc.Name,
-				Response: map[string]any{"result": utils.SanitizePrompt(toolResult.Result)},
+			infra.LoggerFrom(ctx).Debug("dreamer task phase tool", "dreamer_run_id", dreamerRunID, "phase", "task_phase", "tool", fc.Name, "success", toolResult.Success)
+			parts = append(parts, &genai.Part{
+				FunctionResponse: &genai.FunctionResponse{
+					Name:     fc.Name,
+					Response: map[string]any{"result": utils.SanitizePrompt(toolResult.Result)},
+				},
 			})
 		}
 		resp, err = session.SendMessage(ctx, parts...)
 		if err != nil {
-			infra.LoggerFrom(ctx).Warn("dreamer task phase: send after tools failed", "error", err)
+			infra.LoggerFrom(ctx).Warn("dreamer task phase: send after tools failed", "dreamer_run_id", dreamerRunID, "phase", "task_phase", "error", err)
 			span.RecordError(err)
 			return
 		}
 		iteration++
 	}
-	infra.LoggerFrom(ctx).Info("dreamer task phase completed", "iterations", iteration)
+	infra.LoggerFrom(ctx).Info("dreamer task phase completed", "dreamer_run_id", dreamerRunID, "phase", "task_phase", "iterations", iteration)
 	span.SetAttributes(map[string]string{"iterations": fmt.Sprintf("%d", iteration)})
 }
 
@@ -477,22 +479,23 @@ func RunDreamer(ctx context.Context, app *infra.App) (*DreamerResult, error) {
 		return nil, fmt.Errorf("no app in context")
 	}
 
+	dreamerRunID := infra.GenShortRunID()
 	tDreamStart := time.Now()
-	infra.LoggerFrom(ctx).Info("dreamer starting", "window", "24h")
+	infra.LoggerFrom(ctx).Info("dreamer starting", "dreamer_run_id", dreamerRunID, "phase", "start", "window", "24h")
 
 	inputs, err := loadDreamerInputs(ctx)
 	if err != nil {
 		span.RecordError(err)
-		infra.LoggerFrom(ctx).Error("dreamer fetch entries failed", "error", err)
+		infra.LoggerFrom(ctx).Error("dreamer fetch entries failed", "dreamer_run_id", dreamerRunID, "phase", "fetch", "error", err)
 		return nil, err
 	}
 	if len(inputs.EntryUUIDs) == 0 {
-		infra.LoggerFrom(ctx).Info("dreamer: no entries in last 24h")
+		infra.LoggerFrom(ctx).Info("dreamer: no entries in last 24h", "dreamer_run_id", dreamerRunID, "phase", "fetch")
 		return &DreamerResult{EntriesProcessed: 0}, nil
 	}
 
-	infra.LoggerFrom(ctx).Info("dreamer fetched entries", "count", len(inputs.EntryUUIDs), "fetch_ms", time.Since(tDreamStart).Milliseconds())
-	infra.LoggerFrom(ctx).Info("dreamer journal", "total_chars", len(inputs.JournalContext), "journal", inputs.JournalContext)
+	infra.LoggerFrom(ctx).Info("dreamer fetched entries", "dreamer_run_id", dreamerRunID, "phase", "fetch", "count", len(inputs.EntryUUIDs), "fetch_ms", time.Since(tDreamStart).Milliseconds())
+	infra.LoggerFrom(ctx).Info("dreamer journal", "dreamer_run_id", dreamerRunID, "phase", "fetch", "total_chars", len(inputs.JournalContext), "journal", inputs.JournalContext)
 
 	journalContext := inputs.JournalContext
 	entryUUIDs := inputs.EntryUUIDs
@@ -518,14 +521,14 @@ func RunDreamer(ctx context.Context, app *infra.App) (*DreamerResult, error) {
 	const maxRoomPasses = 2 // 2 passes allows initial thoughts + 1 round of corrections
 
 	for pass := 1; pass <= maxRoomPasses; pass++ {
-		infra.LoggerFrom(ctx).Info("dreamer colloquium pass starting", "pass", pass)
+		infra.LoggerFrom(ctx).Info("dreamer colloquium pass starting", "dreamer_run_id", dreamerRunID, "phase", "colloquium", "pass", pass)
 		var newMessages []string
 		allDone := true
 
 		for _, domain := range domains {
 			msg, isDone, err := RunSpecialistDiscussion(ctx, domain, journalContext, roomTranscript, dreamerModel)
 			if err != nil {
-				infra.LoggerFrom(ctx).Warn("specialist discussion failed", "domain", domain, "error", err)
+				infra.LoggerFrom(ctx).Warn("specialist discussion failed", "dreamer_run_id", dreamerRunID, "phase", "colloquium", "domain", domain, "error", err)
 				continue // Skip this agent's turn rather than crashing the room
 			}
 			if !isDone {
@@ -541,42 +544,42 @@ func RunDreamer(ctx context.Context, app *infra.App) (*DreamerResult, error) {
 		}
 
 		if allDone {
-			infra.LoggerFrom(ctx).Info("all specialists declared DONE early", "pass", pass)
+			infra.LoggerFrom(ctx).Info("all specialists declared DONE early", "dreamer_run_id", dreamerRunID, "phase", "colloquium", "pass", pass)
 			break
 		}
 	}
-	infra.LoggerFrom(ctx).Info("dreamer colloquium finished", "duration_ms", time.Since(tColloquiumStart).Milliseconds())
+	infra.LoggerFrom(ctx).Info("dreamer colloquium finished", "dreamer_run_id", dreamerRunID, "phase", "colloquium", "duration_ms", time.Since(tColloquiumStart).Milliseconds())
 
 	// Attach the final transcript to the input for the final extraction phase
 	input.RoomContext = roomTranscript
-	infra.LoggerFrom(ctx).Info("dreamer colloquium room_transcript", "room_transcript", roomTranscript)
+	infra.LoggerFrom(ctx).Info("dreamer colloquium room_transcript", "dreamer_run_id", dreamerRunID, "phase", "colloquium", "room_transcript", roomTranscript)
 
 	// --- PHASE 2: FINAL EXTRACTION (sequential) ---
 	// 2a. Final Specialist Extraction
 	for i, d := range domains {
-		infra.LoggerFrom(ctx).Info("dreamer final extraction start", "domain", d)
+		infra.LoggerFrom(ctx).Info("dreamer final extraction start", "dreamer_run_id", dreamerRunID, "phase", "extraction", "domain", d)
 		out, runErr := RunSpecialist(ctx, d, input, dreamerModel)
 		if runErr != nil {
-			infra.LoggerFrom(ctx).Warn("dreamer specialist extraction failed", "domain", d, "error", runErr)
+			infra.LoggerFrom(ctx).Warn("dreamer specialist extraction failed", "dreamer_run_id", dreamerRunID, "phase", "extraction", "domain", d, "error", runErr)
 			if err == nil {
 				err = runErr
 			}
 			continue
 		}
 		outputs[i] = out
-		infra.LoggerFrom(ctx).Info("dreamer specialist extraction done", "domain", d, "facts", len(out.Facts))
+		infra.LoggerFrom(ctx).Info("dreamer specialist extraction done", "dreamer_run_id", dreamerRunID, "phase", "extraction", "domain", d, "facts", len(out.Facts))
 	}
 
 	// 2b. Context Extractor
 	if ctxs, runErr := RunContextExtractor(ctx, journalContext); runErr != nil {
-		infra.LoggerFrom(ctx).Warn("dreamer context extractor failed", "error", runErr)
+		infra.LoggerFrom(ctx).Warn("dreamer context extractor failed", "dreamer_run_id", dreamerRunID, "phase", "extraction", "error", runErr)
 	} else {
 		impactedContexts = ctxs
 	}
 
 	// 2c. Query Analyzer
 	if analysis, runErr := RunQueryAnalyzer(ctx, recentQueriesText); runErr != nil {
-		infra.LoggerFrom(ctx).Warn("dreamer query analyzer failed", "error", runErr)
+		infra.LoggerFrom(ctx).Warn("dreamer query analyzer failed", "dreamer_run_id", dreamerRunID, "phase", "extraction", "error", runErr)
 	} else {
 		queryAnalysis = analysis
 	}
@@ -592,33 +595,33 @@ func RunDreamer(ctx context.Context, app *infra.App) (*DreamerResult, error) {
 			span.RecordError(err)
 			return nil, fmt.Errorf("dreamer: all specialists failed: %w", err)
 		}
-		infra.LoggerFrom(ctx).Warn("dreamer some specialists or tasks failed", "error", err)
+		infra.LoggerFrom(ctx).Warn("dreamer some specialists or tasks failed", "dreamer_run_id", dreamerRunID, "phase", "extraction", "error", err)
 	}
 
 	for _, name := range impactedContexts {
 		ctxUUID, e := memory.EnsureContextExists(ctx, name)
 		if e != nil {
-			infra.LoggerFrom(ctx).Warn("dreamer ensure context failed", "name", name, "error", e)
+			infra.LoggerFrom(ctx).Warn("dreamer ensure context failed", "dreamer_run_id", dreamerRunID, "phase", "consolidation", "name", name, "error", e)
 			continue
 		}
 		contextUUIDs[ctxUUID] = struct{}{}
 	}
 	for uuid := range contextUUIDs {
 		if e := memory.TouchContextBatch(ctx, uuid, entryUUIDs, 0.05); e != nil {
-			infra.LoggerFrom(ctx).Warn("dreamer touch context batch failed", "context_uuid", uuid, "error", e)
+			infra.LoggerFrom(ctx).Warn("dreamer touch context batch failed", "dreamer_run_id", dreamerRunID, "phase", "consolidation", "context_uuid", uuid, "error", e)
 		}
 	}
 
 	if queryAnalysis != "" {
 		thoughtContent := "Query analysis: " + queryAnalysis
 		if _, e := memory.UpsertSemanticMemory(ctx, thoughtContent, "thought", "selfmodel", 0.9, nil, nil); e != nil {
-			infra.LoggerFrom(ctx).Warn("dreamer save query analysis thought failed", "error", e)
+			infra.LoggerFrom(ctx).Warn("dreamer save query analysis thought failed", "dreamer_run_id", dreamerRunID, "phase", "consolidation", "error", e)
 		} else {
-			infra.LoggerFrom(ctx).Info("dreamer saved query analysis thought", "len", len(queryAnalysis))
+			infra.LoggerFrom(ctx).Info("dreamer saved query analysis thought", "dreamer_run_id", dreamerRunID, "phase", "consolidation", "len", len(queryAnalysis))
 		}
 	}
 
-	infra.LoggerFrom(ctx).Info("dreamer specialists complete", "specialists_ms", time.Since(tSpecialistsStart).Milliseconds())
+	infra.LoggerFrom(ctx).Info("dreamer specialists complete", "dreamer_run_id", dreamerRunID, "phase", "extraction", "specialists_ms", time.Since(tSpecialistsStart).Milliseconds())
 
 	totalFacts := 0
 	for i := range domains {
@@ -626,39 +629,46 @@ func RunDreamer(ctx context.Context, app *infra.App) (*DreamerResult, error) {
 			totalFacts += len(outputs[i].Facts)
 		}
 	}
-	infra.LoggerFrom(ctx).Info("dreamer starting consolidation", "total_facts", totalFacts)
+	infra.LoggerFrom(ctx).Info("dreamer starting consolidation", "dreamer_run_id", dreamerRunID, "phase", "consolidation", "total_facts", totalFacts)
 
 	merged := mergeDreamerFacts(ctx, domains, outputs)
-	infra.LoggerFrom(ctx).Info("dreamer merge complete", "before", totalFacts, "after", len(merged), "msg", fmt.Sprintf("dreamer merged %d facts into %d", totalFacts, len(merged)))
+	infra.LoggerFrom(ctx).Info("dreamer merge complete", "dreamer_run_id", dreamerRunID, "phase", "consolidation", "before", totalFacts, "after", len(merged), "msg", fmt.Sprintf("dreamer merged %d facts into %d", totalFacts, len(merged)))
 
 	written, _ := dreamerWriteMergedFacts(ctx, merged, inputs.EntryUUIDs)
 
 	if err = RunGapDetection(ctx, inputs.JournalContext, inputs.EntryUUIDs); err != nil {
-		infra.LoggerFrom(ctx).Warn("dreamer gap detection failed", "error", err)
+		infra.LoggerFrom(ctx).Warn("dreamer gap detection failed", "dreamer_run_id", dreamerRunID, "phase", "gap_detection", "error", err)
 	} else {
-		infra.LoggerFrom(ctx).Info("dreamer gap detection completed")
+		infra.LoggerFrom(ctx).Info("dreamer gap detection completed", "dreamer_run_id", dreamerRunID, "phase", "gap_detection")
 	}
 
 	synthesized, skippedLazy, _ := dreamerSynthesizeContexts(ctx, contextUUIDs)
 	if skippedLazy > 0 {
-		infra.LoggerFrom(ctx).Info("dreamer synthesis skipped (lazy)", "count", skippedLazy)
+		infra.LoggerFrom(ctx).Info("dreamer synthesis skipped (lazy)", "dreamer_run_id", dreamerRunID, "phase", "synthesis", "count", skippedLazy)
 	}
 
 	personaFacts := extractDreamerPersonaFacts(outputs, domains)
 	if len(personaFacts) > 0 {
 		if err = RunProfileSynthesis(ctx, personaFacts); err != nil {
-			infra.LoggerFrom(ctx).Warn("dreamer profile synthesis failed", "error", err)
+			infra.LoggerFrom(ctx).Warn("dreamer profile synthesis failed", "dreamer_run_id", dreamerRunID, "phase", "synthesis", "error", err)
 		} else {
-			infra.LoggerFrom(ctx).Info("dreamer profile synthesis completed", "persona_facts", len(personaFacts))
+			infra.LoggerFrom(ctx).Info("dreamer profile synthesis completed", "dreamer_run_id", dreamerRunID, "phase", "synthesis", "persona_facts", len(personaFacts))
 		}
 	}
 
 	var evolutionAudit *EvolutionAuditOutput
 	if audit, synErr := RunEvolutionSynthesis(ctx, journalContext); synErr != nil {
-		infra.LoggerFrom(ctx).Warn("dreamer evolution synthesis failed", "error", synErr)
+		infra.LoggerFrom(ctx).Warn("dreamer evolution synthesis failed", "dreamer_run_id", dreamerRunID, "phase", "synthesis", "error", synErr)
 	} else {
 		evolutionAudit = audit
-		infra.LoggerFrom(ctx).Info("dreamer evolution synthesis completed")
+		infra.LoggerFrom(ctx).Info("dreamer evolution synthesis completed", "dreamer_run_id", dreamerRunID, "phase", "synthesis")
+	}
+
+	// Momentum/incubation: promote recurring themes (tags/category across multiple days) to formal contexts.
+	if promoted, incErr := memory.PromoteIncubatingClusters(ctx); incErr != nil {
+		infra.LoggerFrom(ctx).Warn("dreamer incubation failed", "dreamer_run_id", dreamerRunID, "phase", "incubation", "error", incErr)
+	} else if promoted > 0 {
+		infra.LoggerFrom(ctx).Info("dreamer incubation completed", "dreamer_run_id", dreamerRunID, "phase", "incubation", "promoted", promoted)
 	}
 
 	// Generate and store the Dream Narrative (morning readout) for the user.
@@ -670,13 +680,13 @@ func RunDreamer(ctx context.Context, app *infra.App) (*DreamerResult, error) {
 		PersonaFacts:        personaFacts,
 		EvolutionAudit:      evolutionAudit,
 	}); err != nil {
-		infra.LoggerFrom(ctx).Warn("dreamer narrative failed", "error", err)
+		infra.LoggerFrom(ctx).Warn("dreamer narrative failed", "dreamer_run_id", dreamerRunID, "phase", "narrative", "error", err)
 	}
 
 	// Let the dreamer create or update tasks from the night's journal (tool-calling phase).
-	runDreamerTaskPhase(ctx, journalContext, entryUUIDs)
+	runDreamerTaskPhase(ctx, dreamerRunID, journalContext, entryUUIDs)
 
-	infra.LoggerFrom(ctx).Info("dreamer completed", "entries_processed", len(entryUUIDs), "facts_extracted", totalFacts, "facts_written", written, "contexts_synthesized", synthesized, "total_ms", time.Since(tDreamStart).Milliseconds(), "msg", fmt.Sprintf("dreamer completed: %d entries -> %d extracted -> %d written, %d contexts synthesized in %dms", len(entryUUIDs), totalFacts, written, synthesized, time.Since(tDreamStart).Milliseconds()))
+	infra.LoggerFrom(ctx).Info("dreamer completed", "dreamer_run_id", dreamerRunID, "phase", "complete", "entries_processed", len(entryUUIDs), "facts_extracted", totalFacts, "facts_written", written, "contexts_synthesized", synthesized, "total_ms", time.Since(tDreamStart).Milliseconds(), "msg", fmt.Sprintf("dreamer completed: %d entries -> %d extracted -> %d written, %d contexts synthesized in %dms", len(entryUUIDs), totalFacts, written, synthesized, time.Since(tDreamStart).Milliseconds()))
 	span.SetAttributes(map[string]string{
 		"entries":     fmt.Sprintf("%d", len(entryUUIDs)),
 		"written":     fmt.Sprintf("%d", written),

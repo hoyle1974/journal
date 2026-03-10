@@ -33,6 +33,16 @@ func BuildSystemPrompt(ctx context.Context) string {
 	lastWeekStr := fmt.Sprintf("%d-W%02d", lastWeek.Year(), lastWeekNum)
 	currentMonth := now.Format("2006-01")
 
+	// 0. Root Identity (always inject user_profile so the model knows who it is serving)
+	identityBlock := ""
+	if node, _, err := memory.FindContextByName(ctx, "user_profile"); err == nil && node != nil && node.Content != "" {
+		identityBlock = "\n---\n## ROOT IDENTITY (who you are serving)\n# Primary user and context. Use this as the authority for preferences and priorities.\n\n" + strings.TrimSpace(node.Content)
+	}
+	identityWrapped := identityBlock
+	if identityBlock != "" {
+		identityWrapped = utils.WrapAsUserData(identityBlock)
+	}
+
 	// 1. Active Contexts
 	nodes, metas, _ := memory.GetActiveContexts(ctx, 5)
 	activeContextItems := make([]ActiveContextItem, 0, len(nodes))
@@ -87,7 +97,7 @@ func BuildSystemPrompt(ctx context.Context) string {
 	}
 
 	// Log the actual injected context at Info so it appears in production (e.g. tail.sh / LLM_CONTEXT_SENT).
-	injectedSections := strings.TrimSpace(activeContextsStr + recentConversation + proactiveSignals + knowledgeGapBlock + openTodoBlock)
+	injectedSections := strings.TrimSpace(identityBlock + activeContextsStr + recentConversation + proactiveSignals + knowledgeGapBlock + openTodoBlock)
 	if injectedSections == "" {
 		injectedSections = "(no dynamic sections)"
 	}
@@ -95,8 +105,8 @@ func BuildSystemPrompt(ctx context.Context) string {
 		"event", "LLM_CONTEXT_SENT",
 		"context_sections", injectedSections)
 
-	// Template order: preamble (cacheable) then ======= then dynamic. Placeholders: delimOpen, delimClose, sourceCodeBlock, today, currentWeek, lastWeekStr, currentMonth, activeContextsStr, recentConversation, proactiveSignals, knowledgeGapBlock, openTodoBlock.
-	prompt := fmt.Sprintf(prompts.SystemPromptTemplate(), utils.UserDataDelimOpen, utils.UserDataDelimClose, sourceCodeBlock, today, currentWeek, lastWeekStr, currentMonth, activeContextsWrapped, recentConversationWrapped, proactiveSignalsWrapped, knowledgeGapBlockWrapped, openTodoBlockWrapped)
+	// Template order: preamble (cacheable) then ======= then dynamic. Placeholders: delimOpen, delimClose, sourceCodeBlock, today, currentWeek, lastWeekStr, currentMonth, identity, activeContextsStr, recentConversation, proactiveSignals, knowledgeGapBlock, openTodoBlock.
+	prompt := fmt.Sprintf(prompts.SystemPromptTemplate(), utils.UserDataDelimOpen, utils.UserDataDelimClose, sourceCodeBlock, today, currentWeek, lastWeekStr, currentMonth, identityWrapped, activeContextsWrapped, recentConversationWrapped, proactiveSignalsWrapped, knowledgeGapBlockWrapped, openTodoBlockWrapped)
 
 	// Map vs Manual: compressed manifest + 3 core tools (semantic_search, upsert_knowledge, discovery_search). Everything else via discovery_search(intent) → JIT schema injection.
 	if app := infra.GetApp(ctx); app != nil && app.Config() != nil && app.Config().UseCompactTools {

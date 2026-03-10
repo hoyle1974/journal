@@ -24,11 +24,17 @@
 
 - **Rule:** Never trust user input strings inside a prompt.
 - **Requirement:** Wrap all user-origin strings or tool results in `<user_data>` tags using the `WrapAsUserData()` helper.
-- **Rule:** Use `llmjson.RepairAndUnmarshal` for all LLM JSON parsing to handle truncation.
 
 ## LLM Structured Output (genai.Schema)
 
-- **Note:** `github.com/google/generative-ai-go/genai.Schema` does **not** support `maxLength` (or similar string-length constraints). Rely on prompt instructions and post-processing (e.g. truncate or drop oversize string fields) when you need bounded string lengths in structured responses.
+Gemini’s `responseSchema` works well only for **simple, flat** structures. For complex or conditional JSON, use a prompt-first approach and post-validate. See: [Why Google Gemini’s responseSchema isn’t ready for complex JSON](https://ubaidullahmomer.medium.com/why-google-geminis-response-schema-isn-t-ready-for-complex-json-46f35c3aaaea).
+
+- **Use schema when:** Flat objects, basic types (`string`, `number`, `boolean`, `object`, `array`), simple enums, and arrays of such objects. Keep nesting minimal.
+- **Skip schema for complex output:** Use `GenConfig.ResponseMIMEType = infra.MIMETypeJSON` (or `"application/json"`) and drive the structure via the prompt (exact structure, example output, conditional rules). Post-validate in app code.
+- **Nullable/optional:** Schema does not support `type: ["string", "null"]`. Use optional fields (omit from `required`) instead.
+- **Not supported by genai.Schema:** `maxLength`, `minLength`, `pattern`, `minimum`, `maxItems`; `$ref`/definitions; `if`/`then`, `oneOf`, `allOf`, `not`; discriminator/polymorphism. Rely on prompt instructions and post-processing (e.g. truncate or drop oversize fields) for constraints.
+- **Rule:** Use `llmjson.RepairAndUnmarshal` (or `ParseLLMResponse`) for all LLM JSON parsing to handle truncation and minor malformations.
+- **Checklist before using ResponseSchema:** Flat structure ✓; basic types and simple enums ✓; no `$ref`/conditionals/union types ✗.
 
 ## Observability
 
@@ -47,6 +53,11 @@
 - **Gold:** Permanent facts for Semantic Memory.
 - **Gravel:** Temporary logs to be ignored by the Dreamer.
 - **FOH:** Front of House (the `query_agent.go` loop).
+
+## App capabilities file
+
+- **File:** `internal/prompts/app_capabilities.txt` — single source of truth for what Jot can do. LLM-readable; injected into the Dreamer gap-detection prompt so the model understands current capabilities when detecting gaps/contradictions.
+- **Rule:** After any change that affects what Jot can do (new or removed tools, agents, API routes, cron jobs, memory/journal behavior, or data models), update `app_capabilities.txt` so it stays accurate and concise. Prefer short bullets and clear section headers.
 
 ## Logic Updates
 

@@ -74,6 +74,12 @@ var activityHistoryTxt string
 //go:embed dream_story.txt
 var dreamStoryTxt string
 
+//go:embed synthesis_pass.txt
+var synthesisPassTxt string
+
+//go:embed app_capabilities.txt
+var appCapabilitiesTxt string
+
 var (
 	specialistMap   map[string]string
 	specialistMapOnce sync.Once
@@ -90,8 +96,8 @@ func initSpecialistMap() {
 	}
 }
 
-// SystemPromptTemplate returns the main FOH system prompt template with 12 %s placeholders.
-// Order: delimOpen, delimClose, sourceCodeBlock (preamble, cacheable), then after "=======": today, currentWeek, lastWeekStr, currentMonth, activeContextsStr, recentConversation, proactiveSignals, knowledgeGapBlock, openTodoBlock (dynamic).
+// SystemPromptTemplate returns the main FOH system prompt template with 13 %s placeholders.
+// Order: delimOpen, delimClose, sourceCodeBlock (preamble, cacheable), then after "=======": today, currentWeek, lastWeekStr, currentMonth, identityBlock, activeContextsStr, recentConversation, proactiveSignals, knowledgeGapBlock, openTodoBlock (dynamic).
 func SystemPromptTemplate() string { return systemPromptTxt }
 
 // SourceCodeBlock returns the static source-code block appended to the system prompt.
@@ -159,12 +165,22 @@ func FormatKnowledgeGap(gapListContent string) string {
 // DreamStoryTemplate returns the dream narrative (morning readout) system prompt.
 func DreamStoryTemplate() string { return dreamStoryTxt }
 
-// GapDetectorTemplate returns the gap-detector prompt template with two %s placeholders: recent journal, relevant knowledge.
+// SynthesisPass returns the synthesis-pass system prompt (retrieve-and-summarize refinement).
+func SynthesisPass() string { return synthesisPassTxt }
+
+// GapDetectorTemplate returns the gap-detector prompt template with three %s placeholders: recent journal, relevant knowledge, tool manifest.
 func GapDetectorTemplate() string { return gapDetectorTxt }
 
-// FormatGapDetector formats the gap-detector template with journal and knowledge text.
-func FormatGapDetector(recentJournal, relevantKnowledge string) string {
-	return fmt.Sprintf(GapDetectorTemplate(), recentJournal, relevantKnowledge)
+// FormatGapDetector formats the gap-detector template with journal, knowledge, and tool manifest text.
+// The third argument is typically AppCapabilities() + "\n\n" + tools.GetCompactDirectory() so the LLM sees what Jot can do and the tool list.
+func FormatGapDetector(recentJournal, relevantKnowledge, toolManifest string) string {
+	return fmt.Sprintf(GapDetectorTemplate(), recentJournal, relevantKnowledge, toolManifest)
+}
+
+// AppCapabilities returns the static, LLM-readable description of Jot's parts (entry points, agents, memory, journal, tools).
+// Injected into gap-detection during dreaming so the model understands current capabilities. Keep app_capabilities.txt up to date when the codebase changes.
+func AppCapabilities() string {
+	return appCapabilitiesTxt
 }
 
 // RollUpTemplate returns the roll-up prompt template with two %s: period label, journal analyses text.

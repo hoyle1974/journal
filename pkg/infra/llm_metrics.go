@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/generative-ai-go/genai"
+	"google.golang.org/genai"
 )
 
 // Model cost per 1M tokens (input, output). Used for cost_est in logs. Approximate.
@@ -79,20 +79,20 @@ const contextAuditStaticThreshold = 2048
 const preambleSeparator = "======="
 
 // contentPartsToText concatenates text from genai.Parts (for system instruction, which is text-only).
-func contentPartsToText(parts []genai.Part) string {
+func contentPartsToText(parts []*genai.Part) string {
 	var b strings.Builder
 	for _, p := range parts {
-		if t, ok := p.(genai.Text); ok {
-			b.WriteString(string(t))
+		if p != nil && p.Text != "" {
+			b.WriteString(p.Text)
 		}
 	}
 	return b.String()
 }
 
 // CollectContextAudit runs CountTokens for system, tools, archive, and recent+current to populate telemetry.
-// Uses app to create a system-only model for separating system vs tool tokens. Returns nil on any CountTokens error.
-func CollectContextAudit(ctx context.Context, app *App, model *genai.GenerativeModel, modelName string, history []*genai.Content, currentParts []genai.Part) *ContextAuditTelemetry {
-	if app == nil || model == nil {
+// Returns nil on any CountTokens error.
+func CollectContextAudit(ctx context.Context, app *App, modelName string, config *genai.GenerateContentConfig, history []*genai.Content, currentParts []*genai.Part) *ContextAuditTelemetry {
+	if app == nil || config == nil {
 		return nil
 	}
 	client, err := app.Gemini(ctx)
@@ -101,22 +101,19 @@ func CollectContextAudit(ctx context.Context, app *App, model *genai.GenerativeM
 	}
 	audit := &ContextAuditTelemetry{}
 
-	// Minimal content for "preamble" counts (system, system+tools)
-	emptyParts := []genai.Part{genai.Text(" ")}
+	emptyContents := genai.Text(" ")
 
-	// System only: model with same system instruction, no tools
-	modelSys := client.GenerativeModel(modelName)
-	if model.SystemInstruction != nil {
-		modelSys.SystemInstruction = model.SystemInstruction
-	}
-	modelSys.Tools = nil
-	respSys, err := modelSys.CountTokens(ctx, emptyParts...)
+	// System only
+	countSys := &genai.CountTokensConfig{SystemInstruction: config.SystemInstruction}
+	respSys, err := client.Models.CountTokens(ctx, modelName, emptyContents, countSys)
 	if err != nil {
 		return nil
 	}
 	audit.SystemTokens = int(respSys.TotalTokens)
 
-	respFull, err := model.CountTokens(ctx, emptyParts...)
+	// System + tools
+	countFull := &genai.CountTokensConfig{SystemInstruction: config.SystemInstruction, Tools: config.Tools}
+	respFull, err := client.Models.CountTokens(ctx, modelName, emptyContents, countFull)
 	if err != nil {
 		return nil
 	}
@@ -125,33 +122,29 @@ func CollectContextAudit(ctx context.Context, app *App, model *genai.GenerativeM
 		audit.ToolTokens = systemPlusTools - audit.SystemTokens
 	}
 
-	// Preamble vs rest of system: split system instruction on "=======" and count tokens for each (content-only via plain model).
-	modelPlain := client.GenerativeModel(modelName)
-	modelPlain.SystemInstruction = nil
-	modelPlain.Tools = nil
-	if model.SystemInstruction != nil && len(model.SystemInstruction.Parts) > 0 {
-		fullSystemText := contentPartsToText(model.SystemInstruction.Parts)
+	// Preamble vs rest of system
+	if config.SystemInstruction != nil && len(config.SystemInstruction.Parts) > 0 {
+		fullSystemText := contentPartsToText(config.SystemInstruction.Parts)
 		if idx := strings.Index(fullSystemText, preambleSeparator); idx >= 0 {
 			preambleText := strings.TrimSpace(fullSystemText[:idx])
 			restText := strings.TrimSpace(fullSystemText[idx+len(preambleSeparator):])
 			if preambleText != "" {
-				if resp, err := modelPlain.CountTokens(ctx, genai.Text(preambleText)); err == nil {
+				if resp, err := client.Models.CountTokens(ctx, modelName, genai.Text(preambleText), nil); err == nil {
 					audit.PreambleTokens = int(resp.TotalTokens)
 				}
 			}
 			if restText != "" {
-				if resp, err := modelPlain.CountTokens(ctx, genai.Text(restText)); err == nil {
+				if resp, err := client.Models.CountTokens(ctx, modelName, genai.Text(restText), nil); err == nil {
 					audit.RestOfSystemTokens = int(resp.TotalTokens)
 				}
 			}
 		} else {
-			if resp, err := modelPlain.CountTokens(ctx, genai.Text(fullSystemText)); err == nil {
+			if resp, err := client.Models.CountTokens(ctx, modelName, genai.Text(fullSystemText), nil); err == nil {
 				audit.PreambleTokens = int(resp.TotalTokens)
 			}
 		}
 	}
 
-	// Archive = history excluding last 2 turns (2 turns = 4 Content items: user, model, user, model)
 	const lastNContents = 4
 	archiveEnd := len(history) - lastNContents
 	if archiveEnd < 0 {
@@ -160,32 +153,20 @@ func CollectContextAudit(ctx context.Context, app *App, model *genai.GenerativeM
 	archiveContents := history[:archiveEnd]
 	recentContents := history[archiveEnd:]
 
-	// Archive tokens: flatten archive contents to one Part list, count, subtract preamble
 	if len(archiveContents) > 0 {
-		var archiveParts []genai.Part
-		for _, c := range archiveContents {
-			if c != nil {
-				archiveParts = append(archiveParts, c.Parts...)
-			}
-		}
-		if len(archiveParts) > 0 {
-			respArchive, err := model.CountTokens(ctx, archiveParts...)
-			if err == nil {
-				audit.ArchiveTokens = max(0, int(respArchive.TotalTokens)-systemPlusTools)
-			}
+		respArchive, err := client.Models.CountTokens(ctx, modelName, archiveContents, countFull)
+		if err == nil {
+			audit.ArchiveTokens = max(0, int(respArchive.TotalTokens)-systemPlusTools)
 		}
 	}
 
-	// Recent + current: flatten last 2 turns and current parts, count, subtract preamble
-	var recentParts []genai.Part
-	for _, c := range recentContents {
-		if c != nil {
-			recentParts = append(recentParts, c.Parts...)
-		}
+	var recentContentsWithCurrent []*genai.Content
+	recentContentsWithCurrent = append(recentContentsWithCurrent, recentContents...)
+	if len(currentParts) > 0 {
+		recentContentsWithCurrent = append(recentContentsWithCurrent, &genai.Content{Role: genai.RoleUser, Parts: currentParts})
 	}
-	recentParts = append(recentParts, currentParts...)
-	if len(recentParts) > 0 {
-		respRecent, err := model.CountTokens(ctx, recentParts...)
+	if len(recentContentsWithCurrent) > 0 {
+		respRecent, err := client.Models.CountTokens(ctx, modelName, recentContentsWithCurrent, countFull)
 		if err == nil {
 			audit.RecentTokens = max(0, int(respRecent.TotalTokens)-systemPlusTools)
 		}
@@ -198,12 +179,16 @@ func CollectContextAudit(ctx context.Context, app *App, model *genai.GenerativeM
 }
 
 // LogContextAudit writes a single structured log line for context-caching analysis: pre-call breakdown + actual usage.
-func LogContextAudit(ctx context.Context, modelName string, audit *ContextAuditTelemetry, resp *genai.GenerateContentResponse) {
+// llmCorrelationID links this line to the same call's LLM_RAW_REQUEST, LLM_RAW_RESPONSE, and LLM_METRICS.
+func LogContextAudit(ctx context.Context, llmCorrelationID string, modelName string, audit *ContextAuditTelemetry, resp *genai.GenerateContentResponse) {
 	log := LoggerFrom(ctx)
 	attrs := []any{
 		slog.String("event", "LLM_CONTEXT_AUDIT"),
 		slog.String("message", "LLM Context Audit"),
 		slog.String("model", modelName),
+	}
+	if llmCorrelationID != "" {
+		attrs = append(attrs, slog.String("llm_correlation_id", llmCorrelationID))
 	}
 	if audit != nil {
 		attrs = append(attrs,
@@ -232,6 +217,9 @@ func LogContextAudit(ctx context.Context, modelName string, audit *ContextAuditT
 	}
 	msgParts := []string{"LLM_CONTEXT_AUDIT", "LLM Context Audit", "model=" + modelName,
 		fmt.Sprintf("actual_billed_prompt=%d", actualPrompt)}
+	if llmCorrelationID != "" {
+		msgParts = append(msgParts, "llm_correlation_id="+llmCorrelationID)
+	}
 	if audit != nil {
 		msgParts = append(msgParts,
 			fmt.Sprintf("system_tokens=%d", audit.SystemTokens),
@@ -252,7 +240,8 @@ func LogContextAudit(ctx context.Context, modelName string, audit *ContextAuditT
 
 // LogLLMMetrics logs a structured LLM_METRICS line after a GenerateContent/SendMessage call.
 // Message includes key=value so it's visible in Cloud Logging when only the message column is shown.
-func LogLLMMetrics(ctx context.Context, model string, resp *genai.GenerateContentResponse, inputSizeBytes int) {
+// llmCorrelationID links this line to the same call's LLM_RAW_REQUEST and LLM_RAW_RESPONSE.
+func LogLLMMetrics(ctx context.Context, llmCorrelationID string, model string, resp *genai.GenerateContentResponse, inputSizeBytes int) {
 	if resp == nil {
 		return
 	}
@@ -279,8 +268,14 @@ func LogLLMMetrics(ctx context.Context, model string, resp *genai.GenerateConten
 		slog.Int("completion_tokens", completionTokens),
 		slog.Int("total_tokens", totalTokens),
 	}
+	if llmCorrelationID != "" {
+		attrs = append(attrs, slog.String("llm_correlation_id", llmCorrelationID))
+	}
 	var msgParts []string
 	msgParts = append(msgParts, "LLM_METRICS")
+	if llmCorrelationID != "" {
+		msgParts = append(msgParts, "llm_correlation_id="+llmCorrelationID)
+	}
 	if traceID != "" {
 		msgParts = append(msgParts, "trace_id="+traceID)
 		attrs = append(attrs, slog.String("trace_id", traceID))

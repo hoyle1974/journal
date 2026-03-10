@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/generative-ai-go/genai"
+	"google.golang.org/genai"
 	"github.com/jackstrohm/jot/pkg/infra"
 	"github.com/jackstrohm/jot/tools"
 )

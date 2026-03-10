@@ -3,7 +3,7 @@ package infra
 import (
 	"testing"
 
-	"github.com/google/generative-ai-go/genai"
+	"google.golang.org/genai"
 )
 
 func TestExtractText(t *testing.T) {
@@ -18,7 +18,7 @@ func TestExtractText(t *testing.T) {
 			"valid text response",
 			&genai.GenerateContentResponse{
 				Candidates: []*genai.Candidate{{
-					Content: &genai.Content{Parts: []genai.Part{genai.Text("Hello, world!")}},
+					Content: &genai.Content{Parts: []*genai.Part{{Text: "Hello, world!"}}},
 				}},
 			},
 			"Hello, world!",

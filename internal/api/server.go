@@ -5,7 +5,7 @@ import (
 	"net/http"
 
 	"cloud.google.com/go/firestore"
-	"github.com/google/generative-ai-go/genai"
+	"google.golang.org/genai"
 	"github.com/jackstrohm/jot/internal/config"
 	"log/slog"
 )

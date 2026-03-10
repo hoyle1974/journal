@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/generative-ai-go/genai"
+	"google.golang.org/genai"
 	"github.com/jackstrohm/jot/internal/prompts"
 	"github.com/jackstrohm/jot/llmjson"
 	"github.com/jackstrohm/jot/pkg/infra"
@@ -71,9 +71,10 @@ func RunQueryWithDebug(ctx context.Context, app *infra.App, question, source str
 	ctx, span := infra.StartSpan(ctx, "query.run")
 	defer span.End()
 
+	queryRunID := infra.GenShortRunID()
 	startTime := time.Now()
 	infra.QueriesTotal.Inc()
-	infra.LoggerFrom(ctx).Debug("FOH: query started", "question", question, "source", source)
+	infra.LoggerFrom(ctx).Debug("FOH: query started", "query_run_id", queryRunID, "phase", "start", "question", question, "source", source)
 
 	span.SetAttributes(map[string]string{
 		"question_len": fmt.Sprintf("%d", len(question)),
@@ -103,12 +104,12 @@ func RunQueryWithDebug(ctx context.Context, app *infra.App, question, source str
 		}
 	}
 	ctx = withCurrentEntryUUID(ctx, entryUUID)
-	infra.LoggerFrom(ctx).Debug("FOH: user input logged as entry", "event", "query_start", "question", question, "entry_uuid", entryUUID, "source", source)
+	infra.LoggerFrom(ctx).Debug("FOH: user input logged as entry", "query_run_id", queryRunID, "phase", "start", "event", "query_start", "question", question, "entry_uuid", entryUUID, "source", source)
 
 	logDebug("[start] Question: %s", question)
 
 	systemPrompt := BuildSystemPrompt(ctx)
-	infra.LoggerFrom(ctx).Debug("FOH: system prompt built", "prompt_len", len(systemPrompt), "reason", "inject date, contexts, recent history")
+	infra.LoggerFrom(ctx).Debug("FOH: system prompt built", "query_run_id", queryRunID, "phase", "start", "prompt_len", len(systemPrompt), "reason", "inject date, contexts, recent history")
 	logDebug("[prompt] %s", systemPrompt)
 
 	useCompactTools := app.Config() != nil && app.Config().UseCompactTools
@@ -130,7 +131,7 @@ func RunQueryWithDebug(ctx context.Context, app *infra.App, question, source str
 		}
 	}
 	logDebug("[init] Chat session created with %d tools (compact=%v)", len(toolDefs), useCompactTools)
-	infra.LoggerFrom(ctx).Debug("FOH: sending question to LLM", "tool_count", len(toolDefs), "compact_tools", useCompactTools, "reason", "first turn")
+	infra.LoggerFrom(ctx).Debug("FOH: sending question to LLM", "query_run_id", queryRunID, "phase", "first_turn", "tool_count", len(toolDefs), "compact_tools", useCompactTools, "reason", "first turn")
 
 	iteration := 0
 	emptyContentRetries := 0
@@ -139,8 +140,10 @@ func RunQueryWithDebug(ctx context.Context, app *infra.App, question, source str
 	toolCallCounts := make(map[string]int)
 	var repeatedToolName string
 	var knowledgeGapDetected bool
+	var retrievedContent strings.Builder
+	searchToolCallCount := 0
 
-	resp, err := session.SendMessage(ctx, genai.Text(question))
+	resp, err := session.SendMessage(ctx, &genai.Part{Text: question})
 	if err != nil {
 		infra.ErrorsTotal.Inc()
 		span.RecordError(err)
@@ -154,7 +157,7 @@ func RunQueryWithDebug(ctx context.Context, app *infra.App, question, source str
 	iteration++
 	infra.GeminiCallsTotal.Inc()
 	logDebug("[iter %d] Sent question to LLM", iteration)
-	infra.LoggerFrom(ctx).Debug("FOH: iteration 1 response received", "reason", "initial LLM turn")
+	infra.LoggerFrom(ctx).Debug("FOH: iteration 1 response received", "query_run_id", queryRunID, "phase", "first_turn", "llm_correlation_id", session.LastLLMCorrelationID(), "reason", "initial LLM turn")
 
 	for iteration < MaxIterations {
 		var hasCalls bool
@@ -172,7 +175,7 @@ func RunQueryWithDebug(ctx context.Context, app *infra.App, question, source str
 			if hasCalls && !infra.HasFunctionCalls(resp) {
 				// Discovered tool invoked via JSON block
 				logDebug("[iter %d] LLM response: discovered tool_call=%s", iteration, discoveredToolName)
-				infra.LoggerFrom(ctx).Debug("FOH: discovered tool call (JSON)", "iter", iteration, "tool", discoveredToolName)
+				infra.LoggerFrom(ctx).Debug("FOH: discovered tool call (JSON)", "query_run_id", queryRunID, "phase", "tool_execution", "iter", iteration, "tool", discoveredToolName)
 				infra.ToolCallsTotal.Inc()
 				toolResult := tools.Execute(ctx, discoveredToolName, discoveredToolArgs)
 				toolCalls = append(toolCalls, map[string]interface{}{
@@ -188,6 +191,9 @@ func RunQueryWithDebug(ctx context.Context, app *infra.App, question, source str
 					"consult_anthropologist": true, "consult_architect": true, "consult_executive": true, "consult_philosopher": true,
 				}
 				if searchTools[discoveredToolName] {
+					searchToolCallCount++
+					retrievedContent.WriteString(toolResult.Result)
+					retrievedContent.WriteString("\n\n")
 					res := strings.ToLower(strings.TrimSpace(toolResult.Result))
 					if strings.Contains(res, "no results found") || strings.Contains(res, "no information found") ||
 						strings.Contains(res, "no semantic matches found") || strings.Contains(res, "no entries found") ||
@@ -197,7 +203,7 @@ func RunQueryWithDebug(ctx context.Context, app *infra.App, question, source str
 					}
 				}
 				resultMsg := "Tool result (" + discoveredToolName + "): " + toolResult.Result
-				resp, err = session.SendMessage(ctx, genai.Text(utils.SanitizePrompt(resultMsg)))
+				resp, err = session.SendMessage(ctx, &genai.Part{Text: utils.SanitizePrompt(resultMsg)})
 				if err != nil {
 					infra.ErrorsTotal.Inc()
 					span.RecordError(err)
@@ -224,14 +230,14 @@ func RunQueryWithDebug(ctx context.Context, app *infra.App, question, source str
 		}
 
 		logDebug("[iter %d] LLM response: has_function_calls=%v", iteration, hasCalls)
-		infra.LoggerFrom(ctx).Debug("FOH: iteration decision", "iter", iteration, "has_function_calls", hasCalls, "reason", "decompose: LLM either answers or calls tools")
+		infra.LoggerFrom(ctx).Debug("FOH: iteration decision", "query_run_id", queryRunID, "phase", "decision", "iter", iteration, "has_function_calls", hasCalls, "llm_correlation_id", session.LastLLMCorrelationID(), "reason", "decompose: LLM either answers or calls tools")
 
 		if !hasCalls {
 			if answerText != "" {
 				answer := strings.TrimSpace(answerText)
 
 				if pass, reason, err := runReflectionCheck(ctx, app, answer, question); err == nil && !pass {
-					infra.LoggerFrom(ctx).Debug("FOH: reflection check failed", "reason", reason, "action", "revising answer against semantic memory")
+					infra.LoggerFrom(ctx).Debug("FOH: reflection check failed", "query_run_id", queryRunID, "phase", "reflection", "reason", reason, "action", "revising answer against semantic memory")
 					logDebug("[reflect] failed: %s", reason)
 					revised := runReflectionRevision(ctx, session, question, answer, reason)
 					if revised != "" {
@@ -247,12 +253,22 @@ func RunQueryWithDebug(ctx context.Context, app *infra.App, question, source str
 					}
 				}
 				infra.LogAssistantEfficiency(ctx, len(systemPrompt)+len(question), len(answer), iteration)
-				infra.LoggerFrom(ctx).Debug("FOH: final answer", "event", "query_complete", "question", question, "answer", answer, "iterations", iteration, "tool_call_count", len(toolCalls), "tool_names", strings.Join(toolNamesFromCalls, ","), "duration_ms", time.Since(startTime).Milliseconds())
+				infra.LoggerFrom(ctx).Debug("FOH: final answer", "query_run_id", queryRunID, "phase", "answer", "event", "query_complete", "question", question, "answer", answer, "iterations", iteration, "tool_call_count", len(toolCalls), "tool_names", strings.Join(toolNamesFromCalls, ","), "duration_ms", time.Since(startTime).Milliseconds())
 				infra.LoggerFrom(ctx).Info("query completed",
+					"query_run_id", queryRunID,
+					"phase", "answer",
 					"iterations", iteration,
 					"tool_calls", len(toolCalls),
 					"duration_ms", time.Since(startTime).Milliseconds(),
 				)
+
+				// Synthesis pass: when multiple search results were used, refine the answer to avoid dumping/repetition.
+				if searchToolCallCount > 1 || retrievedContent.Len() > 2000 {
+					if refined, err := runSynthesisPass(ctx, app, question, answer, retrievedContent.String()); err == nil && strings.TrimSpace(refined) != "" {
+						logDebug("[synthesis] applied synthesis pass (%d -> %d chars)", len(answer), len(refined))
+						answer = refined
+					}
+				}
 
 				if !strings.HasPrefix(answer, "Error:") {
 					if err := EnqueueSaveQuery(ctx, question, answer, source, knowledgeGapDetected); err != nil {
@@ -285,7 +301,7 @@ func RunQueryWithDebug(ctx context.Context, app *infra.App, question, source str
 				delay := time.Duration(emptyContentRetries) * time.Second
 				logDebug("[retry] No text or function calls (attempt %d/%d), waiting %v then retrying", emptyContentRetries, maxEmptyRetries, delay)
 				time.Sleep(delay)
-				resp2, err2 := session.SendMessage(ctx, genai.Text(question))
+				resp2, err2 := session.SendMessage(ctx, &genai.Part{Text: question})
 				if err2 != nil {
 					infra.ErrorsTotal.Inc()
 					return &QueryResult{
@@ -336,15 +352,15 @@ func RunQueryWithDebug(ctx context.Context, app *infra.App, question, source str
 			argsJSON, _ := json.Marshal(fc.Args)
 			sigParts = append(sigParts, fmt.Sprintf("%s:%s", fc.Name, string(argsJSON)))
 			logDebug("[iter %d] tool_call: %s(%s)", iteration, fc.Name, string(argsJSON))
-			infra.LoggerFrom(ctx).Debug("FOH: tool call", "event", "tool_call", "iter", iteration, "tool", fc.Name, "args", string(argsJSON))
+			infra.LoggerFrom(ctx).Debug("FOH: tool call", "query_run_id", queryRunID, "phase", "tool_execution", "event", "tool_call", "iter", iteration, "tool", fc.Name, "args", string(argsJSON))
 		}
-		infra.LoggerFrom(ctx).Debug("FOH: executing tools", "iter", iteration, "tools", toolNames, "reason", "execute: run tools in parallel then send results back to LLM")
+		infra.LoggerFrom(ctx).Debug("FOH: executing tools", "query_run_id", queryRunID, "phase", "tool_execution", "iter", iteration, "tools", toolNames, "reason", "execute: run tools in parallel then send results back to LLM")
 		currentSignature := strings.Join(sigParts, "|")
 
 		if currentSignature == lastToolCallSignature && lastToolCallSignature != "" {
-			infra.LoggerFrom(ctx).Debug("FOH: breaking loop", "reason", "same tool call signature repeated; forcing conclusion")
+			infra.LoggerFrom(ctx).Debug("FOH: breaking loop", "query_run_id", queryRunID, "phase", "tool_execution", "reason", "same tool call signature repeated; forcing conclusion")
 			logDebug("[warning] Detected tool call loop, forcing conclusion")
-			infra.LoggerFrom(ctx).Warn("detected tool call loop", "signature", utils.TruncateString(currentSignature, 100))
+			infra.LoggerFrom(ctx).Warn("detected tool call loop", "query_run_id", queryRunID, "phase", "tool_execution", "signature", utils.TruncateString(currentSignature, 100))
 			break
 		}
 		lastToolCallSignature = currentSignature
@@ -356,7 +372,7 @@ func RunQueryWithDebug(ctx context.Context, app *infra.App, question, source str
 			if toolCallCounts[key] >= ToolRepeatBackOffAt {
 				repeatedToolName = fc.Name
 				logDebug("[backoff] Tool %q called %d times with similar args", fc.Name, toolCallCounts[key])
-				infra.LoggerFrom(ctx).Warn("tool repeat back-off", "tool", fc.Name, "count", toolCallCounts[key])
+				infra.LoggerFrom(ctx).Warn("tool repeat back-off", "query_run_id", queryRunID, "phase", "tool_execution", "tool", fc.Name, "count", toolCallCounts[key])
 				break
 			}
 		}
@@ -389,7 +405,7 @@ func RunQueryWithDebug(ctx context.Context, app *infra.App, question, source str
 				results[idx] = toolExecResult{index: idx, fcName: fcName, args: args, result: toolResult}
 				mu.Unlock()
 
-				infra.LoggerFrom(ctx).Debug("tool executed", "event", "tool_result", "iter", iteration, "tool", fcName, "success", toolResult.Success, "result", toolResult.Result)
+				infra.LoggerFrom(ctx).Debug("tool executed", "query_run_id", queryRunID, "phase", "tool_execution", "event", "tool_result", "iter", iteration, "tool", fcName, "success", toolResult.Success, "result", toolResult.Result)
 				resultPreview := toolResult.Result
 				if len(resultPreview) > 500 {
 					resultPreview = resultPreview[:500] + "..."
@@ -411,7 +427,7 @@ func RunQueryWithDebug(ctx context.Context, app *infra.App, question, source str
 		}
 		wg.Wait()
 
-		var functionResponses []genai.Part
+		var functionResponses []*genai.Part
 		searchToolCalled := false
 		searchTools := map[string]bool{
 			"semantic_search": true, "get_entity_network": true, "search_entries": true,
@@ -427,13 +443,18 @@ func RunQueryWithDebug(ctx context.Context, app *infra.App, question, source str
 				"result_preview": utils.TruncateString(r.result.Result, 200),
 			})
 
-			functionResponses = append(functionResponses, genai.FunctionResponse{
-				Name:     r.fcName,
-				Response: map[string]any{"result": utils.SanitizePrompt(r.result.Result)},
+			functionResponses = append(functionResponses, &genai.Part{
+				FunctionResponse: &genai.FunctionResponse{
+					Name:     r.fcName,
+					Response: map[string]any{"result": utils.SanitizePrompt(r.result.Result)},
+				},
 			})
 
 			if searchTools[r.fcName] {
 				searchToolCalled = true
+				searchToolCallCount++
+				retrievedContent.WriteString(r.result.Result)
+				retrievedContent.WriteString("\n\n")
 			}
 		}
 
@@ -453,12 +474,12 @@ func RunQueryWithDebug(ctx context.Context, app *infra.App, question, source str
 			}
 		}
 
-		messageParts := make([]genai.Part, 0, len(functionResponses)+1)
+		messageParts := make([]*genai.Part, 0, len(functionResponses)+1)
 		for _, p := range functionResponses {
 			messageParts = append(messageParts, p)
 		}
 		if repeatedToolName != "" {
-			messageParts = append(messageParts, genai.Text(buildToolRepeatBackOffPrompt(repeatedToolName)))
+			messageParts = append(messageParts, &genai.Part{Text: buildToolRepeatBackOffPrompt(repeatedToolName)})
 			for k := range toolCallCounts {
 				if strings.HasPrefix(k, repeatedToolName+":") {
 					delete(toolCallCounts, k)
@@ -481,14 +502,14 @@ func RunQueryWithDebug(ctx context.Context, app *infra.App, question, source str
 		iteration++
 		infra.GeminiCallsTotal.Inc()
 		session.TrimHistory(MaxMessagePairs)
-		infra.LoggerFrom(ctx).Debug("FOH: tool results sent to LLM", "iter", iteration, "reason", "reflect: next turn may answer or call more tools")
+		infra.LoggerFrom(ctx).Debug("FOH: tool results sent to LLM", "query_run_id", queryRunID, "phase", "tool_execution", "iter", iteration, "next_llm_correlation_id", session.LastLLMCorrelationID(), "reason", "reflect: next turn may answer or call more tools")
 	}
 
 	logDebug("[warning] Reached max iterations (%d), forcing conclusion", MaxIterations)
-	infra.LoggerFrom(ctx).Debug("FOH: forcing conclusion", "iterations", MaxIterations, "reason", "max iterations reached; asking LLM for best answer so far")
-	infra.LoggerFrom(ctx).Warn("query reached max iterations", "max", MaxIterations)
+	infra.LoggerFrom(ctx).Debug("FOH: forcing conclusion", "query_run_id", queryRunID, "phase", "forced_conclusion", "iterations", MaxIterations, "reason", "max iterations reached; asking LLM for best answer so far")
+	infra.LoggerFrom(ctx).Warn("query reached max iterations", "query_run_id", queryRunID, "phase", "forced_conclusion", "max", MaxIterations)
 
-	resp, err = session.SendMessage(ctx, genai.Text("Please provide your best answer based on the information gathered so far."))
+	resp, err = session.SendMessage(ctx, &genai.Part{Text: "Please provide your best answer based on the information gathered so far."})
 	if err != nil {
 		infra.ErrorsTotal.Inc()
 		span.RecordError(err)
@@ -504,6 +525,11 @@ func RunQueryWithDebug(ctx context.Context, app *infra.App, question, source str
 	text := infra.ExtractTextFromResponse(resp)
 	if text != "" {
 		answer := strings.TrimSpace(text)
+		if searchToolCallCount > 1 || retrievedContent.Len() > 2000 {
+			if refined, err := runSynthesisPass(ctx, app, question, answer, retrievedContent.String()); err == nil && strings.TrimSpace(refined) != "" {
+				answer = refined
+			}
+		}
 		if !strings.HasPrefix(answer, "Error:") {
 			_ = EnqueueSaveQuery(ctx, question, answer, source, knowledgeGapDetected)
 		}
@@ -514,7 +540,7 @@ func RunQueryWithDebug(ctx context.Context, app *infra.App, question, source str
 			}
 		}
 		infra.LogAssistantEfficiency(ctx, len(systemPrompt)+len(question), len(answer), iteration)
-		infra.LoggerFrom(ctx).Debug("FOH: forced conclusion", "event", "query_complete", "question", question, "answer", answer, "iterations", iteration, "tool_call_count", len(toolCalls), "tool_names", strings.Join(forcedToolNames, ","), "duration_ms", time.Since(startTime).Milliseconds(), "forced_conclusion", true)
+		infra.LoggerFrom(ctx).Debug("FOH: forced conclusion", "query_run_id", queryRunID, "phase", "forced_conclusion", "event", "query_complete", "question", question, "answer", answer, "iterations", iteration, "tool_call_count", len(toolCalls), "tool_names", strings.Join(forcedToolNames, ","), "duration_ms", time.Since(startTime).Milliseconds(), "forced_conclusion", true)
 		span.SetAttributes(map[string]string{
 			"iterations":        fmt.Sprintf("%d", iteration),
 			"forced_conclusion": "true",
@@ -577,9 +603,9 @@ func runReflectionCheck(ctx context.Context, app *infra.App, answer, question st
 	}
 	prompt := prompts.FormatReflectionCheck(utils.SanitizePrompt(answer), utils.SanitizePrompt(semanticMemory))
 	req := &infra.LLMRequest{
-		Parts:           []genai.Part{genai.Text(prompt)},
+		Parts:           []*genai.Part{{Text: prompt}},
 		Model:           app.Config().GeminiModel,
-		GenConfig:       &infra.GenConfig{MaxOutputTokens: 256, ResponseMIMEType: "application/json"},
+		GenConfig:       &infra.GenConfig{MaxOutputTokens: 256, ResponseMIMEType: infra.MIMETypeJSON},
 		ResponseSchema:  schema,
 	}
 	infra.GeminiCallsTotal.Inc()
@@ -616,6 +642,31 @@ func runReflectionCheck(ctx context.Context, app *infra.App, answer, question st
 	return true, "", nil
 }
 
+const synthesisPassRetrievedMaxBytes = 6000
+
+// runSynthesisPass refines a candidate answer when multiple search results were merged, to reduce repetition and "dumping."
+func runSynthesisPass(ctx context.Context, app *infra.App, question, candidateAnswer, retrievedContent string) (string, error) {
+	if app == nil || app.Config() == nil {
+		return candidateAnswer, fmt.Errorf("no app or config")
+	}
+	truncated := retrievedContent
+	if len(truncated) > synthesisPassRetrievedMaxBytes {
+		truncated = truncated[:synthesisPassRetrievedMaxBytes] + "\n... (truncated)"
+	}
+	userPrompt := fmt.Sprintf("User question:\n%s\n\nDraft answer (to refine):\n%s\n\nRetrieved content (merge and deduplicate):\n%s",
+		utils.WrapAsUserData(utils.SanitizePrompt(question)),
+		utils.WrapAsUserData(utils.SanitizePrompt(candidateAnswer)),
+		utils.WrapAsUserData(utils.SanitizePrompt(truncated)))
+	refined, err := infra.GenerateContentSimple(ctx, prompts.SynthesisPass()+prompts.DataSafety(), userPrompt, app.Config(), &infra.GenConfig{
+		MaxOutputTokens: 1024,
+		ModelOverride:   app.Config().GeminiModel,
+	})
+	if err != nil {
+		return candidateAnswer, err
+	}
+	return strings.TrimSpace(refined), nil
+}
+
 func runReflectionRevision(ctx context.Context, session *infra.ChatSession, question, previousAnswer, reason string) string {
 	searchResult := tools.Execute(ctx, "semantic_search", map[string]interface{}{
 		"query": question,
@@ -627,8 +678,8 @@ func runReflectionRevision(ctx context.Context, session *infra.ChatSession, ques
 	}
 	revisePrompt := fmt.Sprintf("Additional semantic memory:\n%s\n\nYour previous answer was flagged: %s\nPlease provide a revised final answer that avoids contradicting permanent facts and removes Gravel. Be concise.", utils.SanitizePrompt(extraMemory), utils.SanitizePrompt(reason))
 	resp, err := session.SendMessage(ctx,
-		genai.FunctionResponse{Name: "semantic_search", Response: map[string]any{"result": utils.SanitizePrompt(extraMemory)}},
-		genai.Text(revisePrompt),
+		&genai.Part{FunctionResponse: &genai.FunctionResponse{Name: "semantic_search", Response: map[string]any{"result": utils.SanitizePrompt(extraMemory)}}},
+		&genai.Part{Text: revisePrompt},
 	)
 	if err != nil {
 		return ""

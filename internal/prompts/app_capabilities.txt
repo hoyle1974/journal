@@ -1,0 +1,40 @@
+# Jot — Application Capabilities (for gap/contradiction detection)
+
+Jot is a personal journaling and memory system. It ingests journal entries, extracts structured knowledge, and answers questions via an agentic loop.
+
+## Entry points
+- **CLI**: log, query, sync (Google Doc), dream, janitor, plan, recall (dream narrative), edit, entries.
+- **API**: POST /query, /log, /dream, /rollup, /janitor, /plan; GET /dream/latest. Cloud Tasks for async work (e.g. process-sms-query).
+- **Cron**: Dreamer (daily) consolidates last 24h journal into semantic memory; Janitor (weekly) evicts low-significance, rarely recalled nodes.
+
+## Agents
+- **FOH (Front of House)**: Query loop. Uses system prompt, identity, active contexts, knowledge-gap block, open todos; can call tools (journal, knowledge, context, task, web, utility). Produces an answer; may save queries as knowledge gaps (is_gap).
+- **Dreamer**: Nightly pipeline. Loads last 24h journal → colloquium (specialists discuss) → specialist extraction (relationship, work, task, thought, selfmodel) → merge facts → write to semantic memory → gap detection → context synthesis → profile synthesis → evolution synthesis → dream narrative + task phase. Writes latest_dream and system_evolution.
+- **Specialists**: Domain extractors (relationship, work, task, thought, selfmodel) plus evolution (Cognitive Engineer). Consultable via tools (consult_anthropologist, consult_architect, etc.).
+- **Planner**: Generates step-by-step plans from a goal; stores phases in knowledge graph.
+
+## Memory
+- **Semantic memory**: Knowledge nodes (Firestore). Types: person, project, goal, preference, event, milestone, place, asset, tool, generic, weekly_summary, monthly_summary, identity_anchor, user_identity. Recalled by embedding similarity; janitor evicts by last_recalled_at and significance_weight.
+- **Context nodes**: Named, typed (permanent/auto). Used for active projects, plans, living context. Touch updates relevance; some created by Dreamer context extractor.
+- **Reserved names**: user_profile (identity), system_evolution (audit/friction), latest_dream (narrative). Janitor must not delete identity_anchor / user_identity.
+
+## Journal
+- **Entries**: Timestamped, optional source (cli, sms, web, etc.). Stored in Firestore; can be analyzed (categories, entities). Google Doc sync processes new entries and in-doc questions.
+- **Queries**: Saved with question, answer, source, is_gap. Gap queries surface in knowledge-gap block for FOH.
+- **Pending questions**: Gaps/contradictions from Dreamer gap detection; user can clarify later.
+
+## Tools (by category)
+- **knowledge**: semantic_search, upsert_knowledge, list_knowledge, get_entity_network, generate_plan, check_proactive_signals, get_latest_dream.
+- **journal**: get_recent_entries, get_oldest_entries, get_entries_by_date_range, search_entries, count_entries, list_sources, get_entries_by_source, query_activity_history, query_entities, summarize_daily_activities.
+- **context**: list_contexts, create_context, touch_context, delete_context, get_system_health_audit, get_project_timeline, update_project_status.
+- **task**: create_task, get_task, update_task, update_task_status, search_tasks.
+- **query**: get_recent_queries, search_queries, get_queries_by_date.
+- **web**: fetch_url, define_word, wikipedia, web_search, bookmark, countdown, github_read.
+- **utility**: calculate, date_calc, text_stats, convert_units, random, timezone_convert, encode_decode.
+- **specialist**: consult_anthropologist, consult_architect, consult_executive, consult_philosopher (and any other consult_*).
+- **bootstrap**: discovery_search (intent → tool schemas).
+
+## Data terms
+- **Gold**: Permanent, high-value facts for semantic memory.
+- **Gravel**: Temporary or low-significance (e.g. one-off errands); Dreamer ignores for extraction.
+- **Knowledge gap**: Question the system could not answer from current knowledge; stored and shown to FOH for context.

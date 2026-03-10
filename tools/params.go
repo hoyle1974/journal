@@ -1,6 +1,6 @@
 package tools
 
-import "github.com/google/generative-ai-go/genai"
+import "google.golang.org/genai"
 
 // CountParam returns a standard "count" parameter (default 10, max 50).
 func CountParam() Param {

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/google/generative-ai-go/genai"
+	"google.golang.org/genai"
 	"github.com/jackstrohm/jot/internal/prompts"
 	"github.com/jackstrohm/jot/llmjson"
 	"github.com/jackstrohm/jot/pkg/infra"
@@ -126,9 +126,9 @@ func AnalyzeJournalEntry(ctx context.Context, entryContent, entryUUID, entryTime
 	}
 	prompt := prompts.FormatJournalAnalyze(entryUUID, entryDate, utils.WrapAsUserData(utils.SanitizePrompt(entryContent)))
 	req := &infra.LLMRequest{
-		Parts:          []genai.Part{genai.Text(prompt)},
+		Parts:          []*genai.Part{{Text: prompt}},
 		Model:          app.Config().GeminiModel,
-		GenConfig:      &infra.GenConfig{MaxOutputTokens: 1024, ResponseMIMEType: "application/json"},
+		GenConfig:      &infra.GenConfig{MaxOutputTokens: 1024, ResponseMIMEType: infra.MIMETypeJSON},
 		ResponseSchema: schema,
 	}
 	resp, err := app.Dispatch(ctx, req)

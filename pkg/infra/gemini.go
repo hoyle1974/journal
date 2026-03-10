@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -12,12 +11,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/generative-ai-go/genai"
 	"github.com/jackstrohm/jot/internal/config"
 	"github.com/jackstrohm/jot/pkg/utils"
 	"golang.org/x/oauth2/google"
-	"google.golang.org/api/iterator"
-	"google.golang.org/api/option"
+	"google.golang.org/genai"
 )
 
 // DefaultGeminiFactory creates a Gemini client using the built-in implementation.
@@ -30,21 +27,19 @@ func DefaultGeminiFactory(ctx context.Context, cfg *config.Config) (*genai.Clien
 	return newGeminiClientForApp(ctx, cfg, log)
 }
 
-func supportsGenerateContent(m *genai.ModelInfo) bool {
-	for _, method := range m.SupportedGenerationMethods {
-		if method == "generateContent" || method == "GenerateContent" {
+func supportsGenerateContent(m *genai.Model) bool {
+	for _, action := range m.SupportedActions {
+		if action == "generateContent" || action == "GenerateContent" {
 			return true
 		}
 	}
-	return false
+	// If no SupportedActions, assume model supports generateContent (e.g. from REST fallback).
+	return len(m.SupportedActions) == 0
 }
 
-func modelID(m *genai.ModelInfo) string {
+func modelID(m *genai.Model) string {
 	if m == nil {
 		return ""
-	}
-	if m.BaseModelID != "" {
-		return m.BaseModelID
 	}
 	return strings.TrimPrefix(m.Name, "models/")
 }
@@ -53,13 +48,9 @@ func listAllModelsWithLogger(ctx context.Context, client *genai.Client, log *slo
 	if log == nil {
 		log = Logger
 	}
-	it := client.ListModels(ctx)
-	for {
-		m, err := it.Next()
+	for m, err := range client.Models.All(ctx) {
 		if err != nil {
-			if !errors.Is(err, iterator.Done) {
-				log.Warn("gemini list models iterator error", "error", err)
-			}
+			log.Warn("gemini list models iterator error", "error", err)
 			break
 		}
 		id := modelID(m)
@@ -152,7 +143,10 @@ func newGeminiClientForApp(ctx context.Context, cfg *config.Config, log *slog.Lo
 	if cfg == nil || cfg.GeminiAPIKey == "" {
 		return nil, "", "", fmt.Errorf("GEMINI_API_KEY not configured")
 	}
-	client, err := genai.NewClient(ctx, option.WithAPIKey(cfg.GeminiAPIKey))
+	client, err := genai.NewClient(ctx, &genai.ClientConfig{
+		APIKey:  cfg.GeminiAPIKey,
+		Backend: genai.BackendGeminiAPI,
+	})
 	if err != nil {
 		return nil, "", "", fmt.Errorf("failed to create Gemini client: %w", err)
 	}
@@ -198,13 +192,18 @@ func GetEffectiveModel(ctx context.Context, configured string) string {
 	return configured
 }
 
+// MIMETypeJSON is the MIME type for JSON responses. Use with GenConfig.ResponseMIMEType
+// when requesting structured JSON from Gemini. For complex or conditional JSON, prefer
+// this with prompt-driven structure (and no ResponseSchema) over genai.Schema; see .cursorrules.
+const MIMETypeJSON = "application/json"
+
 // GenConfig holds generation configuration options.
 type GenConfig struct {
 	Temperature      float64
 	TopP             float64 // if > 0, set on model (e.g. 0.9)
 	MaxOutputTokens  int
 	ModelOverride    string // if non-empty, use this model
-	ResponseMIMEType string // if non-empty, request JSON or other
+	ResponseMIMEType string // if non-empty, request JSON or other (e.g. MIMETypeJSON)
 }
 
 // GenerateContentSimple generates content without tools.
@@ -219,7 +218,7 @@ func GenerateContentSimple(ctx context.Context, systemPrompt, userPrompt string,
 	}
 	req := &LLMRequest{
 		SystemPrompt: systemPrompt,
-		Parts:        []genai.Part{genai.Text(userPrompt)},
+		Parts:        []*genai.Part{{Text: userPrompt}},
 		Model:        cfg.GeminiModel,
 		GenConfig:    genConfig,
 	}
@@ -262,20 +261,10 @@ func EvaluateFactCollision(ctx context.Context, cfg *config.Config, newFact, exi
 }
 
 func extractTextFromResponse(resp *genai.GenerateContentResponse) string {
-	if resp == nil || len(resp.Candidates) == 0 {
+	if resp == nil {
 		return ""
 	}
-	candidate := resp.Candidates[0]
-	if candidate.Content == nil || len(candidate.Content.Parts) == 0 {
-		return ""
-	}
-	var sb strings.Builder
-	for _, part := range candidate.Content.Parts {
-		if text, ok := part.(genai.Text); ok {
-			sb.WriteString(string(text))
-		}
-	}
-	return sb.String()
+	return resp.Text()
 }
 
 // ExtractText extracts text content from a Gemini response.

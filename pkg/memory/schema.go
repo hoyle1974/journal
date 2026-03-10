@@ -23,7 +23,32 @@ const (
 	NodeTypeGeneric       = "generic"
 	NodeTypeWeeklySummary = "weekly_summary"
 	NodeTypeMonthlySummary = "monthly_summary"
+	// NodeTypeIdentity is the reserved identity-anchor node type. Janitor must not delete or archive these.
+	NodeTypeIdentity = "identity_anchor"
+	// NodeTypeUserIdentity is for self-referential statements about the user's core identity (name, role, values, traits). Janitor must not delete these.
+	NodeTypeUserIdentity = "user_identity"
 )
+
+// IdentityMeta is the metadata schema for identity-anchor nodes (primary user, core values, system directives).
+type IdentityMeta struct {
+	PrimaryName      string   `json:"primary_name"`
+	CoreValues       []string `json:"core_values"`
+	SystemDirectives []string `json:"system_directives"`
+}
+
+// UserIdentityMeta is the metadata schema for user_identity nodes (self-referential identity statements).
+// Category helps retrieval: "name", "role", "value", "trait", or leave empty for generic.
+const (
+	UserIdentityCategoryName  = "name"
+	UserIdentityCategoryRole  = "role"
+	UserIdentityCategoryValue = "value"
+	UserIdentityCategoryTrait = "trait"
+)
+
+// UserIdentityMeta optional fields for user_identity nodes.
+type UserIdentityMeta struct {
+	Category string `json:"category"` // optional: name, role, value, trait
+}
 
 // Project/Goal status values (metadataStatus and existing code expect lowercase).
 const (
@@ -122,20 +147,43 @@ type GenericNodeMeta struct {
 type validatorFunc func(map[string]any) error
 type normalizerFunc func(map[string]any) (map[string]any, error)
 
+var userIdentityCategories = map[string]bool{
+	UserIdentityCategoryName: true, UserIdentityCategoryRole: true,
+	UserIdentityCategoryValue: true, UserIdentityCategoryTrait: true,
+}
+
+func validateUserIdentity(m map[string]any) error {
+	c := getString(m, "category")
+	if c != "" && !userIdentityCategories[strings.ToLower(c)] {
+		return fmt.Errorf("invalid category %q for user_identity (use name, role, value, trait or omit)", c)
+	}
+	return nil
+}
+
+func normalizeUserIdentity(m map[string]any) (map[string]any, error) {
+	out := make(map[string]any)
+	c := getString(m, "category")
+	if c != "" {
+		out["category"] = strings.ToLower(c)
+	}
+	return out, nil
+}
+
 var registry = map[string]struct {
 	validate  validatorFunc
 	normalize normalizerFunc
 }{
-	NodeTypePerson:     {validate: validatePerson, normalize: normalizePerson},
-	NodeTypeProject:    {validate: validateProjectGoal, normalize: normalizeProjectGoal},
-	NodeTypeGoal:       {validate: validateProjectGoal, normalize: normalizeProjectGoal},
-	NodeTypePreference: {validate: validatePreference, normalize: normalizePreference},
-	NodeTypeEvent:      {validate: validateEventMilestone, normalize: normalizeEventMilestone},
-	NodeTypeMilestone:  {validate: validateEventMilestone, normalize: normalizeEventMilestone},
-	NodeTypePlace:      {validate: validatePlace, normalize: normalizePlace},
-	NodeTypeAsset:      {validate: validateAssetTool, normalize: normalizeAssetTool},
-	NodeTypeTool:       {validate: validateAssetTool, normalize: normalizeAssetTool},
-	NodeTypeGeneric:    {validate: validateGeneric, normalize: normalizeGeneric},
+	NodeTypePerson:       {validate: validatePerson, normalize: normalizePerson},
+	NodeTypeProject:      {validate: validateProjectGoal, normalize: normalizeProjectGoal},
+	NodeTypeGoal:         {validate: validateProjectGoal, normalize: normalizeProjectGoal},
+	NodeTypePreference:   {validate: validatePreference, normalize: normalizePreference},
+	NodeTypeEvent:        {validate: validateEventMilestone, normalize: normalizeEventMilestone},
+	NodeTypeMilestone:    {validate: validateEventMilestone, normalize: normalizeEventMilestone},
+	NodeTypePlace:        {validate: validatePlace, normalize: normalizePlace},
+	NodeTypeAsset:        {validate: validateAssetTool, normalize: normalizeAssetTool},
+	NodeTypeTool:         {validate: validateAssetTool, normalize: normalizeAssetTool},
+	NodeTypeGeneric:      {validate: validateGeneric, normalize: normalizeGeneric},
+	NodeTypeUserIdentity: {validate: validateUserIdentity, normalize: normalizeUserIdentity},
 }
 
 // IsRegistered returns true if nodeType has a schema in the registry.

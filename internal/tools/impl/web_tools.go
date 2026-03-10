@@ -14,7 +14,7 @@ import (
 	"time"
 
 	readability "github.com/go-shiori/go-readability"
-	"github.com/google/generative-ai-go/genai"
+	"google.golang.org/genai"
 	"github.com/jackstrohm/jot/pkg/utils"
 	"github.com/jackstrohm/jot/tools"
 )
