@@ -80,6 +80,10 @@ func ProcessEntry(ctx context.Context, app *infra.App, entryUUID, content, times
 		}
 	}
 	infra.LoggerFrom(ctx).Debug("process-entry: journal analysis done", "entry_uuid", entryUUID, "has_analysis", analysis != nil, "reason", "mood/tags/entities for rollup and search")
+	if analysis != nil && len(analysis.Entities) > 0 {
+		bgCtx := infra.WithApp(context.Background(), app)
+		go LinkEntryToPeople(bgCtx, app, entryUUID, analysis.Entities)
+	}
 
 	t3 := time.Now()
 	vector, err := infra.GenerateEmbedding(ctx, app.Config().GoogleCloudProject, content, infra.EmbedTaskRetrievalDocument)

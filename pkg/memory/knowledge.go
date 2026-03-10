@@ -295,6 +295,35 @@ func AppendJournalEntryIDsToNode(ctx context.Context, nodeUUID string, entryIDs 
 	return err
 }
 
+// AddEntityLink appends a target UUID (e.g. a fact or project node) to a source node's entity_links.
+// Idempotent: if targetUUID is already in the list, no update is performed.
+func AddEntityLink(ctx context.Context, sourceUUID, targetUUID string) error {
+	if sourceUUID == "" || targetUUID == "" {
+		return nil
+	}
+	client, err := infra.GetFirestoreClient(ctx)
+	if err != nil {
+		return err
+	}
+	return client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
+		ref := client.Collection(KnowledgeCollection).Doc(sourceUUID)
+		doc, err := tx.Get(ref)
+		if err != nil {
+			return err
+		}
+		links := infra.GetStringSliceField(doc.Data(), "entity_links")
+		for _, l := range links {
+			if l == targetUUID {
+				return nil
+			}
+		}
+		links = append(links, targetUUID)
+		return tx.Update(ref, []firestore.Update{
+			{Path: "entity_links", Value: links},
+		})
+	})
+}
+
 // QuerySimilarNodes performs a KNN vector search in Firestore.
 func QuerySimilarNodes(ctx context.Context, queryVector []float32, limit int) ([]KnowledgeNode, error) {
 	ctx, span := infra.StartSpan(ctx, "knowledge.query_similar")
@@ -504,6 +533,36 @@ func FindEntityNodeByName(ctx context.Context, entityName string) (*KnowledgeNod
 		}
 	}
 	return nil, nil
+}
+
+// DiscoverRelatedNodes finds nodes semantically related to an entity name that may not be in entity_links.
+// Excludes person nodes whose content contains the entity name (to avoid returning the primary entity card).
+func DiscoverRelatedNodes(ctx context.Context, entityName string, limit int) ([]KnowledgeNode, error) {
+	app := infra.GetApp(ctx)
+	if app == nil || app.Config() == nil {
+		return nil, fmt.Errorf("no app in context")
+	}
+	query := fmt.Sprintf("Facts and information about %s", entityName)
+	vec, err := infra.GenerateEmbedding(ctx, app.Config().GoogleCloudProject, query)
+	if err != nil {
+		return nil, err
+	}
+	candidates, err := QuerySimilarNodes(ctx, vec, limit*2)
+	if err != nil {
+		return nil, err
+	}
+	entityLower := strings.ToLower(strings.TrimSpace(entityName))
+	var related []KnowledgeNode
+	for _, n := range candidates {
+		if n.NodeType == "person" && strings.Contains(strings.ToLower(n.Content), entityLower) {
+			continue
+		}
+		related = append(related, n)
+		if len(related) >= limit {
+			break
+		}
+	}
+	return related, nil
 }
 
 func metadataStatus(metadata string) string {

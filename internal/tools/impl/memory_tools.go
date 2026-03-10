@@ -11,6 +11,7 @@ import (
 	"github.com/jackstrohm/jot/pkg/infra"
 	"github.com/jackstrohm/jot/pkg/journal"
 	"github.com/jackstrohm/jot/pkg/memory"
+	"github.com/jackstrohm/jot/pkg/utils"
 	"github.com/jackstrohm/jot/tools"
 )
 
@@ -209,7 +210,7 @@ func registerKnowledgeTools() {
 
 	tools.Register(&tools.Tool{
 		Name:        "get_entity_network",
-		Description: "Get the entity profile and first-degree related nodes for a person (e.g. wife, Gloria). Use for high-level questions like 'Who influenced me?', 'What are my wife's favorites?'. Returns the entity node plus linked facts and people.",
+		Description: "Get the entity profile and related knowledge. Dynamically discovers facts about the person even if not explicitly linked. Use for high-level questions like 'Who influenced me?', 'What are my wife's favorites?'.",
 		Category:    "knowledge",
 		Params: []tools.Param{
 			tools.RequiredStringParam("entity_name", "Name or role of the person (e.g. 'wife', 'Gloria', 'Sarah')"),
@@ -223,60 +224,90 @@ func registerKnowledgeTools() {
 			if entityName == "" {
 				return tools.Fail("entity_name cannot be empty")
 			}
+			app := infra.GetApp(ctx)
+			if app == nil || app.Config() == nil {
+				return tools.Fail("Error: no app in context")
+			}
 			node, err := memory.FindEntityNodeByName(ctx, entityName)
 			if err != nil {
 				return tools.Fail("Error finding entity: %v", err)
 			}
 			if node == nil {
-				return tools.OK("No entity found for '%s'. Try semantic_search for related facts.", entityName)
+				return tools.OK("No profile found for '%s'. Try semantic_search for related facts.", entityName)
 			}
 			full, err := memory.GetKnowledgeNodeByID(ctx, node.UUID)
 			if err != nil {
 				return tools.Fail("Error loading entity: %v", err)
 			}
-			var parts []string
-			entityTs := journal.TruncateTimestamp(full.Timestamp, journal.DateTimeDisplayLen)
-			if entityTs == "" {
-				entityTs = "(no date)"
+
+			var discovered, linked []memory.KnowledgeNode
+			var wg sync.WaitGroup
+			wg.Add(2)
+			go func() {
+				defer wg.Done()
+				discovered, _ = memory.DiscoverRelatedNodes(ctx, entityName, 10)
+			}()
+			go func() {
+				defer wg.Done()
+				if len(full.EntityLinks) > 0 {
+					linked, _ = memory.GetKnowledgeNodesByIDs(ctx, full.EntityLinks)
+				}
+			}()
+			wg.Wait()
+
+			seen := make(map[string]bool)
+			seen[full.UUID] = true
+			var merged []memory.KnowledgeNode
+			for _, n := range discovered {
+				if n.UUID != "" && !seen[n.UUID] {
+					seen[n.UUID] = true
+					merged = append(merged, n)
+				}
 			}
-			parts = append(parts, fmt.Sprintf("Entity: [%s] [%s] %s", full.NodeType, entityTs, full.Content))
+			for _, n := range linked {
+				if n.UUID != "" && !seen[n.UUID] {
+					seen[n.UUID] = true
+					merged = append(merged, n)
+				}
+			}
+
+			var allParts []string
+			allParts = append(allParts, fmt.Sprintf("PRIMARY: %s", full.Content))
 			if full.Metadata != "" && full.Metadata != "{}" {
-				parts = append(parts, fmt.Sprintf("Metadata: %s", full.Metadata))
+				allParts = append(allParts, fmt.Sprintf("PRIMARY_METADATA: %s", full.Metadata))
 			}
-			if len(full.EntityLinks) > 0 {
-				related, err := memory.GetKnowledgeNodesByIDs(ctx, full.EntityLinks)
-				if err != nil {
-					parts = append(parts, fmt.Sprintf("Related (fetch error: %v)", err))
-				} else if len(related) > 0 {
-					parts = append(parts, "Related (first-degree):\n"+formatKnowledgeNodes(ctx, related))
-				}
+			for _, n := range merged {
+				allParts = append(allParts, fmt.Sprintf("FACT: %s", n.Content))
 			}
-			if len(full.JournalEntryIDs) > 0 {
-				var entryLines []string
-				for i, eid := range full.JournalEntryIDs {
-					if i >= 5 {
-						entryLines = append(entryLines, fmt.Sprintf("... and %d more entries", len(full.JournalEntryIDs)-5))
-						break
-					}
-					e, err := journal.GetEntry(ctx, eid)
-					if err != nil || e == nil {
-						continue
-					}
-					content := e.Content
-					if len(content) > 120 {
-						content = content[:117] + "..."
-					}
-					entryTs := journal.TruncateTimestamp(e.Timestamp, journal.DateTimeDisplayLen)
-					if entryTs == "" {
-						entryTs = "(no date)"
-					}
-					entryLines = append(entryLines, fmt.Sprintf("- [%s] %s", entryTs, content))
+			for i, eid := range full.JournalEntryIDs {
+				if i >= 5 {
+					allParts = append(allParts, fmt.Sprintf("JOURNAL: ... and %d more entries", len(full.JournalEntryIDs)-5))
+					break
 				}
-				if len(entryLines) > 0 {
-					parts = append(parts, "From journal:\n"+strings.Join(entryLines, "\n"))
+				e, err := journal.GetEntry(ctx, eid)
+				if err != nil || e == nil {
+					continue
 				}
+				content := e.Content
+				if len(content) > 200 {
+					content = content[:197] + "..."
+				}
+				entryTs := journal.TruncateTimestamp(e.Timestamp, journal.DateTimeDisplayLen)
+				if entryTs == "" {
+					entryTs = "(no date)"
+				}
+				allParts = append(allParts, fmt.Sprintf("JOURNAL: [%s] %s", entryTs, content))
 			}
-			return tools.OK("%s", strings.Join(parts, "\n\n"))
+			allInfo := strings.Join(allParts, "\n")
+
+			const synthesisPrompt = "Consolidate the following entity data into a concise profile. Remove redundant facts and merge overlapping information. Use bullets. Output only the profile, no preamble."
+			userPrompt := utils.WrapAsUserData(allInfo)
+			summary, err := infra.GenerateContentSimple(ctx, synthesisPrompt, userPrompt, app.Config(), &infra.GenConfig{MaxOutputTokens: 512})
+			if err != nil {
+				infra.LoggerFrom(ctx).Debug("get_entity_network synthesis failed, returning raw data", "error", err)
+				return tools.OK("Entity: %s\n\n%s", entityName, allInfo)
+			}
+			return tools.OK("Entity profile: %s\n\n%s", entityName, summary)
 		},
 	})
 
