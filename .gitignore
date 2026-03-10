@@ -1,3 +1,6 @@
+# Dangerous admin scripts (optional local exclusion)
+scripts/reset-firestore.sh
+
 # Credentials and secrets
 credentials.json
 credentials-*.json
