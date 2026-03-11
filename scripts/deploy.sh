@@ -1,26 +1,21 @@
 #!/bin/bash
 #
 # Deploy Jot Cloud Function to GCP (Go version)
-# Usage: ./scripts/deploy.sh [dev|prod] [container|source]
+# Usage: ./scripts/deploy.sh <dev|prod> [container|source]
+# Environment must be explicit (no default). Script will confirm before continuing.
 #
 set -e
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
+source "$REPO_ROOT/scripts/lib/env-confirm.sh"
+require_env_and_confirm "$1" " [container|source]"
+shift
 
-# 1. Determine environment and load variables
-ENV_TARGET="dev"
-if [[ "$1" == "prod" ]] || [[ "$1" == "dev" ]]; then
-    ENV_TARGET="$1"
-    shift # Remove the env arg so $1 becomes 'container' or 'source'
-fi
-
-ENV_FILE=".env"
 if [ "$ENV_TARGET" == "prod" ]; then
-    ENV_FILE=".env.prod"
-    echo -e "\033[1;33mTargeting PRODUCTION environment (.env.prod)\033[0m"
+  echo -e "\033[1;33mTargeting PRODUCTION environment (.env.prod)\033[0m"
 else
-    echo -e "\033[1;33mTargeting DEVELOPMENT environment (.env)\033[0m"
+  echo -e "\033[1;33mTargeting DEVELOPMENT environment (.env)\033[0m"
 fi
 
 if [ -f "$ENV_FILE" ]; then

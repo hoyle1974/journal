@@ -1,27 +1,28 @@
 #!/bin/bash
+#
+# Jot secrets setup (Secret Manager, API keys, Twilio, IAM).
+# Usage: ./scripts/setup-secrets.sh <dev|prod>
+# Environment must be explicit (no default). Script will confirm before continuing.
+#
 set -e
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
-
-# Determine environment
-ENV_TARGET="${1:-dev}"
-ENV_FILE=".env"
-if [ "$ENV_TARGET" == "prod" ]; then
-    ENV_FILE=".env.prod"
-fi
+source "$REPO_ROOT/scripts/lib/env-confirm.sh"
+require_env_and_confirm "$1"
+shift
 
 # LOAD TARGET ENV ONLY
 if [ -f "$ENV_FILE" ]; then
-    echo -e "Targeting $ENV_TARGET using $ENV_FILE"
-    set -a
-    source "$ENV_FILE"
-    set +a
+  echo -e "Targeting $ENV_TARGET using $ENV_FILE"
+  set -a
+  source "$ENV_FILE"
+  set +a
 else
-    if [ "$ENV_TARGET" == "prod" ]; then
-        echo "Error: .env.prod not found. Create it with GOOGLE_CLOUD_PROJECT=your-prod-id"
-        exit 1
-    fi
+  if [ "$ENV_TARGET" == "prod" ]; then
+    echo "Error: .env.prod not found. Create it with GOOGLE_CLOUD_PROJECT=your-prod-id"
+    exit 1
+  fi
 fi
 
 PROJECT="${GOOGLE_CLOUD_PROJECT:?Set GOOGLE_CLOUD_PROJECT}"
@@ -157,6 +158,6 @@ echo ""
 echo -e "${YELLOW}Next steps:${NC}"
 echo "1. Add JOT_API_KEY to your .env file"
 echo "2. For Twilio SMS: add TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER, ALLOWED_PHONE_NUMBER to .env and re-run this script"
-echo "3. Redeploy: ./scripts/deploy.sh"
+echo "3. Redeploy: ./scripts/deploy.sh <dev|prod>"
 echo "4. Test: curl -H 'X-API-Key: \$JOT_API_KEY' https://...cloudrun.app/..."
 echo ""

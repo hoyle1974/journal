@@ -3,15 +3,17 @@
 # Run Jot Cloud Function locally for testing (Go version)
 #
 # Usage:
-#   ./scripts/test-local.sh           # Start server on port 8080
-#   ./scripts/test-local.sh 8081      # Start on custom port
+#   ./scripts/test-local.sh <dev|prod> [port]
+#   port defaults to 8080. Environment must be explicit (no default). Script will confirm before continuing.
 #
 set -e
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
-
-PORT=${1:-8080}
+source "$REPO_ROOT/scripts/lib/env-confirm.sh"
+require_env_and_confirm "$1" " [port]"
+shift
+PORT="${1:-8080}"
 
 # Colors
 YELLOW='\033[1;33m'
@@ -23,13 +25,13 @@ echo -e "${YELLOW}Starting Jot API locally (Go)${NC}"
 echo "Port: ${PORT}"
 echo ""
 
-# Load environment variables from .env if it exists
-if [ -f .env ]; then
-    echo -e "${CYAN}Loading environment from .env${NC}"
-    set -a
-    # shellcheck source=.env
-    source .env
-    set +a
+# Load environment variables from env file
+if [ -f "$ENV_FILE" ]; then
+  echo -e "${CYAN}Loading environment from $ENV_FILE${NC}"
+  set -a
+  # shellcheck source=.env
+  source "$ENV_FILE"
+  set +a
 fi
 
 echo ""

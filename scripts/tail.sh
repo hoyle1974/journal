@@ -1,25 +1,28 @@
 #!/bin/bash
+#
+# Tail Cloud Run logs for the Jot service.
+# Usage: ./scripts/tail.sh <dev|prod>
+# Environment must be explicit (no default). Script will confirm before continuing.
+#
 set -e
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
+source "$REPO_ROOT/scripts/lib/env-confirm.sh"
+require_env_and_confirm "$1"
+shift
 
-# --- NEW ENVIRONMENT HANDLING ---
-ENV_TARGET="${1:-dev}"
-ENV_FILE=".env"
 if [ "$ENV_TARGET" == "prod" ]; then
-    ENV_FILE=".env.prod"
-    echo -e "\033[1;33mTailing PRODUCTION logs...\033[0m"
+  echo -e "\033[1;33mTailing PRODUCTION logs...\033[0m"
 else
-    echo -e "\033[1;33mTailing DEVELOPMENT logs...\033[0m"
+  echo -e "\033[1;33mTailing DEVELOPMENT logs...\033[0m"
 fi
 
 if [ -f "$ENV_FILE" ]; then
-    set -a
-    source "$ENV_FILE"
-    set +a
+  set -a
+  source "$ENV_FILE"
+  set +a
 fi
-# --------------------------------
 
 PROJECT="${GOOGLE_CLOUD_PROJECT:?Set GOOGLE_CLOUD_PROJECT in $ENV_FILE}"
 SERVICE_NAME="${SERVICE_NAME:-jot-api-go}"

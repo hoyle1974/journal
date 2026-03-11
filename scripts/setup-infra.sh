@@ -1,21 +1,22 @@
 #!/bin/bash
+#
+# Jot infrastructure setup (APIs, Artifact Registry, Cloud Tasks, Scheduler).
+# Usage: ./scripts/setup-infra.sh <dev|prod>
+# Environment must be explicit (no default). Script will confirm before continuing.
+#
 set -e
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
-
-# Determine environment
-ENV_TARGET="${1:-dev}"
-ENV_FILE=".env"
-if [ "$ENV_TARGET" == "prod" ]; then
-    ENV_FILE=".env.prod"
-fi
+source "$REPO_ROOT/scripts/lib/env-confirm.sh"
+require_env_and_confirm "$1"
+shift
 
 if [ -f "$ENV_FILE" ]; then
-    echo -e "Loading config from $ENV_FILE"
-    set -a
-    source "$ENV_FILE"
-    set +a
+  echo -e "Loading config from $ENV_FILE"
+  set -a
+  source "$ENV_FILE"
+  set +a
 fi
 
 PROJECT="${GOOGLE_CLOUD_PROJECT:?Set GOOGLE_CLOUD_PROJECT in $ENV_FILE}"
@@ -162,9 +163,9 @@ echo "  CLOUD_TASKS_LOCATION=$REGION"
 echo "  SYNC_GDOC_URL=https://${REGION}-${PROJECT}.cloudfunctions.net/jot-api-go/sync"
 echo ""
 echo -e "${YELLOW}Next steps:${NC}"
-echo "1. Run ./scripts/setup-secrets.sh if needed"
-echo "2. Deploy: ./scripts/deploy.sh"
-echo "3. Test locally: ./scripts/test-local.sh dream"
+echo "1. Run ./scripts/setup-secrets.sh <dev|prod> if needed"
+echo "2. Deploy: ./scripts/deploy.sh <dev|prod>"
+echo "3. Test locally: ./scripts/test-local.sh <dev|prod>"
 echo ""
 echo -e "${CYAN}To set up Drive Watch for auto-sync (run after deploy):${NC}"
 echo "  python setup_drive_watch.py"

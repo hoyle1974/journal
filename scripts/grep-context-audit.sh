@@ -1,10 +1,9 @@
 #!/bin/bash
 #
 # Read Cloud Run logs (same source as tail.sh) and output only lines containing LLM_CONTEXT_AUDIT.
-# One-shot read over a time window; no tail/poll. If you see no output, check stderr for how many entries were read.
-# Requires: gcloud CLI, GOOGLE_CLOUD_PROJECT in .env. Optional: jq (for best display).
-#
-# Usage: ./scripts/grep-context-audit.sh [--freshness=DURATION] [--limit=N]
+# One-shot read over a time window; no tail/poll.
+# Usage: ./scripts/grep-context-audit.sh <dev|prod> [--freshness=DURATION] [--limit=N]
+#   Environment must be explicit (no default). Script will confirm before continuing.
 #   --freshness  gcloud freshness (default: 1d). e.g. 1h, 24h, 7d
 #   --limit      max log entries to fetch (default: 1000)
 #
@@ -12,15 +11,18 @@ set -e
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
+source "$REPO_ROOT/scripts/lib/env-confirm.sh"
+require_env_and_confirm "$1" " [--freshness=DURATION] [--limit=N]"
+shift
 
-if [ -f .env ]; then
+if [ -f "$ENV_FILE" ]; then
   set -a
   # shellcheck source=.env
-  source .env
+  source "$ENV_FILE"
   set +a
 fi
 
-PROJECT="${GOOGLE_CLOUD_PROJECT:?Set GOOGLE_CLOUD_PROJECT in .env or export GOOGLE_CLOUD_PROJECT=your-project-id}"
+PROJECT="${GOOGLE_CLOUD_PROJECT:?Set GOOGLE_CLOUD_PROJECT in $ENV_FILE or export GOOGLE_CLOUD_PROJECT=your-project-id}"
 SERVICE_NAME="${SERVICE_NAME:-jot-api-go}"
 REGION="${REGION:-us-central1}"
 FILTER="resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"$SERVICE_NAME\" AND resource.labels.location=\"$REGION\""
@@ -31,7 +33,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --freshness=*) FRESHNESS="${1#--freshness=}"; shift ;;
     --limit=*)     LIMIT="${1#--limit=}"; shift ;;
-    *) echo "Usage: $0 [--freshness=DURATION] [--limit=N]" >&2; exit 1 ;;
+    *) echo "Usage: $0 <dev|prod> [--freshness=DURATION] [--limit=N]" >&2; exit 1 ;;
   esac
 done
 
