@@ -45,8 +45,19 @@ Gemini’s `responseSchema` works well only for **simple, flat** structures. For
 ## Go Style
 
 - **Context:** Every exported function must take `ctx context.Context` as the first argument.
-- **Errors:** Use `%w` for error wrapping: `fmt.Errorf("context: %w", err)`.
+- **Errors:** Use `%w` for error wrapping: `fmt.Errorf("context: %w", err)`. Use `errors.Is` and `errors.As` to inspect error chains; use `errors.Join` for multi-error returns in concurrent flows. Never use `%v` when wrapping an error.
 - **Files:** Keep files under 400 lines. Suggest a refactor if a file becomes a "junk drawer."
+
+## Modern Go (2025/2026)
+
+Long-term refactoring targets (from huizhou92-style modernization). Apply when touching code; do not block other work.
+
+- **Type erasure:** Prefer `any` over `interface{}`. Use generics `[T any]` for collection utilities, heaps, and middleware where it improves type safety.
+- **Slice allocation:** When the length or capacity is known, pre-allocate: `make([]T, 0, length)` for append loops, `make([]T, length)` for index assignment. Avoid `var x []T` then many appends when size is predictable.
+- **Context-first I/O:** Use `http.NewRequestWithContext(ctx, method, url, body)` for all HTTP requests. I/O-bound functions must take `ctx context.Context` as the first parameter for cancellation and tracing.
+- **Test lifecycle:** In tests, use `t.Cleanup(func() { ... })` instead of `defer` for cleanup (e.g. `server.Close()`, temp file removal). Cleanup runs even on failure and with `t.Parallel()`.
+- **Error handling in tests:** In test code, `t.Fatalf("msg: %v", err)` is acceptable for failing the test; in application code always use `%w` when wrapping.
+- **Optional (when refactoring):** Consider `io/fs` and `fs.FS` for file-like access (embed, local, or cloud). Consider Go 1.22+ `net/http.ServeMux` method/wildcard routing if replacing the router. Use `sync/atomic` type-safe APIs (e.g. `atomic.Int64`) if adding atomics. For critical parsing paths, add `testing.F` fuzz tests. Prefer opaque, strongly-typed config structs injected at init (already the pattern for `*config.Config`).
 
 ## Domain Terms
 
@@ -68,3 +79,18 @@ Gemini’s `responseSchema` works well only for **simple, flat** structures. For
 - **Rule:** All composite indexes used by queries must be defined in `firestore.indexes.json`.
 - **Requirement:** After adding or changing an index, run `firebase deploy --only firestore:indexes` (or use `./scripts/deploy.sh`, which deploys indexes first).
 - **Janitor:** The janitor (garbage collection) requires the composite index on `knowledge_nodes` with fields `last_recalled_at`, `significance_weight` (order matters).
+
+## Feature Work Tracking
+
+All in-progress feature and task work is tracked as **briefs** in `briefs/active/`.
+
+- **Directory:** `briefs/active/` for ongoing work, `briefs/done/` for completed or abandoned work
+- **Template:** `briefs/TEMPLATE.md` — use this for every new brief
+- **Naming:** `YYYYMMDD_short-feature-name.md` (e.g. `20250311_auth-system.md`)
+
+**Rules:**
+- Before starting any new feature or task, create a brief from the template
+- At the start of every session, read the relevant brief to restore context
+- At the end of every session, append a short summary to the brief's Session Log section
+- When a feature is merged or abandoned, move its brief from `briefs/active/` to `briefs/done/`
+- Each brief maps 1:1 to a git worktree and branch (see worktree rules above)

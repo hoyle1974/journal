@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -61,18 +62,18 @@ func TestApiRequest_Success(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"success": true, "uuid": "abc-123"}`))
 	}))
-	defer server.Close()
+	t.Cleanup(func() { server.Close() })
 
 	origURL := APIBaseURL
 	origKey := APIKey
 	APIBaseURL = server.URL
 	APIKey = "test-key"
-	defer func() {
+	t.Cleanup(func() {
 		APIBaseURL = origURL
 		APIKey = origKey
-	}()
+	})
 
-	result, err := apiRequest("POST", "/log", map[string]string{"content": "test"}, 5*time.Second)
+	result, err := apiRequest(context.Background(), "POST", "/log", map[string]string{"content": "test"}, 5*time.Second)
 	if err != nil {
 		t.Fatalf("apiRequest() error: %v", err)
 	}
@@ -90,13 +91,13 @@ func TestApiRequest_4xxError(t *testing.T) {
 		w.WriteHeader(http.StatusUnauthorized)
 		w.Write([]byte(`{"error": "Invalid API key"}`))
 	}))
-	defer server.Close()
+	t.Cleanup(func() { server.Close() })
 
 	origURL := APIBaseURL
 	APIBaseURL = server.URL
-	defer func() { APIBaseURL = origURL }()
+	t.Cleanup(func() { APIBaseURL = origURL })
 
-	result, err := apiRequest("GET", "/entries", nil, 5*time.Second)
+	result, err := apiRequest(context.Background(), "GET", "/entries", nil, 5*time.Second)
 	if err == nil {
 		t.Fatal("apiRequest() expected error for 401")
 	}
@@ -113,13 +114,13 @@ func TestApiRequest_5xxError(t *testing.T) {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(`{"error": "server meltdown"}`))
 	}))
-	defer server.Close()
+	t.Cleanup(func() { server.Close() })
 
 	origURL := APIBaseURL
 	APIBaseURL = server.URL
-	defer func() { APIBaseURL = origURL }()
+	t.Cleanup(func() { APIBaseURL = origURL })
 
-	_, err := apiRequest("POST", "/query", nil, 5*time.Second)
+	_, err := apiRequest(context.Background(), "POST", "/query", nil, 5*time.Second)
 	if err == nil {
 		t.Fatal("apiRequest() expected error for 500")
 	}
@@ -134,13 +135,13 @@ func TestApiRequest_InvalidJSON(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`not json`))
 	}))
-	defer server.Close()
+	t.Cleanup(func() { server.Close() })
 
 	origURL := APIBaseURL
 	APIBaseURL = server.URL
-	defer func() { APIBaseURL = origURL }()
+	t.Cleanup(func() { APIBaseURL = origURL })
 
-	_, err := apiRequest("GET", "/health", nil, 5*time.Second)
+	_, err := apiRequest(context.Background(), "GET", "/health", nil, 5*time.Second)
 	if err == nil {
 		t.Fatal("apiRequest() expected error for invalid JSON")
 	}

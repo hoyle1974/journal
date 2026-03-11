@@ -4,6 +4,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -63,14 +64,14 @@ func getEnv(key, defaultValue string) string {
 
 // apiRequest performs an HTTP request and returns the JSON response.
 // Returns an error for 4xx/5xx status codes or network failures.
-func apiRequest(method, endpoint string, data interface{}, timeout time.Duration) (map[string]interface{}, error) {
-	result, _, err := apiRequestWithHeaders(method, endpoint, data, timeout, false)
+func apiRequest(ctx context.Context, method, endpoint string, data any, timeout time.Duration) (map[string]interface{}, error) {
+	result, _, err := apiRequestWithHeaders(ctx, method, endpoint, data, timeout, false)
 	return result, err
 }
 
 // apiRequestWithHeaders performs an HTTP request and returns the JSON response and response headers.
 // When wantTrace is true, sends X-Want-Trace-Id so the backend exports this trace to Cloud Trace.
-func apiRequestWithHeaders(method, endpoint string, data interface{}, timeout time.Duration, wantTrace bool) (map[string]interface{}, http.Header, error) {
+func apiRequestWithHeaders(ctx context.Context, method, endpoint string, data any, timeout time.Duration, wantTrace bool) (map[string]interface{}, http.Header, error) {
 	url := APIBaseURL + endpoint
 
 	var body io.Reader
@@ -82,7 +83,7 @@ func apiRequestWithHeaders(method, endpoint string, data interface{}, timeout ti
 		body = bytes.NewReader(jsonData)
 	}
 
-	req, err := http.NewRequest(method, url, body)
+	req, err := http.NewRequestWithContext(ctx, method, url, body)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -101,10 +102,10 @@ func apiRequestWithHeaders(method, endpoint string, data interface{}, timeout ti
 		if strings.Contains(err.Error(), "connection refused") ||
 			strings.Contains(err.Error(), "no such host") ||
 			strings.Contains(err.Error(), "network is unreachable") {
-			return nil, nil, fmt.Errorf("offline")
+			return nil, nil, fmt.Errorf("offline: %w", err)
 		}
 		if strings.Contains(err.Error(), "timeout") {
-			return nil, nil, fmt.Errorf("timeout")
+			return nil, nil, fmt.Errorf("timeout: %w", err)
 		}
 		return nil, nil, err
 	}
@@ -199,16 +200,16 @@ var traceFlag bool
 // api wraps the API client; Do uses traceFlag and returns (result, headers, err). DoOrExit exits on error and prints trace when requested.
 type apiClient struct{}
 
-func (c *apiClient) Do(method, endpoint string, payload interface{}, timeout time.Duration) (map[string]interface{}, http.Header, error) {
+func (c *apiClient) Do(ctx context.Context, method, endpoint string, payload any, timeout time.Duration) (map[string]interface{}, http.Header, error) {
 	if traceFlag {
-		return apiRequestWithHeaders(method, endpoint, payload, timeout, true)
+		return apiRequestWithHeaders(ctx, method, endpoint, payload, timeout, true)
 	}
-	result, err := apiRequest(method, endpoint, payload, timeout)
+	result, err := apiRequest(ctx, method, endpoint, payload, timeout)
 	return result, nil, err
 }
 
-func (c *apiClient) DoOrExit(method, endpoint string, payload interface{}, timeout time.Duration) (map[string]interface{}, http.Header) {
-	result, headers, err := c.Do(method, endpoint, payload, timeout)
+func (c *apiClient) DoOrExit(ctx context.Context, method, endpoint string, payload any, timeout time.Duration) (map[string]interface{}, http.Header) {
+	result, headers, err := c.Do(ctx, method, endpoint, payload, timeout)
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
 		os.Exit(1)
@@ -231,12 +232,12 @@ var api = &apiClient{}
 
 func cmdLog(content string) {
 	source := fmt.Sprintf("cli:%s", MachineName)
-	api.DoOrExit("POST", "/log", map[string]string{"content": content, "source": source}, RequestTimeout)
+	api.DoOrExit(context.Background(), "POST", "/log", map[string]string{"content": content, "source": source}, RequestTimeout)
 	fmt.Println("Logged.")
 }
 
 func cmdQuery(question string) {
-	result, headers, err := api.Do("POST", "/query", map[string]string{
+	result, headers, err := api.Do(context.Background(), "POST", "/query", map[string]string{
 		"question": question,
 		"source":   fmt.Sprintf("cli:%s", MachineName),
 	}, time.Duration(timeout.QuerySeconds)*time.Second)
@@ -279,7 +280,7 @@ func cmdQuery(question string) {
 
 func cmdSync() {
 	fmt.Println("Syncing Google Doc...")
-	result, headers := api.DoOrExit("POST", "/sync", nil, 300*time.Second)
+	result, headers := api.DoOrExit(context.Background(), "POST", "/sync", nil, 300*time.Second)
 	if traceFlag && headers != nil {
 		printTraceInfo(headers)
 	}
@@ -302,7 +303,7 @@ func cmdSync() {
 }
 
 func cmdEntries(limit int) {
-	result, _ := api.DoOrExit("GET", fmt.Sprintf("/entries?limit=%d", limit), nil, RequestTimeout)
+	result, _ := api.DoOrExit(context.Background(), "GET", fmt.Sprintf("/entries?limit=%d", limit), nil, RequestTimeout)
 	entriesRaw, ok := result["entries"].([]interface{})
 	if !ok || len(entriesRaw) == 0 {
 		fmt.Println("No entries found.")
@@ -330,7 +331,7 @@ func cmdEntries(limit int) {
 func cmdEdit(limit int) {
 	firstFetch := true
 	for {
-		result, headers, err := api.Do("GET", fmt.Sprintf("/entries?limit=%d", limit), nil, RequestTimeout)
+		result, headers, err := api.Do(context.Background(), "GET", fmt.Sprintf("/entries?limit=%d", limit), nil, RequestTimeout)
 		if err != nil {
 			fmt.Printf("Error: %v\n", err)
 			return
@@ -396,7 +397,7 @@ func cmdEdit(limit int) {
 				fmt.Println("Invalid entry")
 				continue
 			}
-			_, _, err = api.Do("DELETE", "/entries", map[string]interface{}{
+			_, _, err = api.Do(context.Background(), "DELETE", "/entries", map[string]interface{}{
 				"uuids": []string{entryUUID},
 			}, RequestTimeout)
 			if err != nil {
@@ -427,7 +428,7 @@ func cmdEdit(limit int) {
 
 func cmdDream() {
 	// If a dream is already running or pending, attach to it instead of starting a new one.
-	state, _, _ := api.Do("GET", "/dream/status", nil, 15*time.Second)
+	state, _, _ := api.Do(context.Background(), "GET", "/dream/status", nil, 15*time.Second)
 	if state != nil {
 		if status, _ := state["status"].(string); status == "running" || status == "pending" {
 			dreamRunID, _ := state["dream_run_id"].(string)
@@ -442,7 +443,7 @@ func cmdDream() {
 	}
 
 	fmt.Println("Starting dream run (consolidating last 24h into semantic memory)...")
-	result, headers, err := api.Do("POST", "/dream", nil, 30*time.Second)
+	result, headers, err := api.Do(context.Background(), "POST", "/dream", nil, 30*time.Second)
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
 		if strings.Contains(err.Error(), "429") || strings.Contains(err.Error(), "Rate limit") || strings.Contains(err.Error(), "quota") {
@@ -479,7 +480,7 @@ func pollDreamStatus(initialState map[string]interface{}, lastLogLen int, lastPh
 	for {
 		if state == nil {
 			var err error
-			state, _, err = api.Do("GET", "/dream/status", nil, 15*time.Second)
+			state, _, err = api.Do(context.Background(), "GET", "/dream/status", nil, 15*time.Second)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Poll error: %v\n", err)
 				time.Sleep(pollInterval)
@@ -544,7 +545,7 @@ func cmdDreamPollOnly() {
 	var lastPhase string
 	var lastLogLen int
 	for {
-		state, _, err := api.Do("GET", "/dream/status", nil, 15*time.Second)
+		state, _, err := api.Do(context.Background(), "GET", "/dream/status", nil, 15*time.Second)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Poll error: %v\n", err)
 			time.Sleep(pollInterval)
@@ -594,7 +595,7 @@ func cmdDreamPollOnly() {
 
 func cmdRollup() {
 	fmt.Println("Running roll-up (weekly + monthly summaries)...")
-	result, _ := api.DoOrExit("POST", "/rollup", nil, time.Duration(timeout.QuerySeconds)*time.Second)
+	result, _ := api.DoOrExit(context.Background(), "POST", "/rollup", nil, time.Duration(timeout.QuerySeconds)*time.Second)
 	weekly := int(jsonFloat(result, "weekly_entries_rolled"))
 	monthly := int(jsonFloat(result, "monthly_weekly_nodes"))
 	fmt.Printf("Weekly entries rolled: %d | Monthly (weekly nodes): %d\n", weekly, monthly)
@@ -602,7 +603,7 @@ func cmdRollup() {
 
 func cmdJanitor() {
 	fmt.Println("Running Janitor (garbage collection)...")
-	result, headers, err := api.Do("POST", "/janitor", nil, time.Duration(timeout.QuerySeconds)*time.Second)
+	result, headers, err := api.Do(context.Background(), "POST", "/janitor", nil, time.Duration(timeout.QuerySeconds)*time.Second)
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
 		if strings.Contains(err.Error(), "429") || strings.Contains(err.Error(), "Rate limit") || strings.Contains(err.Error(), "quota") {
@@ -634,7 +635,7 @@ func cmdJanitor() {
 
 func cmdPlan(goal string) {
 	fmt.Println("Generating plan (this takes a few seconds)...")
-	result, headers, err := api.Do("POST", "/plan", map[string]string{"goal": goal}, time.Duration(timeout.QuerySeconds)*time.Second)
+	result, headers, err := api.Do(context.Background(), "POST", "/plan", map[string]string{"goal": goal}, time.Duration(timeout.QuerySeconds)*time.Second)
 	if err != nil {
 		if err.Error() == "offline" {
 			fmt.Println("Error: Cannot generate plans while offline. Requires cloud connection.")
@@ -872,7 +873,7 @@ func maybeFetchUnreadDream() {
 	if APIBaseURL == "" {
 		return
 	}
-	result, err := apiRequest("GET", "/dream/latest", nil, RequestTimeout)
+	result, err := apiRequest(context.Background(), "GET", "/dream/latest", nil, RequestTimeout)
 	if err != nil || result == nil {
 		return
 	}
@@ -886,7 +887,7 @@ func maybeFetchUnreadDream() {
 	}
 	fmt.Printf("\n[From Last Night's Dreamer]:\n%s\n---\n", narrative)
 	go func() {
-		_, _ = apiRequest("GET", "/dream/latest?mark_read=true", nil, RequestTimeout)
+		_, _ = apiRequest(context.Background(), "GET", "/dream/latest?mark_read=true", nil, RequestTimeout)
 	}()
 }
 
@@ -896,7 +897,7 @@ func cmdRecall() {
 		fmt.Println("Error: JOT_API_URL is not set")
 		os.Exit(1)
 	}
-	result, _, err := api.Do("GET", "/dream/latest", nil, RequestTimeout)
+	result, _, err := api.Do(context.Background(), "GET", "/dream/latest", nil, RequestTimeout)
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
 		os.Exit(1)
@@ -922,7 +923,7 @@ func maybePromptPendingQuestions() {
 	if APIBaseURL == "" {
 		return
 	}
-	result, err := apiRequest("GET", "/pending-questions", nil, RequestTimeout)
+	result, err := apiRequest(context.Background(), "GET", "/pending-questions", nil, RequestTimeout)
 	if err != nil || result == nil {
 		return
 	}
@@ -938,10 +939,10 @@ func maybePromptPendingQuestions() {
 		}
 		kind := jsonStr(q, "kind")
 		question := jsonStr(q, "question")
-		context := jsonStr(q, "context")
+		questionCtx := jsonStr(q, "context")
 		fmt.Printf("\n%d. [%s] %s\n", i+1, kind, question)
-		if context != "" {
-			fmt.Printf("   Context: %s\n", context)
+		if questionCtx != "" {
+			fmt.Printf("   Context: %s\n", questionCtx)
 		}
 		fmt.Print("   Answer (or Enter to skip): ")
 		reader := bufio.NewReader(os.Stdin)
@@ -950,7 +951,7 @@ func maybePromptPendingQuestions() {
 		if answer != "" {
 			uuid := jsonStr(q, "uuid")
 			if uuid != "" {
-				_, _ = apiRequest("POST", "/pending-questions/"+uuid+"/resolve", map[string]interface{}{"answer": answer}, RequestTimeout)
+				_, _ = apiRequest(context.Background(), "POST", "/pending-questions/"+uuid+"/resolve", map[string]interface{}{"answer": answer}, RequestTimeout)
 			}
 		}
 	}

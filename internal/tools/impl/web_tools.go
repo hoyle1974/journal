@@ -39,7 +39,7 @@ func registerWebTools() {
 				return tools.MissingParam("url")
 			}
 			maxLength := args.Int("max_length", 5000)
-			content, err := fetchURLContent(urlStr, maxLength)
+			content, err := fetchURLContent(ctx, urlStr, maxLength)
 			if err != nil {
 				return tools.Fail("Fetch error: %v", err)
 			}
@@ -59,7 +59,7 @@ func registerWebTools() {
 			if !ok {
 				return tools.MissingParam("word")
 			}
-			definition, err := lookupWord(word)
+			definition, err := lookupWord(ctx, word)
 			if err != nil {
 				return tools.Fail("Definition error: %v", err)
 			}
@@ -79,7 +79,7 @@ func registerWebTools() {
 			if !ok {
 				return tools.MissingParam("query")
 			}
-			result, err := searchWikipedia(query)
+			result, err := searchWikipedia(ctx, query)
 			if err != nil {
 				return tools.Fail("Wikipedia error: %v", err)
 			}
@@ -107,7 +107,7 @@ func registerWebTools() {
 				return tools.MissingParam("query")
 			}
 			numResults := args.IntBounded("num_results", 5, 1, 10)
-			result, err := webSearch(query, numResults)
+			result, err := webSearch(ctx, query, numResults)
 			if err != nil {
 				return tools.Fail("Web search error: %v", err)
 			}
@@ -169,13 +169,17 @@ func registerWebTools() {
 }
 
 // fetchURLContent fetches and extracts text from a URL (tool: fetch_url).
-func fetchURLContent(pageURL string, maxLength int) (string, error) {
+func fetchURLContent(ctx context.Context, pageURL string, maxLength int) (string, error) {
 	if !strings.HasPrefix(pageURL, "http://") && !strings.HasPrefix(pageURL, "https://") {
 		pageURL = "https://" + pageURL
 	}
 
 	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Get(pageURL)
+	req, err := http.NewRequestWithContext(ctx, "GET", pageURL, nil)
+	if err != nil {
+		return "", err
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -230,12 +234,16 @@ func stripHTMLTags(html string) string {
 }
 
 // lookupWord fetches word definition from Free Dictionary API (tool: define_word).
-func lookupWord(word string) (string, error) {
+func lookupWord(ctx context.Context, word string) (string, error) {
 	word = strings.ToLower(strings.TrimSpace(word))
 	apiURL := fmt.Sprintf("https://api.dictionaryapi.dev/api/v2/entries/en/%s", word)
 
 	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Get(apiURL)
+	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
+	if err != nil {
+		return "", err
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -266,7 +274,7 @@ func lookupWord(word string) (string, error) {
 	}
 
 	if err := json.Unmarshal(body, &entries); err != nil {
-		return "", fmt.Errorf("failed to parse dictionary response: %v", err)
+		return "", fmt.Errorf("failed to parse dictionary response: %w", err)
 	}
 
 	if len(entries) == 0 {
@@ -299,11 +307,11 @@ func lookupWord(word string) (string, error) {
 }
 
 // searchWikipedia searches Wikipedia and returns article summary (tool: wikipedia).
-func searchWikipedia(query string) (string, error) {
+func searchWikipedia(ctx context.Context, query string) (string, error) {
 	searchURL := fmt.Sprintf("https://en.wikipedia.org/api/rest_v1/page/summary/%s", url.PathEscape(query))
 
 	client := &http.Client{Timeout: 10 * time.Second}
-	req, err := http.NewRequest("GET", searchURL, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", searchURL, nil)
 	if err != nil {
 		return "", err
 	}
@@ -316,7 +324,7 @@ func searchWikipedia(query string) (string, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode == 404 {
-		return searchWikipediaFallback(query)
+		return searchWikipediaFallback(ctx, query)
 	}
 
 	if resp.StatusCode != 200 {
@@ -340,7 +348,7 @@ func searchWikipedia(query string) (string, error) {
 	}
 
 	if err := json.Unmarshal(body, &article); err != nil {
-		return "", fmt.Errorf("failed to parse Wikipedia response: %v", err)
+		return "", fmt.Errorf("failed to parse Wikipedia response: %w", err)
 	}
 
 	if article.Extract == "" {
@@ -362,11 +370,11 @@ func searchWikipedia(query string) (string, error) {
 	return strings.Join(result, "\n"), nil
 }
 
-func searchWikipediaFallback(query string) (string, error) {
+func searchWikipediaFallback(ctx context.Context, query string) (string, error) {
 	searchURL := fmt.Sprintf("https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=%s&format=json&srlimit=1", url.QueryEscape(query))
 
 	client := &http.Client{Timeout: 10 * time.Second}
-	req, err := http.NewRequest("GET", searchURL, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", searchURL, nil)
 	if err != nil {
 		return "", err
 	}
@@ -393,7 +401,7 @@ func searchWikipediaFallback(query string) (string, error) {
 	}
 
 	if err := json.Unmarshal(body, &searchResult); err != nil {
-		return "", fmt.Errorf("failed to parse search response: %v", err)
+		return "", fmt.Errorf("failed to parse search response: %w", err)
 	}
 
 	if len(searchResult.Query.Search) == 0 {
@@ -401,15 +409,15 @@ func searchWikipediaFallback(query string) (string, error) {
 	}
 
 	title := searchResult.Query.Search[0].Title
-	return searchWikipedia(title)
+	return searchWikipedia(ctx, title)
 }
 
 // webSearch performs a web search using Google News RSS feed (tool: web_search).
-func webSearch(query string, numResults int) (string, error) {
+func webSearch(ctx context.Context, query string, numResults int) (string, error) {
 	searchURL := fmt.Sprintf("https://news.google.com/rss/search?q=%s&hl=en-US&gl=US&ceid=US:en", url.QueryEscape(query))
 
 	client := &http.Client{Timeout: 15 * time.Second}
-	req, err := http.NewRequest("GET", searchURL, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", searchURL, nil)
 	if err != nil {
 		return "", err
 	}
@@ -445,7 +453,7 @@ func webSearch(query string, numResults int) (string, error) {
 
 	var r rss
 	if err := xml.Unmarshal(body, &r); err != nil {
-		return "", fmt.Errorf("failed to parse RSS: %v", err)
+		return "", fmt.Errorf("failed to parse RSS: %w", err)
 	}
 
 	if len(r.Channel.Items) == 0 {
