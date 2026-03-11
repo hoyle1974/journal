@@ -19,11 +19,69 @@ const (
 	StatusActive    = "active"
 	StatusCompleted = "completed"
 	StatusAbandoned = "abandoned"
+
+	// TaskCreateIdempotencyWindow is the window in which we consider a task "recent" for deduplication.
+	// Prevents duplicate tasks when both process-entry (agency) and the LLM create_task run concurrently for the same entry.
+	TaskCreateIdempotencyWindow = 30 * time.Second
 )
 
 const reflectionSystemPrompt = `You are a summarizer. Given context about why a task was completed or abandoned, output exactly 1-2 short sentences of plain prose suitable for a journal reflection. Output plain text only—no JSON, no arrays, no code, no numbers or brackets. No preamble or quotes.`
 
+// normalizeContentForDedup normalizes task content for idempotency comparison (trim, lowercase, collapse whitespace).
+func normalizeContentForDedup(content string) string {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return ""
+	}
+	content = strings.ToLower(content)
+	parts := strings.Fields(content)
+	return strings.Join(parts, " ")
+}
+
+// findRecentDuplicateTask returns the UUID of a task linked to entryUUID with the same normalized content
+// created within the given window, or empty string if none found. Used to avoid duplicate tasks when
+// process-entry (agency) and the LLM create_task run concurrently.
+func findRecentDuplicateTask(ctx context.Context, client *firestore.Client, entryUUID, normalizedContent string, within time.Duration) (string, error) {
+	if entryUUID == "" || normalizedContent == "" {
+		return "", nil
+	}
+	cutoff := time.Now().Add(-within)
+	iter := client.Collection(TasksCollection).
+		Where("journal_entry_ids", "array-contains", entryUUID).
+		OrderBy("timestamp", firestore.Desc).
+		Limit(20).
+		Documents(ctx)
+	defer iter.Stop()
+	for {
+		doc, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return "", err
+		}
+		var task Task
+		if err := doc.DataTo(&task); err != nil {
+			continue
+		}
+		task.UUID = doc.Ref.ID
+		parsed, err := time.Parse(time.RFC3339, task.Timestamp)
+		if err != nil || time.Since(parsed) > within {
+			continue
+		}
+		if parsed.Before(cutoff) {
+			continue
+		}
+		if normalizeContentForDedup(task.Content) == normalizedContent {
+			return task.UUID, nil
+		}
+	}
+	return "", nil
+}
+
 // CreateTask creates a task in Firestore, generates an embedding for Content+SystemPrompt, and returns the task UUID.
+// When the task is linked to a single journal entry, checks for a recently created task with the same content
+// for that entry (idempotency window) and returns the existing UUID to avoid duplicates from concurrent agency + LLM creation.
 func CreateTask(ctx context.Context, t *Task) (string, error) {
 	ctx, span := infra.StartSpan(ctx, "task.create")
 	defer span.End()
@@ -42,6 +100,21 @@ func CreateTask(ctx context.Context, t *Task) (string, error) {
 	if app == nil || app.Config() == nil {
 		return "", fmt.Errorf("no app in context")
 	}
+
+	// Idempotency: if this task is linked to exactly one entry, avoid creating a duplicate when agency and LLM both create for the same content.
+	if len(t.JournalEntryIDs) == 1 {
+		entryUUID := t.JournalEntryIDs[0]
+		existingUUID, err := findRecentDuplicateTask(ctx, client, entryUUID, normalizeContentForDedup(t.Content), TaskCreateIdempotencyWindow)
+		if err != nil {
+			infra.LoggerFrom(ctx).Debug("task create idempotency check failed", "entry_uuid", entryUUID, "error", err)
+			// Proceed with create on check failure so we don't block task creation
+		} else if existingUUID != "" {
+			infra.LoggerFrom(ctx).Info("task create idempotent: returning existing", "entry_uuid", entryUUID, "existing_uuid", existingUUID, "content", t.Content)
+			span.SetAttributes(map[string]string{"uuid": existingUUID, "idempotent": "true"})
+			return existingUUID, nil
+		}
+	}
+
 	projectID := app.Config().GoogleCloudProject
 
 	textToEmbed := t.Content
