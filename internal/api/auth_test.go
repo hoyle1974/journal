@@ -77,7 +77,7 @@ func TestPublicRoutes(t *testing.T) {
 			t.Errorf("path %q should be public", path)
 		}
 	}
-	protectedPaths := []string{"/log", "/query", "/plan", "/entries", "/sync", "/dream", "/janitor", "/rollup", "/pending-questions"}
+	protectedPaths := []string{"/log", "/query", "/plan", "/entries", "/sync", "/dream", "/dream/status", "/janitor", "/rollup", "/pending-questions"}
 	for _, path := range protectedPaths {
 		if PublicRoutes[path] {
 			t.Errorf("path %q should be protected", path)

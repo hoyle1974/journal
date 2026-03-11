@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/jackstrohm/jot/pkg/agent"
 	"github.com/jackstrohm/jot/pkg/infra"
 )
 
@@ -84,6 +85,7 @@ type AgentService interface {
 	CreateAndSavePlan(ctx context.Context, goal string) (string, error)
 	ProcessEntry(ctx context.Context, entryUUID, content, timestamp, source string) (*infra.LatencyBreakdown, error)
 	RunDreamer(ctx context.Context) (*DreamerResult, error)
+	RunDreamerWithProgress(ctx context.Context, runID string, progress agent.DreamerProgress) (*DreamerResult, error)
 	RunPulseAudit(ctx context.Context) (*PulseResult, error)
 	RunJanitor(ctx context.Context) (int, error)
 	RunWeeklyRollup(ctx context.Context) (int, error)

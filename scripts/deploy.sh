@@ -37,10 +37,16 @@ REGION="us-central1"
 FUNCTION_NAME="jot-api-go"
 IMAGE="$REGION-docker.pkg.dev/$PROJECT/jot/$FUNCTION_NAME"
 
-# Resource configuration
+# Resource configuration (use max of query/dream so POST /dream can run up to DreamSeconds)
 QUERY_TIMEOUT=$(grep 'QuerySeconds = ' internal/timeout/timeout.go | sed 's/.*= \([0-9]*\).*/\1/')
+DREAM_TIMEOUT=$(grep 'DreamSeconds = ' internal/timeout/timeout.go | sed 's/.*= \([0-9]*\).*/\1/')
+RUN_TIMEOUT=$QUERY_TIMEOUT
+if [ -n "$DREAM_TIMEOUT" ] && [ "$DREAM_TIMEOUT" -gt "$RUN_TIMEOUT" ] 2>/dev/null; then
+  RUN_TIMEOUT=$DREAM_TIMEOUT
+fi
 CPU="1"
-MEMORY="128Mi"
+# gen2 (required for Prometheus sidecar) has a minimum of 512 Mi total memory
+MEMORY="512Mi"
 CONCURRENCY="80"
 
 # Colors
@@ -87,11 +93,14 @@ case "$MODE" in
     echo -e "${YELLOW}Cross-compiling server for Linux...${NC}"
     VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
     COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "none")
+    DEPLOY_REV="${COMMIT}-$(date -u +%s)"
+    IMAGE_TAG="sha-${COMMIT}"
     LDFLAGS="-s -w -X github.com/jackstrohm/jot/pkg/infra.Version=$VERSION -X github.com/jackstrohm/jot/pkg/infra.Commit=$COMMIT"
     CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="$LDFLAGS" -o server ./cmd/server
 
     echo -e "${YELLOW}Building and pushing container...${NC}"
-    docker build --platform linux/amd64 -t "$IMAGE:latest" .
+    docker build --platform linux/amd64 -t "$IMAGE:$IMAGE_TAG" -t "$IMAGE:latest" .
+    docker push "$IMAGE:$IMAGE_TAG"
     docker push "$IMAGE:latest"
     rm -f server
 
@@ -101,28 +110,46 @@ case "$MODE" in
       ENV_VARS="$ENV_VARS,JOT_API_URL=${EXISTING_URL},SYNC_GDOC_URL=${EXISTING_URL}/sync"
     fi
 
-    echo -e "${YELLOW}Deploying to Cloud Run...${NC}"
-    gcloud beta run deploy "$FUNCTION_NAME" \
-      --region="$REGION" \
-      --image="$IMAGE:latest" \
-      --cpu="$CPU" \
-      --memory="$MEMORY" \
-      --concurrency="$CONCURRENCY" \
-      --timeout="$QUERY_TIMEOUT" \
-      --max-instances=1 \
-      --allow-unauthenticated \
-      --execution-environment=gen1 \
-      --update-env-vars="$ENV_VARS" \
-      --verbosity=debug
+    # Build env block for YAML (Prometheus sidecar deploy)
+    ENV_BLOCK_FILE="$REPO_ROOT/scripts/.env-block.yaml"
+    : > "$ENV_BLOCK_FILE"
+    while IFS= read -r pair; do
+      [ -z "$pair" ] && continue
+      key="${pair%%=*}"
+      val="${pair#*=}"
+      printf '        - name: %s\n          value: "%s"\n' "$key" "$val" >> "$ENV_BLOCK_FILE"
+    done < <(echo "$ENV_VARS" | tr ',' '\n')
+
+    # Generate Cloud Run service YAML (app + GMP Prometheus sidecar).
+    # Use unique image tag (sha-COMMIT) so Cloud Run always creates a new revision and runs the new code.
+    RUN_YAML="$REPO_ROOT/scripts/cloud-run-service.yaml"
+    sed -e "s|__SERVICE_NAME__|$FUNCTION_NAME|g" \
+        -e "s|__REGION__|$REGION|g" \
+        -e "s|__IMAGE__|$IMAGE:$IMAGE_TAG|g" \
+        -e "s|__DEPLOY_REV__|$DEPLOY_REV|g" \
+        -e "s|__CPU__|$CPU|g" \
+        -e "s|__MEMORY__|$MEMORY|g" \
+        -e "s|__CONCURRENCY__|$CONCURRENCY|g" \
+        -e "s|__TIMEOUT__|$RUN_TIMEOUT|g" \
+        -e "s|__MAX_INSTANCES__|1|g" \
+        "$REPO_ROOT/scripts/cloud-run-service.yaml.template" | \
+    awk -v envfile="$ENV_BLOCK_FILE" '
+      /__ENV_BLOCK__/ {
+        while ((getline line < envfile) > 0) print line
+        close(envfile)
+        next
+      }
+      { print }
+    ' > "$RUN_YAML"
+    rm -f "$ENV_BLOCK_FILE"
+
+    echo -e "${YELLOW}Deploying to Cloud Run (with Prometheus sidecar for /metrics)...${NC}"
+    gcloud run services replace "$RUN_YAML" --region="$REGION" --project="$PROJECT" --verbosity=debug
+
+    # Allow unauthenticated invocations (replace does not set IAM)
+    gcloud run services add-iam-policy-binding "$FUNCTION_NAME" --region="$REGION" --member="allUsers" --role="roles/run.invoker" 2>/dev/null || true
 
     DEPLOYED_BASE_URL=$(gcloud run services describe "$FUNCTION_NAME" --region="$REGION" --format='value(status.url)' --project="$PROJECT")
-
-    #echo "Ensuring Cloud Run environment has JOT_API_URL..."
-    #gcloud run services update "$FUNCTION_NAME" \
-      #--region="$REGION" \
-      #--project="$PROJECT" \
-      #--update-env-vars="JOT_API_URL=${DEPLOYED_BASE_URL},SYNC_GDOC_URL=${DEPLOYED_BASE_URL}/sync" \
-      #--verbosity=debug
     ;;
   *)
     echo "Unsupported mode: $MODE (use container)"

@@ -70,6 +70,8 @@ func Router(s *Server, w http.ResponseWriter, r *http.Request) {
 		handleSync(s, rw, reqWithCtx)
 	case path == "/dream/latest":
 		handleDreamLatest(s, rw, reqWithCtx)
+	case path == "/dream/status":
+		handleDreamStatus(s, rw, reqWithCtx)
 	case path == "/dream":
 		handleDream(s, rw, reqWithCtx)
 	case path == "/janitor":
@@ -100,13 +102,15 @@ func Router(s *Server, w http.ResponseWriter, r *http.Request) {
 		handleProcessSMSQuery(s, rw, reqWithCtx)
 	case path == "/internal/save-query":
 		handleSaveQuery(s, rw, reqWithCtx)
+	case path == "/internal/dream-run":
+		handleDreamRun(s, rw, reqWithCtx)
 	default:
 		infra.LoggerFrom(ctx).Info("handler response", "event", "http_response", "method", method, "path", path, "status", http.StatusNotFound, "error", "Not found")
 		WriteJSON(rw, http.StatusNotFound, map[string]interface{}{
 			"error": "Not found", "path": path,
 			"available_routes": []string{
 				"GET  /health", "GET  /metrics", "GET  /privacy-policy", "GET  /terms-and-conditions",
-				"POST /log", "POST /query", "POST /plan", "GET  /entries", "POST /sync", "GET  /dream/latest", "POST /dream",
+				"POST /log", "POST /query", "POST /plan", "GET  /entries", "POST /sync", "GET  /dream/latest", "GET  /dream/status", "POST /dream",
 				"POST /janitor", "POST /rollup", "POST /webhook", "POST /sms", 				"POST /decay-contexts",
 				"POST /backfill-embeddings", "GET  /pending-questions", "POST /pending-questions/:id/resolve",
 			},

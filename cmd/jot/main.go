@@ -117,7 +117,15 @@ func apiRequestWithHeaders(method, endpoint string, data interface{}, timeout ti
 
 	var result map[string]interface{}
 	if err := json.Unmarshal(bodyBytes, &result); err != nil {
-		snippet := string(bodyBytes)
+		bodyStr := strings.TrimSpace(string(bodyBytes))
+		if resp.StatusCode >= 400 && bodyStr != "" {
+			// Server returned error body (e.g. 504 "upstream request timeout") that isn't JSON.
+			if len(bodyStr) > 200 {
+				bodyStr = bodyStr[:200] + "..."
+			}
+			return nil, nil, fmt.Errorf("request failed (status %d): %s", resp.StatusCode, bodyStr)
+		}
+		snippet := bodyStr
 		if len(snippet) > 80 {
 			snippet = snippet[:80] + "..."
 		}
@@ -418,13 +426,30 @@ func cmdEdit(limit int) {
 }
 
 func cmdDream() {
-	fmt.Println("Running Dreamer (consolidating last 24h into semantic memory)...")
-	fmt.Println("(This may take 3–5 minutes.)")
-	result, headers, err := api.Do("POST", "/dream", nil, time.Duration(timeout.DreamSeconds)*time.Second)
+	// If a dream is already running or pending, attach to it instead of starting a new one.
+	state, _, _ := api.Do("GET", "/dream/status", nil, 15*time.Second)
+	if state != nil {
+		if status, _ := state["status"].(string); status == "running" || status == "pending" {
+			dreamRunID, _ := state["dream_run_id"].(string)
+			if dreamRunID != "" {
+				fmt.Printf("Dream already in progress (run_id: %s). Showing progress.\n", dreamRunID)
+				fmt.Println("Polling for progress (Ctrl-C to exit anytime; dream continues on server)...")
+				fmt.Println()
+				pollDreamStatus(state, 0, "")
+				return
+			}
+		}
+	}
+
+	fmt.Println("Starting dream run (consolidating last 24h into semantic memory)...")
+	result, headers, err := api.Do("POST", "/dream", nil, 30*time.Second)
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
 		if strings.Contains(err.Error(), "429") || strings.Contains(err.Error(), "Rate limit") || strings.Contains(err.Error(), "quota") {
 			fmt.Println("Tip: You may have hit a billing or rate limit. Check Google AI Studio (aistudio.google.com) or try again later.")
+		}
+		if strings.Contains(err.Error(), "504") || strings.Contains(err.Error(), "upstream request timeout") || strings.Contains(err.Error(), "request failed (status 504)") {
+			fmt.Println("Tip: The server timed out. Dream runs async now; try again or poll GET /dream/status.")
 		}
 		os.Exit(1)
 	}
@@ -435,10 +460,136 @@ func cmdDream() {
 	if traceFlag && headers != nil {
 		printTraceInfo(headers)
 	}
-	entries := int(jsonFloat(result, "entries_processed"))
-	extracted := int(jsonFloat(result, "facts_extracted"))
-	written := int(jsonFloat(result, "facts_written"))
-	fmt.Printf("Entries: %d | Extracted: %d | Written: %d\n", entries, extracted, written)
+	dreamRunID, _ := result["dream_run_id"].(string)
+	if dreamRunID == "" {
+		fmt.Println("Error: No dream_run_id in response")
+		os.Exit(1)
+	}
+	if b, _ := result["already_running"].(bool); b {
+		fmt.Printf("Dream already in progress (run_id: %s). Polling for status.\n", dreamRunID)
+	}
+	fmt.Println("Polling for progress (Ctrl-C to exit anytime; dream continues on server)...")
+	fmt.Println()
+	pollDreamStatus(nil, 0, "")
+}
+
+func pollDreamStatus(initialState map[string]interface{}, lastLogLen int, lastPhase string) {
+	pollInterval := 2 * time.Second
+	state := initialState
+	for {
+		if state == nil {
+			var err error
+			state, _, err = api.Do("GET", "/dream/status", nil, 15*time.Second)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Poll error: %v\n", err)
+				time.Sleep(pollInterval)
+				continue
+			}
+			if state == nil {
+				time.Sleep(pollInterval)
+				continue
+			}
+		}
+		status, _ := state["status"].(string)
+		phase, _ := state["current_phase"].(string)
+		if phase != "" && phase != lastPhase {
+			lastPhase = phase
+			fmt.Printf("[%s]\n", phase)
+		}
+		if logSlice, ok := state["log"].([]interface{}); ok {
+			for i := lastLogLen; i < len(logSlice); i++ {
+				if msg, ok := logSlice[i].(string); ok {
+					fmt.Println("  ", msg)
+				}
+			}
+			lastLogLen = len(logSlice)
+		}
+		switch status {
+		case "completed":
+			if res, ok := state["result"].(map[string]interface{}); ok {
+				entries := int(jsonFloatFromMap(res, "entries_processed"))
+				extracted := int(jsonFloatFromMap(res, "facts_extracted"))
+				written := int(jsonFloatFromMap(res, "facts_written"))
+				fmt.Println()
+				fmt.Printf("Done. Entries: %d | Extracted: %d | Written: %d\n", entries, extracted, written)
+			}
+			return
+		case "failed":
+			errMsg, _ := state["error"].(string)
+			fmt.Println()
+			if errMsg != "" {
+				fmt.Printf("Dream run failed: %s\n", errMsg)
+			} else {
+				fmt.Println("Dream run failed.")
+			}
+			os.Exit(1)
+		}
+		state = nil // next iteration fetch fresh state
+		time.Sleep(pollInterval)
+	}
+}
+
+func jsonFloatFromMap(m map[string]interface{}, key string) float64 {
+	if v, ok := m[key]; ok {
+		if f, ok := v.(float64); ok {
+			return f
+		}
+	}
+	return 0
+}
+
+func cmdDreamPollOnly() {
+	// Legacy / unused: kept in case we want a "jot dream status" that only polls.
+	pollInterval := 2 * time.Second
+	var lastPhase string
+	var lastLogLen int
+	for {
+		state, _, err := api.Do("GET", "/dream/status", nil, 15*time.Second)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Poll error: %v\n", err)
+			time.Sleep(pollInterval)
+			continue
+		}
+		if state == nil {
+			time.Sleep(pollInterval)
+			continue
+		}
+		status, _ := state["status"].(string)
+		phase, _ := state["current_phase"].(string)
+		if phase != "" && phase != lastPhase {
+			lastPhase = phase
+			fmt.Printf("[%s]\n", phase)
+		}
+		if logSlice, ok := state["log"].([]interface{}); ok {
+			for i := lastLogLen; i < len(logSlice); i++ {
+				if msg, ok := logSlice[i].(string); ok {
+					fmt.Println("  ", msg)
+				}
+			}
+			lastLogLen = len(logSlice)
+		}
+		switch status {
+		case "completed":
+			if res, ok := state["result"].(map[string]interface{}); ok {
+				entries := int(jsonFloatFromMap(res, "entries_processed"))
+				extracted := int(jsonFloatFromMap(res, "facts_extracted"))
+				written := int(jsonFloatFromMap(res, "facts_written"))
+				fmt.Println()
+				fmt.Printf("Done. Entries: %d | Extracted: %d | Written: %d\n", entries, extracted, written)
+			}
+			return
+		case "failed":
+			errMsg, _ := state["error"].(string)
+			fmt.Println()
+			if errMsg != "" {
+				fmt.Printf("Dream run failed: %s\n", errMsg)
+			} else {
+				fmt.Println("Dream run failed.")
+			}
+			os.Exit(1)
+		}
+		time.Sleep(pollInterval)
+	}
 }
 
 func cmdRollup() {

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"time"
 
@@ -56,6 +57,20 @@ func handleDreamLatest(s *Server, w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// dreamRunProgress writes phase and log to Firestore for async dream run polling.
+type dreamRunProgress struct {
+	app   dreamRunStateApp
+	runID string
+}
+
+func (p *dreamRunProgress) OnPhase(ctx context.Context, phase string) {
+	_ = UpdateDreamRunPhase(ctx, p.app, p.runID, phase, "")
+}
+
+func (p *dreamRunProgress) OnLog(ctx context.Context, msg string) {
+	_ = AppendDreamRunLog(ctx, p.app, p.runID, msg)
+}
+
 func handleDream(s *Server, w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	path := pathForLog(r.URL.Path)
@@ -65,43 +80,126 @@ func handleDream(s *Server, w http.ResponseWriter, r *http.Request) {
 		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
 		return
 	}
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
-	defer cancel()
-	result, err := s.Agent.RunDreamer(ctx)
+	runID := infra.GenShortRunID()
+	acquired, existingRunID, err := TryAcquireDreamRunLock(ctx, s.App, runID)
 	if err != nil {
-		infra.ErrorsTotal.Inc()
-		infra.LoggerFrom(ctx).Error("dreamer failed", "error", err)
-		code := http.StatusInternalServerError
-		if infra.IsLLMQuotaOrBillingError(err) {
-			code = http.StatusTooManyRequests
-		} else if infra.IsLLMPermissionOrBillingDenied(err) {
-			code = http.StatusForbidden
-		}
-		LogHandlerResponse(ctx, r.Method, path, code, "error", err.Error())
-		WriteJSON(w, code, map[string]string{"error": err.Error()})
+		infra.LoggerFrom(ctx).Error("dream lock failed", "error", err)
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	pulseResult, pulseErr := s.Agent.RunPulseAudit(ctx)
-	if pulseErr != nil {
-		infra.LoggerFrom(ctx).Warn("pulse audit failed after dreamer", "error", pulseErr)
+	idToReturn := runID
+	alreadyRunning := false
+	if !acquired {
+		idToReturn = existingRunID
+		alreadyRunning = true
+		infra.LoggerFrom(ctx).Info("dream already in progress", "dream_run_id", existingRunID)
+	} else {
+		payload := map[string]interface{}{"dream_run_id": runID}
+		if enqErr := s.App.EnqueueTask(ctx, "/internal/dream-run", payload); enqErr != nil {
+			infra.LoggerFrom(ctx).Warn("dream task enqueue failed, running in goroutine", "error", enqErr)
+			go runDreamInBackground(context.WithoutCancel(ctx), s, runID)
+		}
 	}
-	LogHandlerResponse(ctx, r.Method, path, http.StatusOK,
-		"success", true,
-		"entries_processed", result.EntriesProcessed,
-		"facts_extracted", result.FactsExtracted,
-		"facts_written", result.FactsWritten)
-	if pulseResult != nil && (pulseResult.Signals > 0 || len(pulseResult.StaleNodes) > 0) {
-		infra.LoggerFrom(ctx).Info("dream pulse", "signals", pulseResult.Signals, "stale_nodes", len(pulseResult.StaleNodes))
+	LogHandlerResponse(ctx, r.Method, path, http.StatusAccepted)
+	WriteJSON(w, http.StatusAccepted, map[string]interface{}{
+		"dream_run_id":     idToReturn,
+		"already_running":  alreadyRunning,
+		"message":          "Dream run started. Poll GET /dream/status for progress.",
+	})
+}
+
+// runDreamInBackground runs the dreamer with progress and updates Firestore (used when Cloud Tasks is unavailable).
+func runDreamInBackground(ctx context.Context, s *Server, runID string) {
+	// Use a long timeout so the dream can complete; Cloud Run request may still time out if this was the HTTP handler.
+	runCtx, cancel := context.WithTimeout(ctx, 55*time.Minute)
+	defer cancel()
+	progress := &dreamRunProgress{app: s.App, runID: runID}
+	result, err := s.Agent.RunDreamerWithProgress(runCtx, runID, progress)
+	if err != nil {
+		_ = SetDreamRunFailed(runCtx, s.App, runID, err.Error())
+		infra.LoggerFrom(runCtx).Error("dream run failed", "dream_run_id", runID, "error", err)
+		return
 	}
-	resp := map[string]interface{}{
-		"success": true, "entries_processed": result.EntriesProcessed,
-		"facts_extracted": result.FactsExtracted, "facts_written": result.FactsWritten,
+	_ = SetDreamRunCompleted(runCtx, s.App, runID, map[string]interface{}{
+		"entries_processed":    result.EntriesProcessed,
+		"facts_extracted":       result.FactsExtracted,
+		"facts_written":         result.FactsWritten,
+		"contexts_synthesized": result.ContextsSynthesized,
+	})
+	if _, pulseErr := s.Agent.RunPulseAudit(runCtx); pulseErr != nil {
+		infra.LoggerFrom(runCtx).Warn("pulse audit failed after dream", "error", pulseErr)
 	}
-	if pulseResult != nil {
-		resp["pulse_signals"] = pulseResult.Signals
-		resp["pulse_stale_nodes"] = len(pulseResult.StaleNodes)
+}
+
+func handleDreamRun(s *Server, w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	path := pathForLog(r.URL.Path)
+	LogHandlerRequest(ctx, r.Method, path)
+	if r.Method != http.MethodPost {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
+		return
 	}
-	WriteJSON(w, http.StatusOK, resp)
+	var body struct {
+		DreamRunID string `json:"dream_run_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.DreamRunID == "" {
+		infra.LoggerFrom(ctx).Warn("dream-run invalid body", "error", err)
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "missing dream_run_id"})
+		return
+	}
+	runID := body.DreamRunID
+	// Long timeout so the dream can complete (Cloud Run allows up to 60 min).
+	runCtx, cancel := context.WithTimeout(ctx, 55*time.Minute)
+	defer cancel()
+	_ = UpdateDreamRunPhase(runCtx, s.App, runID, "running", "Dream run started.")
+	progress := &dreamRunProgress{app: s.App, runID: runID}
+	result, err := s.Agent.RunDreamerWithProgress(runCtx, runID, progress)
+	if err != nil {
+		_ = SetDreamRunFailed(runCtx, s.App, runID, err.Error())
+		infra.ErrorsTotal.Inc()
+		infra.LoggerFrom(ctx).Error("dream run failed", "dream_run_id", runID, "error", err)
+		WriteJSON(w, http.StatusOK, map[string]interface{}{"success": false, "error": err.Error()})
+		return
+	}
+	_ = SetDreamRunCompleted(runCtx, s.App, runID, map[string]interface{}{
+		"entries_processed":    result.EntriesProcessed,
+		"facts_extracted":      result.FactsExtracted,
+		"facts_written":         result.FactsWritten,
+		"contexts_synthesized": result.ContextsSynthesized,
+	})
+	if _, pulseErr := s.Agent.RunPulseAudit(runCtx); pulseErr != nil {
+		infra.LoggerFrom(ctx).Warn("pulse audit failed after dream", "error", pulseErr)
+	}
+	LogHandlerResponse(ctx, r.Method, path, http.StatusOK)
+	WriteJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true, "dream_run_id": runID,
+		"entries_processed": result.EntriesProcessed, "facts_extracted": result.FactsExtracted,
+		"facts_written": result.FactsWritten, "contexts_synthesized": result.ContextsSynthesized,
+	})
+}
+
+func handleDreamStatus(s *Server, w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	path := pathForLog(r.URL.Path)
+	LogHandlerRequest(ctx, r.Method, path)
+	if r.Method != http.MethodGet {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
+		return
+	}
+	state, err := GetDreamRunState(ctx, s.App)
+	if err != nil {
+		infra.LoggerFrom(ctx).Error("dream status failed", "error", err)
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if state == nil {
+		WriteJSON(w, http.StatusOK, map[string]interface{}{
+			"status": "", "dream_run_id": "", "message": "No dream run yet.",
+		})
+		return
+	}
+	LogHandlerResponse(ctx, r.Method, path, http.StatusOK)
+	WriteJSON(w, http.StatusOK, state)
 }
 
 func handleJanitor(s *Server, w http.ResponseWriter, r *http.Request) {

@@ -41,6 +41,18 @@ type DreamerResult struct {
 	ContextsSynthesized int
 }
 
+// DreamerProgress is called during a dream run to report phase and log lines (e.g. for async status in Firestore).
+type DreamerProgress interface {
+	OnPhase(ctx context.Context, phase string)
+	OnLog(ctx context.Context, msg string)
+}
+
+// RunDreamerOpts optionally supplies a run ID and progress reporter for async dream runs.
+type RunDreamerOpts struct {
+	RunID    string
+	Progress DreamerProgress
+}
+
 type mergedFact struct {
 	Content  string
 	NodeType string
@@ -167,14 +179,21 @@ func shouldSynthesizeContext(meta *memory.ContextMetadata) bool {
 	return time.Since(lastSynth) > DreamerSynthesisStaleHours*time.Hour
 }
 
-func dreamerWriteMergedFacts(ctx context.Context, merged []mergedFact, entryUUIDs []string) (written int, err error) {
+func dreamerWriteMergedFacts(ctx context.Context, merged []mergedFact, entryUUIDs []string, progress DreamerProgress) (written int, err error) {
+	total := len(merged)
 	for _, m := range merged {
 		if _, err = memory.UpsertSemanticMemory(ctx, m.Content, m.NodeType, m.Domain, m.Weight, nil, entryUUIDs); err != nil {
 			infra.LoggerFrom(ctx).Warn("dreamer upsert failed", "domain", m.Domain, "fact", utils.TruncateString(m.Content, 50), "error", err)
 			continue
 		}
 		written++
-		infra.LoggerFrom(ctx).Info("dreamer wrote fact", "domain", m.Domain, "fact", utils.TruncateString(m.Content, 60), "n", written, "total", len(merged))
+		infra.LoggerFrom(ctx).Info("dreamer wrote fact", "domain", m.Domain, "fact", utils.TruncateString(m.Content, 60), "n", written, "total", total)
+		if progress != nil && total > 0 {
+			// Log every 5 facts or on the last one so pollers see progress without spam
+			if written%5 == 0 || written == total {
+				progress.OnLog(ctx, fmt.Sprintf("  Written %d/%d facts", written, total))
+			}
+		}
 	}
 	return written, nil
 }
@@ -470,7 +489,8 @@ func generateEmbedding(ctx context.Context, text string, taskType ...string) ([]
 }
 
 // RunDreamer consolidates the last 24h of journal entries into semantic memory.
-func RunDreamer(ctx context.Context, app *infra.App) (*DreamerResult, error) {
+// If opts is non-nil, opts.RunID is used as the run ID and opts.Progress is notified at each phase.
+func RunDreamer(ctx context.Context, app *infra.App, opts *RunDreamerOpts) (*DreamerResult, error) {
 	ctx = infra.WithApp(ctx, app)
 	ctx, span := infra.StartSpan(ctx, "cron.dreamer")
 	defer span.End()
@@ -479,9 +499,20 @@ func RunDreamer(ctx context.Context, app *infra.App) (*DreamerResult, error) {
 		return nil, fmt.Errorf("no app in context")
 	}
 
-	dreamerRunID := infra.GenShortRunID()
+	var dreamerRunID string
+	var progress DreamerProgress
+	if opts != nil {
+		dreamerRunID = opts.RunID
+		progress = opts.Progress
+	}
+	if dreamerRunID == "" {
+		dreamerRunID = infra.GenShortRunID()
+	}
 	tDreamStart := time.Now()
 	infra.LoggerFrom(ctx).Info("dreamer starting", "dreamer_run_id", dreamerRunID, "phase", "start", "window", "24h")
+	if progress != nil {
+		progress.OnPhase(ctx, "fetch")
+	}
 
 	inputs, err := loadDreamerInputs(ctx)
 	if err != nil {
@@ -491,10 +522,18 @@ func RunDreamer(ctx context.Context, app *infra.App) (*DreamerResult, error) {
 	}
 	if len(inputs.EntryUUIDs) == 0 {
 		infra.LoggerFrom(ctx).Info("dreamer: no entries in last 24h", "dreamer_run_id", dreamerRunID, "phase", "fetch")
+		if progress != nil {
+			progress.OnLog(ctx, "No entries in last 24h; nothing to consolidate.")
+		}
 		return &DreamerResult{EntriesProcessed: 0}, nil
 	}
 
 	infra.LoggerFrom(ctx).Info("dreamer fetched entries", "dreamer_run_id", dreamerRunID, "phase", "fetch", "count", len(inputs.EntryUUIDs), "fetch_ms", time.Since(tDreamStart).Milliseconds())
+	nEntries := len(inputs.EntryUUIDs)
+	if progress != nil {
+		progress.OnLog(ctx, fmt.Sprintf("Fetched %d entries from last 24h.", nEntries))
+		progress.OnLog(ctx, fmt.Sprintf("Processing %d entries.", nEntries))
+	}
 	infra.LoggerFrom(ctx).Info("dreamer journal", "dreamer_run_id", dreamerRunID, "phase", "fetch", "total_chars", len(inputs.JournalContext), "journal", inputs.JournalContext)
 
 	journalContext := inputs.JournalContext
@@ -516,6 +555,9 @@ func RunDreamer(ctx context.Context, app *infra.App) (*DreamerResult, error) {
 	dreamerModel := app.DreamerModel()
 
 	// --- PHASE 1: THE COLLOQUIUM (Discussion Room) ---
+	if progress != nil {
+		progress.OnPhase(ctx, "colloquium")
+	}
 	tColloquiumStart := time.Now()
 	roomTranscript := "Room is open. Initial pass.\n"
 	const maxRoomPasses = 2 // 2 passes allows initial thoughts + 1 round of corrections
@@ -549,15 +591,25 @@ func RunDreamer(ctx context.Context, app *infra.App) (*DreamerResult, error) {
 		}
 	}
 	infra.LoggerFrom(ctx).Info("dreamer colloquium finished", "dreamer_run_id", dreamerRunID, "phase", "colloquium", "duration_ms", time.Since(tColloquiumStart).Milliseconds())
+	if progress != nil {
+		progress.OnLog(ctx, "Colloquium finished.")
+	}
 
 	// Attach the final transcript to the input for the final extraction phase
 	input.RoomContext = roomTranscript
 	infra.LoggerFrom(ctx).Info("dreamer colloquium room_transcript", "dreamer_run_id", dreamerRunID, "phase", "colloquium", "room_transcript", roomTranscript)
 
 	// --- PHASE 2: FINAL EXTRACTION (sequential) ---
+	if progress != nil {
+		progress.OnPhase(ctx, "extraction")
+		progress.OnLog(ctx, fmt.Sprintf("Extracting from %d domains.", len(domains)))
+	}
 	// 2a. Final Specialist Extraction
 	for i, d := range domains {
 		infra.LoggerFrom(ctx).Info("dreamer final extraction start", "dreamer_run_id", dreamerRunID, "phase", "extraction", "domain", d)
+		if progress != nil {
+			progress.OnLog(ctx, fmt.Sprintf("  %d/%d: %s", i+1, len(domains), d))
+		}
 		out, runErr := RunSpecialist(ctx, d, input, dreamerModel)
 		if runErr != nil {
 			infra.LoggerFrom(ctx).Warn("dreamer specialist extraction failed", "dreamer_run_id", dreamerRunID, "phase", "extraction", "domain", d, "error", runErr)
@@ -568,6 +620,9 @@ func RunDreamer(ctx context.Context, app *infra.App) (*DreamerResult, error) {
 		}
 		outputs[i] = out
 		infra.LoggerFrom(ctx).Info("dreamer specialist extraction done", "dreamer_run_id", dreamerRunID, "phase", "extraction", "domain", d, "facts", len(out.Facts))
+		if progress != nil && len(out.Facts) > 0 {
+			progress.OnLog(ctx, fmt.Sprintf("    %s: %d facts", d, len(out.Facts)))
+		}
 	}
 
 	// 2b. Context Extractor
@@ -622,6 +677,9 @@ func RunDreamer(ctx context.Context, app *infra.App) (*DreamerResult, error) {
 	}
 
 	infra.LoggerFrom(ctx).Info("dreamer specialists complete", "dreamer_run_id", dreamerRunID, "phase", "extraction", "specialists_ms", time.Since(tSpecialistsStart).Milliseconds())
+	if progress != nil {
+		progress.OnLog(ctx, "Specialist extraction complete.")
+	}
 
 	totalFacts := 0
 	for i := range domains {
@@ -630,18 +688,38 @@ func RunDreamer(ctx context.Context, app *infra.App) (*DreamerResult, error) {
 		}
 	}
 	infra.LoggerFrom(ctx).Info("dreamer starting consolidation", "dreamer_run_id", dreamerRunID, "phase", "consolidation", "total_facts", totalFacts)
+	if progress != nil {
+		progress.OnPhase(ctx, "consolidation")
+	}
 
 	merged := mergeDreamerFacts(ctx, domains, outputs)
 	infra.LoggerFrom(ctx).Info("dreamer merge complete", "dreamer_run_id", dreamerRunID, "phase", "consolidation", "before", totalFacts, "after", len(merged), "msg", fmt.Sprintf("dreamer merged %d facts into %d", totalFacts, len(merged)))
+	if progress != nil {
+		progress.OnLog(ctx, fmt.Sprintf("Merged %d facts into %d unique.", totalFacts, len(merged)))
+		if len(merged) > 0 {
+			progress.OnLog(ctx, fmt.Sprintf("Writing %d facts to memory...", len(merged)))
+		}
+	}
 
-	written, _ := dreamerWriteMergedFacts(ctx, merged, inputs.EntryUUIDs)
+	written, _ := dreamerWriteMergedFacts(ctx, merged, inputs.EntryUUIDs, progress)
+	if progress != nil {
+		progress.OnLog(ctx, fmt.Sprintf("Consolidation complete: %d facts written.", written))
+	}
 
+	if progress != nil {
+		progress.OnPhase(ctx, "gap_detection")
+		progress.OnLog(ctx, "Checking for gaps and contradictions...")
+	}
 	if err = RunGapDetection(ctx, inputs.JournalContext, inputs.EntryUUIDs); err != nil {
 		infra.LoggerFrom(ctx).Warn("dreamer gap detection failed", "dreamer_run_id", dreamerRunID, "phase", "gap_detection", "error", err)
 	} else {
 		infra.LoggerFrom(ctx).Info("dreamer gap detection completed", "dreamer_run_id", dreamerRunID, "phase", "gap_detection")
 	}
 
+	if progress != nil {
+		progress.OnPhase(ctx, "synthesis")
+		progress.OnLog(ctx, "Synthesizing contexts and profile...")
+	}
 	synthesized, skippedLazy, _ := dreamerSynthesizeContexts(ctx, contextUUIDs)
 	if skippedLazy > 0 {
 		infra.LoggerFrom(ctx).Info("dreamer synthesis skipped (lazy)", "dreamer_run_id", dreamerRunID, "phase", "synthesis", "count", skippedLazy)
@@ -665,13 +743,23 @@ func RunDreamer(ctx context.Context, app *infra.App) (*DreamerResult, error) {
 	}
 
 	// Momentum/incubation: promote recurring themes (tags/category across multiple days) to formal contexts.
+	if progress != nil {
+		progress.OnPhase(ctx, "incubation")
+		progress.OnLog(ctx, "Promoting recurring themes to contexts...")
+	}
 	if promoted, incErr := memory.PromoteIncubatingClusters(ctx); incErr != nil {
 		infra.LoggerFrom(ctx).Warn("dreamer incubation failed", "dreamer_run_id", dreamerRunID, "phase", "incubation", "error", incErr)
 	} else if promoted > 0 {
 		infra.LoggerFrom(ctx).Info("dreamer incubation completed", "dreamer_run_id", dreamerRunID, "phase", "incubation", "promoted", promoted)
+		if progress != nil {
+			progress.OnLog(ctx, fmt.Sprintf("Incubation: %d context(s) promoted.", promoted))
+		}
 	}
 
 	// Generate and store the Dream Narrative (morning readout) for the user.
+	if progress != nil {
+		progress.OnPhase(ctx, "narrative")
+	}
 	if err := writeDreamNarrative(ctx, app, &dreamNarrativeInput{
 		EntriesProcessed:    len(entryUUIDs),
 		FactsExtracted:      totalFacts,
@@ -684,6 +772,9 @@ func RunDreamer(ctx context.Context, app *infra.App) (*DreamerResult, error) {
 	}
 
 	// Let the dreamer create or update tasks from the night's journal (tool-calling phase).
+	if progress != nil {
+		progress.OnPhase(ctx, "task_phase")
+	}
 	runDreamerTaskPhase(ctx, dreamerRunID, journalContext, entryUUIDs)
 
 	infra.LoggerFrom(ctx).Info("dreamer completed", "dreamer_run_id", dreamerRunID, "phase", "complete", "entries_processed", len(entryUUIDs), "facts_extracted", totalFacts, "facts_written", written, "contexts_synthesized", synthesized, "total_ms", time.Since(tDreamStart).Milliseconds(), "msg", fmt.Sprintf("dreamer completed: %d entries -> %d extracted -> %d written, %d contexts synthesized in %dms", len(entryUUIDs), totalFacts, written, synthesized, time.Since(tDreamStart).Milliseconds()))

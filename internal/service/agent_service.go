@@ -103,12 +103,24 @@ func (a *AgentService) ProcessEntry(ctx context.Context, entryUUID, content, tim
 // RunDreamer runs the dreamer pipeline.
 func (a *AgentService) RunDreamer(ctx context.Context) (*api.DreamerResult, error) {
 	infra.LoggerFrom(ctx).Info("function call", "fn", "RunDreamer")
-	result, err := RunDreamer(ctx, a.app)
+	result, err := agent.RunDreamer(ctx, a.app, nil)
 	if err != nil {
 		infra.LoggerFrom(ctx).Error("function result", "fn", "RunDreamer", "error", err.Error())
 		return nil, err
 	}
 	infra.LoggerFrom(ctx).Info("function result", "fn", "RunDreamer", "entries_processed", result.EntriesProcessed, "facts_extracted", result.FactsExtracted, "facts_written", result.FactsWritten)
+	return dreamerResultToAPI(result), nil
+}
+
+// RunDreamerWithProgress runs the dreamer pipeline with progress callbacks (e.g. for async run state in Firestore).
+func (a *AgentService) RunDreamerWithProgress(ctx context.Context, runID string, progress agent.DreamerProgress) (*api.DreamerResult, error) {
+	infra.LoggerFrom(ctx).Info("function call", "fn", "RunDreamerWithProgress", "dream_run_id", runID)
+	result, err := agent.RunDreamer(ctx, a.app, &agent.RunDreamerOpts{RunID: runID, Progress: progress})
+	if err != nil {
+		infra.LoggerFrom(ctx).Error("function result", "fn", "RunDreamerWithProgress", "error", err.Error())
+		return nil, err
+	}
+	infra.LoggerFrom(ctx).Info("function result", "fn", "RunDreamerWithProgress", "entries_processed", result.EntriesProcessed)
 	return dreamerResultToAPI(result), nil
 }
 

@@ -1,0 +1,52 @@
+# Cloud Run service with Managed Service for Prometheus sidecar.
+# deploy.sh substitutes __*__ placeholders and runs: gcloud run services replace scripts/cloud-run-service.yaml --region=REGION
+# Docs: https://cloud.google.com/run/docs/monitoring-managed-prometheus-sidecar
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: __SERVICE_NAME__
+  labels:
+    cloud.googleapis.com/location: __REGION__
+  annotations:
+    run.googleapis.com/launch-stage: ALPHA
+    run.googleapis.com/cpu-throttling: 'false'
+    run.googleapis.com/minScale: "0"
+    run.googleapis.com/maxScale: "__MAX_INSTANCES__"
+spec:
+  template:
+    metadata:
+      annotations:
+        run.googleapis.com/execution-environment: gen2
+        run.googleapis.com/container-dependencies: '{"collector":["app"]}'
+        jot/deploy-rev: "__DEPLOY_REV__"
+    spec:
+      containerConcurrency: __CONCURRENCY__
+      timeoutSeconds: __TIMEOUT__
+      containers:
+      - name: app
+        image: __IMAGE__
+        ports:
+        - containerPort: 8080
+        env:
+__ENV_BLOCK__
+        resources:
+          limits:
+            cpu: "__CPU__"
+            memory: "__MEMORY__"
+        startupProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 0
+          periodSeconds: 5
+          failureThreshold: 6
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          periodSeconds: 10
+      - name: collector
+        image: us-docker.pkg.dev/cloud-ops-agents-artifacts/cloud-run-gmp-sidecar/cloud-run-gmp-sidecar:1.2.0
+  traffic:
+  - percent: 100
+    latestRevision: true

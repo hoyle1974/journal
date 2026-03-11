@@ -5,3 +5,6 @@ const SystemCollection = "_system"
 
 // DeployMetaDoc is the _system document ID that stores last-deployed commit for "run once per deploy" detection.
 const DeployMetaDoc = "deploy_meta"
+
+// DreamRunDoc is the _system document ID for the current/latest async dream run (lock, status, phase, log).
+const DreamRunDoc = "dream_run"
