@@ -35,7 +35,7 @@ type PulseResult struct {
 
 // RunDreamer consolidates the last 24h of journal entries into semantic memory.
 func RunDreamer(ctx context.Context, app *infra.App) (*agent.DreamerResult, error) {
-	return agent.RunDreamer(ctx, app)
+	return agent.RunDreamer(ctx, app, nil)
 }
 
 // RunJanitor performs garbage collection on semantic memory.

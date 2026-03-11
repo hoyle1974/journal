@@ -23,12 +23,12 @@ func init() {
 func registerKnowledgeTools() {
 	tools.Register(&tools.Tool{
 		Name:        "upsert_knowledge",
-		Description: "Add or update a piece of knowledge in the knowledge graph. Use ONLY for NEW facts in the CURRENT user input. NEVER upsert information from RECENT CONVERSATION - that data is already saved. Node types: 'person', 'project', 'fact', 'preference', 'list_item', 'goal', 'user_identity'. Use node_type 'user_identity' for self-referential statements about your core identity (e.g. your name, role, values, traits); these are stored with high priority and are easily retrievable.",
+		Description: "Add or update a piece of knowledge in the knowledge graph. Use ONLY for NEW facts in the CURRENT user input. NEVER upsert information from RECENT CONVERSATION - that data is already saved. Node types: 'person', 'project', 'fact', 'preference', 'list_item', 'goal', 'user_identity'. For node_type 'project' or 'goal', metadata.status must be exactly one of: active, blocked, done, planning, pending, completed (e.g. {\"status\": \"active\"}). Use node_type 'user_identity' for self-referential statements about your core identity (e.g. your name, role, values, traits); these are stored with high priority and are easily retrievable.",
 		Category:    "knowledge",
 		Params: []tools.Param{
 			tools.RequiredStringParam("content", "The fact or information to store (e.g., 'Alice works at Google')"),
 			tools.RequiredStringParam("node_type", "Type of knowledge node"),
-			tools.OptionalStringParam("metadata", "Optional JSON metadata (e.g., {\"relationship\": \"wife\", \"name\": \"Sarah\"})"),
+			tools.OptionalStringParam("metadata", "Optional JSON metadata. For project/goal use status one of: active, blocked, done, planning, pending, completed (e.g. {\"status\": \"active\"}). For person: relationship, occupation, etc."),
 		},
 		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
 			content, ok := args.RequiredString("content")

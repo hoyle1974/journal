@@ -52,5 +52,7 @@ $ jot sync
 This project is designed to be deployed to Google Cloud Platform.
 
 1. **Configure GCP:** When (re)starting the project, run `./scripts/setup-infra.sh` (APIs, Cloud Tasks queue, Scheduler jobs) and `./scripts/setup-secrets.sh` (Secret Manager: Gemini API key, JOT_API_KEY, optional Twilio). Alternatively configure APIs and secrets in the GCP Console or via gcloud.
-2. **Deploy:** Run `./scripts/deploy.sh` (or `./scripts/deploy.sh container`) to build, test, push the image to Cloud Run, and deploy Firestore indexes from `firestore.indexes.json`.
+2. **Deploy:** Run `./scripts/deploy.sh` (or `./scripts/deploy.sh container`) to build, test, push the image to Cloud Run, and deploy Firestore indexes from `firestore.indexes.json`. The deploy uses a Cloud Run service YAML that includes the **Managed Service for Prometheus sidecar**, which scrapes `GET /metrics` (Prometheus exposition format) and sends custom metrics to Google Cloud.
 3. **Local testing:** Run `./scripts/test-local.sh` to start the API locally. Tail logs with `./scripts/tail.sh`.
+
+**Viewing custom metrics (Prometheus):** After deploy, custom metrics (e.g. `jot_llm_*`, `jot_embedding_*`, `jot_queries_total`) are scraped by the sidecar and written to [Google Cloud Managed Service for Prometheus](https://cloud.google.com/stackdriver/docs/managed-prometheus). Open [Metrics Explorer](https://console.cloud.google.com/monitoring/metrics-explorer), switch the query language to **PromQL**, and run queries such as `rate(jot_llm_calls_total[5m])` or `jot_embedding_calls_total`.

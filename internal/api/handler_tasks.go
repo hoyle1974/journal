@@ -70,9 +70,11 @@ func handleProcessSMSQuery(s *Server, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var data struct {
-		From       string `json:"from"`
-		Body       string `json:"body"`
-		MessageSid string `json:"message_sid"`
+		From          string `json:"from"`
+		Body          string `json:"body"`
+		MessageSid    string `json:"message_sid"`
+		TaskID        string `json:"task_id"`
+		ParentTraceID string `json:"parent_trace_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
 		LogHandlerResponse(ctx, r.Method, path, http.StatusBadRequest, "error", "Invalid JSON")
@@ -84,13 +86,16 @@ func handleProcessSMSQuery(s *Server, w http.ResponseWriter, r *http.Request) {
 		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "from and body are required"})
 		return
 	}
+	if data.TaskID != "" || data.ParentTraceID != "" {
+		ctx = infra.WithCorrelation(ctx, data.TaskID, data.ParentTraceID)
+	}
 	msg := &infra.TwilioWebhookRequest{
 		MessageSid: data.MessageSid,
 		From:       data.From,
 		To:         "",
 		Body:       data.Body,
 	}
-	LogHandlerRequest(ctx, r.Method, path, "from", data.From, "message_sid", data.MessageSid, "body_length", len(data.Body))
+	LogHandlerRequest(ctx, r.Method, path, "from", data.From, "message_sid", data.MessageSid, "body_length", len(data.Body), "task_id", data.TaskID, "parent_trace_id", data.ParentTraceID)
 	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
 	response := s.SMS.ProcessIncomingSMS(ctx, msg)
@@ -118,10 +123,12 @@ func handleSaveQuery(s *Server, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var data struct {
-		Question string `json:"question"`
-		Answer   string `json:"answer"`
-		Source   string `json:"source"`
-		IsGap    bool   `json:"is_gap"`
+		Question       string `json:"question"`
+		Answer         string `json:"answer"`
+		Source         string `json:"source"`
+		IsGap          bool   `json:"is_gap"`
+		TaskID         string `json:"task_id"`
+		ParentTraceID  string `json:"parent_trace_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
 		LogHandlerResponse(ctx, r.Method, path, http.StatusBadRequest, "error", "Invalid JSON")
@@ -133,7 +140,10 @@ func handleSaveQuery(s *Server, w http.ResponseWriter, r *http.Request) {
 		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "question and source are required"})
 		return
 	}
-	LogHandlerRequest(ctx, r.Method, path, "question_preview", utils.TruncateString(data.Question, 60), "source", data.Source, "is_gap", data.IsGap)
+	if data.TaskID != "" || data.ParentTraceID != "" {
+		ctx = infra.WithCorrelation(ctx, data.TaskID, data.ParentTraceID)
+	}
+	LogHandlerRequest(ctx, r.Method, path, "question_preview", utils.TruncateString(data.Question, 60), "source", data.Source, "is_gap", data.IsGap, "task_id", data.TaskID, "parent_trace_id", data.ParentTraceID)
 	if _, err := s.Journal.SaveQuery(ctx, data.Question, data.Answer, data.Source, data.IsGap); err != nil {
 		infra.LoggerFrom(ctx).Error("save-query failed", "error", err)
 		LogHandlerResponse(ctx, r.Method, path, http.StatusInternalServerError, "error", err.Error())

@@ -53,6 +53,7 @@ gcloud services enable \
     firestore.googleapis.com \
     docs.googleapis.com \
     drive.googleapis.com \
+    monitoring.googleapis.com \
     aiplatform.googleapis.com \
     --quiet
 

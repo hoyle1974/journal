@@ -48,10 +48,14 @@ func EnqueueSaveQuery(ctx context.Context, question, answer, source string, isGa
 	if app == nil {
 		return nil
 	}
+	taskID := "save-query-" + uuid.New().String()[:8]
+	parentTraceID := infra.TraceIDFromContext(ctx)
 	return app.EnqueueTask(ctx, "/internal/save-query", map[string]interface{}{
-		"question": question,
-		"answer":   answer,
-		"source":   source,
-		"is_gap":   isGap,
+		"question":        question,
+		"answer":          answer,
+		"source":          source,
+		"is_gap":          isGap,
+		"task_id":         taskID,
+		"parent_trace_id": parentTraceID,
 	})
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/jackstrohm/jot/pkg/utils"
 	"google.golang.org/genai"
@@ -170,16 +171,21 @@ func (cs *ChatSession) SendMessage(ctx context.Context, parts ...*genai.Part) (*
 			partValues[i] = *p
 		}
 	}
+	start := time.Now()
 	resp, err := cs.chat.SendMessage(ctx, partValues...)
+	duration := time.Since(start)
 	if err != nil {
 		span.RecordError(err)
 		LoggerFrom(ctx).Error("chat message failed", "error", err)
+		RecordLLMPrometheusMetrics(ctx, cs.modelName, nil, inputSizeBytes, 0, duration, err)
 		return nil, fmt.Errorf("Gemini chat error: %w", err)
 	}
 
 	cs.lastLLMCorrelationID = llmID
 	LogLLMResponse(ctx, llmID, resp)
 	LogLLMMetrics(ctx, llmID, cs.modelName, resp, inputSizeBytes)
+	outputBytes := len(ExtractTextFromResponse(resp))
+	RecordLLMPrometheusMetrics(ctx, cs.modelName, resp, inputSizeBytes, outputBytes, duration, nil)
 	LogContextAudit(ctx, llmID, cs.modelName, audit, resp)
 	return resp, nil
 }

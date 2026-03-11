@@ -73,3 +73,7 @@ __pycache__/
 .drive_watch_channel
 twilio.txt
 cmd/jot/jot-cli
+
+# Generated Cloud Run deploy YAML (from cloud-run-service.yaml.template)
+scripts/cloud-run-service.yaml
+scripts/.env-block.yaml

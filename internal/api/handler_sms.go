@@ -59,20 +59,25 @@ func handleSMS(s *Server, w http.ResponseWriter, r *http.Request) {
 
 	// Prefer Cloud Task so the query runs in a request-scoped context (Cloud Run keeps that request alive until the reply is sent).
 	// Response delivery: task handler runs FOH and sends the answer via SendSMS to the user's phone.
+	taskID := "process-sms-query-" + infra.GenShortRunID()
+	parentTraceID := infra.TraceIDFromContext(ctx)
 	payload := map[string]interface{}{
-		"from":        msg.From,
-		"body":        msg.Body,
-		"message_sid": msg.MessageSid,
+		"from":            msg.From,
+		"body":            msg.Body,
+		"message_sid":     msg.MessageSid,
+		"task_id":         taskID,
+		"parent_trace_id": parentTraceID,
 	}
 	enqErr := s.App.EnqueueTask(ctx, "/internal/process-sms-query", payload)
 	if enqErr == nil {
-		infra.LoggerFrom(ctx).Debug("sms enqueued for process-sms-query", "from", msg.From)
+		infra.LoggerFrom(ctx).Debug("sms enqueued for process-sms-query", "from", msg.From, "task_id", taskID, "parent_trace_id", parentTraceID)
 		return
 	}
 	// Fallback: run in goroutine when Cloud Tasks unavailable (e.g. local dev) so we still deliver the reply.
 	infra.LoggerFrom(ctx).Warn("sms task enqueue failed, processing in goroutine", "from", msg.From, "error", enqErr)
 	go func() {
 		bgCtx := s.App.WithContext(context.Background())
+		bgCtx = infra.WithCorrelation(bgCtx, taskID, parentTraceID)
 		infra.LoggerFrom(bgCtx).Info("sms processing (goroutine fallback)", "from", msg.From)
 		response := s.SMS.ProcessIncomingSMS(bgCtx, msg)
 		if response == "" {

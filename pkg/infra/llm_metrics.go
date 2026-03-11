@@ -56,6 +56,33 @@ func formatCost(usd float64) string {
 	return fmt.Sprintf("$%.6f", usd)
 }
 
+// EstimateLLMCostUSD returns the approximate cost in USD for the given model and token counts (for Prometheus metrics).
+func EstimateLLMCostUSD(model string, promptTokens, completionTokens int) float64 {
+	key := model
+	if key == "" {
+		key = "gemini-2.5-flash"
+	}
+	if idx := strings.LastIndex(key, "/"); idx >= 0 {
+		key = key[idx+1:]
+	}
+	costs, ok := modelCostPer1M[key]
+	if !ok {
+		for k, v := range modelCostPer1M {
+			if strings.HasPrefix(key, k) || strings.HasPrefix(k, key) {
+				costs = v
+				ok = true
+				break
+			}
+		}
+	}
+	if !ok {
+		costs = modelCostPer1M["gemini-2.5-flash"]
+	}
+	in := float64(promptTokens) / 1e6 * costs.input
+	out := float64(completionTokens) / 1e6 * costs.output
+	return in + out
+}
+
 // ContextAuditTelemetry holds pre-call token breakdown and post-call actual usage for context-caching analysis.
 // Static = system + tools + archive (candidate for caching). Dynamic = recent turns + current prompt.
 type ContextAuditTelemetry struct {
@@ -187,6 +214,12 @@ func LogContextAudit(ctx context.Context, llmCorrelationID string, modelName str
 		slog.String("message", "LLM Context Audit"),
 		slog.String("model", modelName),
 	}
+	if callTraceID := TraceIDForLogging(ctx); callTraceID != "" {
+		attrs = append(attrs, slog.String("call_trace_id", callTraceID))
+	}
+	if c := CorrelationFromContext(ctx); c != nil && c.ParentTraceID != "" {
+		attrs = append(attrs, slog.String("parent_trace_id", c.ParentTraceID))
+	}
 	if llmCorrelationID != "" {
 		attrs = append(attrs, slog.String("llm_correlation_id", llmCorrelationID))
 	}
@@ -247,8 +280,13 @@ func LogLLMMetrics(ctx context.Context, llmCorrelationID string, model string, r
 	}
 	log := LoggerFrom(ctx)
 	traceID := TraceIDFromContext(ctx)
+	callTraceID := TraceIDForLogging(ctx) // group by this in Cloud Logging to sum cost per user-facing call
 	if traceID != "" && len(traceID) > 16 {
 		traceID = traceID[:16] + "..."
+	}
+	callTraceIDShort := callTraceID
+	if callTraceIDShort != "" && len(callTraceIDShort) > 16 {
+		callTraceIDShort = callTraceIDShort[:16] + "..."
 	}
 	var promptTokens, completionTokens, totalTokens int
 	if u := resp.UsageMetadata; u != nil {
@@ -268,6 +306,12 @@ func LogLLMMetrics(ctx context.Context, llmCorrelationID string, model string, r
 		slog.Int("completion_tokens", completionTokens),
 		slog.Int("total_tokens", totalTokens),
 	}
+	if callTraceID != "" {
+		attrs = append(attrs, slog.String("call_trace_id", callTraceID))
+	}
+	if c := CorrelationFromContext(ctx); c != nil && c.ParentTraceID != "" {
+		attrs = append(attrs, slog.String("parent_trace_id", c.ParentTraceID))
+	}
 	if llmCorrelationID != "" {
 		attrs = append(attrs, slog.String("llm_correlation_id", llmCorrelationID))
 	}
@@ -275,6 +319,9 @@ func LogLLMMetrics(ctx context.Context, llmCorrelationID string, model string, r
 	msgParts = append(msgParts, "LLM_METRICS")
 	if llmCorrelationID != "" {
 		msgParts = append(msgParts, "llm_correlation_id="+llmCorrelationID)
+	}
+	if callTraceIDShort != "" {
+		msgParts = append(msgParts, "call_trace_id="+callTraceIDShort)
 	}
 	if traceID != "" {
 		msgParts = append(msgParts, "trace_id="+traceID)
@@ -300,16 +347,25 @@ func LogLLMMetrics(ctx context.Context, llmCorrelationID string, model string, r
 
 // LogEmbeddingStats logs EMBEDDING_STATS for embedding API calls (dims, latency, provider).
 // Message includes key=value so it's visible in Cloud Logging when only the message column is shown.
+// call_trace_id is set so cost/latency can be grouped per user-facing call.
 func LogEmbeddingStats(ctx context.Context, dims int, latency time.Duration) {
 	latencyMs := int(latency.Milliseconds())
+	callTraceID := TraceIDForLogging(ctx)
 	msg := fmt.Sprintf("EMBEDDING_STATS | dims=%d | latency=%dms | provider=vertex-ai", dims, latencyMs)
-	LoggerFrom(ctx).Debug(msg,
+	attrs := []any{
 		slog.String("event", "EMBEDDING_STATS"),
 		slog.Int("dims", dims),
 		slog.Duration("latency", latency),
 		slog.Int("latency_ms", latencyMs),
 		slog.String("provider", "vertex-ai"),
-	)
+	}
+	if callTraceID != "" {
+		attrs = append(attrs, slog.String("call_trace_id", callTraceID))
+	}
+	if c := CorrelationFromContext(ctx); c != nil && c.ParentTraceID != "" {
+		attrs = append(attrs, slog.String("parent_trace_id", c.ParentTraceID))
+	}
+	LoggerFrom(ctx).Debug(msg, attrs...)
 }
 
 // LogAssistantEfficiency logs ASSISTANT_EFFICIENCY (verbosity score) for the FOH loop.
@@ -317,12 +373,19 @@ func LogEmbeddingStats(ctx context.Context, dims int, latency time.Duration) {
 func LogAssistantEfficiency(ctx context.Context, inputContextBytes, finalOutputBytes, reasoningSteps int) {
 	msg := fmt.Sprintf("ASSISTANT_EFFICIENCY | input_context_size=%d | final_output_size=%d | reasoning_steps=%d",
 		inputContextBytes, finalOutputBytes, reasoningSteps)
-	LoggerFrom(ctx).Debug(msg,
+	attrs := []any{
 		slog.String("event", "ASSISTANT_EFFICIENCY"),
 		slog.Int("input_context_size", inputContextBytes),
 		slog.Int("final_output_size", finalOutputBytes),
 		slog.Int("reasoning_steps", reasoningSteps),
-	)
+	}
+	if callTraceID := TraceIDForLogging(ctx); callTraceID != "" {
+		attrs = append(attrs, slog.String("call_trace_id", callTraceID))
+	}
+	if c := CorrelationFromContext(ctx); c != nil && c.ParentTraceID != "" {
+		attrs = append(attrs, slog.String("parent_trace_id", c.ParentTraceID))
+	}
+	LoggerFrom(ctx).Debug(msg, attrs...)
 }
 
 // LogVectorSearchFailed logs a structured vector search failure with index, reason, and retries.

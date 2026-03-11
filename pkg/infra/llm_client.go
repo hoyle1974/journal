@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/jackstrohm/jot/pkg/utils"
 	"google.golang.org/genai"
@@ -229,15 +230,20 @@ func (a *App) Dispatch(ctx context.Context, req *LLMRequest) (*genai.GenerateCon
 	}
 
 	contents := []*genai.Content{{Role: genai.RoleUser, Parts: sanitized}}
+	start := time.Now()
 	resp, err := client.Models.GenerateContent(ctx, modelName, contents, config)
+	duration := time.Since(start)
 	if err != nil {
 		span.RecordError(err)
 		if resp != nil {
 			LogLLMResponse(ctx, llmID, resp)
 		}
+		RecordLLMPrometheusMetrics(ctx, modelName, resp, inputSizeBytes, 0, duration, err)
 		return nil, err
 	}
 	LogLLMResponse(ctx, llmID, resp)
 	LogLLMMetrics(ctx, llmID, modelName, resp, inputSizeBytes)
+	outputBytes := len(ExtractTextFromResponse(resp))
+	RecordLLMPrometheusMetrics(ctx, modelName, resp, inputSizeBytes, outputBytes, duration, nil)
 	return resp, nil
 }

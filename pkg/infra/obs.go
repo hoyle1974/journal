@@ -15,6 +15,7 @@ import (
 
 	cloudtrace "github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/trace"
 	"github.com/jackstrohm/jot/internal/config"
+	"github.com/prometheus/client_golang/prometheus"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -387,6 +388,16 @@ func CorrelationFromContext(ctx context.Context) *Correlation {
 	return c
 }
 
+// TraceIDForLogging returns the trace ID to use for grouping logs/metrics by "one user-facing call".
+// For direct requests it is the current span's trace ID; for queued tasks it is the parent_trace_id
+// so all work (LLM, embedding, etc.) for that call can be grouped and cost summed in Cloud Logging.
+func TraceIDForLogging(ctx context.Context) string {
+	if c := CorrelationFromContext(ctx); c != nil && c.ParentTraceID != "" {
+		return c.ParentTraceID
+	}
+	return TraceIDFromContext(ctx)
+}
+
 // LatencyBreakdown holds per-phase durations for process-entry (and similar) requests.
 type LatencyBreakdown struct {
 	LLM            time.Duration
@@ -449,12 +460,19 @@ func (s *Span) SetStatus(code codes.Code, description string) {
 
 // LogRequest logs an incoming HTTP request with structured fields.
 // If ctx contains a LatencyBreakdown (e.g. from process-entry), it is included as latency_breakdown and per-phase durations.
+// call_trace_id and parent_trace_id are included when set so cost can be grouped per user-facing call.
 func LogRequest(ctx context.Context, method, path string, statusCode int, duration time.Duration, attrs ...any) {
 	args := []any{
 		slog.String("method", method),
 		slog.String("path", path),
 		slog.Int("status", statusCode),
 		slog.Duration("duration", duration),
+	}
+	if callTraceID := TraceIDForLogging(ctx); callTraceID != "" {
+		args = append(args, slog.String("call_trace_id", callTraceID))
+	}
+	if c := CorrelationFromContext(ctx); c != nil && c.ParentTraceID != "" {
+		args = append(args, slog.String("parent_trace_id", c.ParentTraceID))
 	}
 	if b := LatencyBreakdownFromContext(ctx); b != nil {
 		args = append(args, b.LogAttrs()...)
@@ -481,44 +499,35 @@ func LogOperation(ctx context.Context, operation string, duration time.Duration,
 	}
 }
 
-// MetricCounter is a simple counter for metrics.
-type MetricCounter struct {
-	name  string
-	count int64
-	mu    sync.Mutex
-}
-
-// NewMetricCounter creates a new counter.
-func NewMetricCounter(name string) *MetricCounter {
-	return &MetricCounter{name: name}
-}
-
-// Inc increments the counter.
-func (m *MetricCounter) Inc() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.count++
-}
-
-// Add adds a value to the counter.
-func (m *MetricCounter) Add(delta int64) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.count += delta
-}
-
-// Value returns the current counter value.
-func (m *MetricCounter) Value() int64 {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.count
-}
-
-// Application-level metrics
+// Application-level metrics (Prometheus counters for scraping by Google Cloud Prometheus).
 var (
-	QueriesTotal     = NewMetricCounter("queries_total")
-	EntriesTotal     = NewMetricCounter("entries_total")
-	ToolCallsTotal   = NewMetricCounter("tool_calls_total")
-	GeminiCallsTotal = NewMetricCounter("gemini_calls_total")
-	ErrorsTotal      = NewMetricCounter("errors_total")
+	QueriesTotal = prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: "jot",
+		Name:      "queries_total",
+		Help:      "Total number of user queries.",
+	})
+	EntriesTotal = prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: "jot",
+		Name:      "entries_total",
+		Help:      "Total number of journal entries processed.",
+	})
+	ToolCallsTotal = prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: "jot",
+		Name:      "tool_calls_total",
+		Help:      "Total number of agent tool calls.",
+	})
+	GeminiCallsTotal = prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: "jot",
+		Name:      "gemini_calls_total",
+		Help:      "Total number of Gemini API calls.",
+	})
+	ErrorsTotal = prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: "jot",
+		Name:      "errors_total",
+		Help:      "Total number of errors.",
+	})
 )
+
+func init() {
+	prometheus.MustRegister(QueriesTotal, EntriesTotal, ToolCallsTotal, GeminiCallsTotal, ErrorsTotal)
+}
