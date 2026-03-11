@@ -2,14 +2,12 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
 	"google.golang.org/genai"
 	"github.com/jackstrohm/jot/internal/prompts"
-	"github.com/jackstrohm/jot/llmjson"
 	"github.com/jackstrohm/jot/pkg/infra"
 	"github.com/jackstrohm/jot/pkg/journal"
 	"github.com/jackstrohm/jot/pkg/memory"
@@ -51,21 +49,11 @@ func runRollUpLLM(ctx context.Context, app *infra.App, periodLabel, analysesText
 	if app == nil {
 		return "", nil, fmt.Errorf("no app in context")
 	}
-	schema := &genai.Schema{
-		Type: genai.TypeObject,
-		Properties: map[string]*genai.Schema{
-			"summary":            {Type: genai.TypeString},
-			"themes":             {Type: genai.TypeArray, Items: &genai.Schema{Type: genai.TypeString}},
-			"key_entities":       {Type: genai.TypeArray, Items: &genai.Schema{Type: genai.TypeString}},
-			"open_loops_summary": {Type: genai.TypeString},
-		},
-	}
 	userPrompt := prompts.FormatRollUp(periodLabel, utils.WrapAsUserData(utils.SanitizePrompt(analysesText)))
 	req := &infra.LLMRequest{
-		Parts:           []*genai.Part{{Text: userPrompt}},
-		Model:           app.Config().DreamerModel,
-		GenConfig:       &infra.GenConfig{MaxOutputTokens: 1024, ResponseMIMEType: infra.MIMETypeJSON},
-		ResponseSchema:  schema,
+		Parts:     []*genai.Part{{Text: userPrompt}},
+		Model:     app.Config().DreamerModel,
+		GenConfig: &infra.GenConfig{MaxOutputTokens: 1024},
 	}
 	apiCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
@@ -74,12 +62,13 @@ func runRollUpLLM(ctx context.Context, app *infra.App, periodLabel, analysesText
 	if err != nil {
 		return "", nil, infra.WrapLLMError(err)
 	}
-	text := infra.ExtractTextFromResponse(resp)
-	var out rollUpOutput
-	if err := json.Unmarshal([]byte(text), &out); err != nil {
-		if err := llmjson.RepairAndUnmarshal(text, &out); err != nil {
-			return "", nil, fmt.Errorf("roll-up parse: %w", err)
-		}
+	text := strings.TrimSpace(infra.ExtractTextFromResponse(resp))
+	simple, sections := utils.ParseKeyValueMap(text)
+	out := &rollUpOutput{
+		Summary:          simple["summary"],
+		Themes:           sections["themes"],
+		KeyEntities:      sections["key_entities"],
+		OpenLoopsSummary: simple["open_loops_summary"],
 	}
 	content := text
 	if out.Summary != "" {
@@ -94,7 +83,7 @@ func runRollUpLLM(ctx context.Context, app *infra.App, periodLabel, analysesText
 			content += "\nOpen loops: " + out.OpenLoopsSummary
 		}
 	}
-	return content, &out, nil
+	return content, out, nil
 }
 
 func getEntriesWithAnalysisForRollup(ctx context.Context, start, end string, limit int) (analysesText string, sourceIDs []string, err error) {

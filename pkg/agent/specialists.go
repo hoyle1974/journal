@@ -2,15 +2,14 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
 	"google.golang.org/genai"
 	"github.com/jackstrohm/jot/internal/prompts"
-	"github.com/jackstrohm/jot/llmjson"
 	"github.com/jackstrohm/jot/pkg/infra"
 	"github.com/jackstrohm/jot/pkg/memory"
 	"github.com/jackstrohm/jot/pkg/utils"
@@ -40,16 +39,6 @@ func RunEvaluatorExtract(ctx context.Context, content string) (*EvaluatorExtract
 	if app == nil {
 		return nil, fmt.Errorf("no app in context")
 	}
-	schema := &genai.Schema{
-		Type: genai.TypeObject,
-		Properties: map[string]*genai.Schema{
-			"significance":       {Type: genai.TypeNumber, Description: "0.0-1.0. High: emotional, milestones, new people. Low: routine logistics."},
-			"domain":             {Type: genai.TypeString, Enum: []string{"relationship", "work", "task", "thought"}},
-			"fact_to_store":      {Type: genai.TypeString, Description: "Single distilled fact to store, or empty if nothing worth keeping"},
-			"future_commitment":  {Type: genai.TypeNumber, Description: "0.0-1.0. High when entry expresses something user will do or needs to do (I need to..., I will...)."},
-			"commitment_intent":  {Type: genai.TypeString, Description: "One sentence describing the action to take, or empty if no commitment."},
-		},
-	}
 	systemPrompt := prompts.Evaluator() + prompts.DataSafety()
 	prompt := ""
 	node, _, err := memory.FindContextByName(ctx, "user_profile")
@@ -64,35 +53,26 @@ func RunEvaluatorExtract(ctx context.Context, content string) (*EvaluatorExtract
 	defer cancel()
 
 	req := &infra.LLMRequest{
-		SystemPrompt:   systemPrompt,
-		Parts:          []*genai.Part{{Text: prompt}},
-		Model:          app.Config().GeminiModel,
-		GenConfig:      &infra.GenConfig{MaxOutputTokens: 1024, ResponseMIMEType: infra.MIMETypeJSON},
-		ResponseSchema: schema,
+		SystemPrompt: systemPrompt,
+		Parts:       []*genai.Part{{Text: prompt}},
+		Model:       app.Config().GeminiModel,
+		GenConfig:   &infra.GenConfig{MaxOutputTokens: 1024},
 	}
 	infra.GeminiCallsTotal.Inc()
 	resp, err := app.Dispatch(bgCtx, req)
 	if err != nil {
 		return nil, err
 	}
-	text := infra.ExtractTextFromResponse(resp)
-	type evaluatorOut struct {
-		Significance      float64 `json:"significance"`
-		Domain            string  `json:"domain"`
-		FactToStore       string  `json:"fact_to_store"`
-		FutureCommitment  float64 `json:"future_commitment"`
-		CommitmentIntent  string  `json:"commitment_intent"`
-	}
-	parsed, _ := llmjson.ParseLLMResponse[evaluatorOut](text, []string{"significance", "domain", "fact_to_store", "future_commitment", "commitment_intent"})
-	if parsed == nil {
-		return nil, nil
-	}
+	text := strings.TrimSpace(infra.ExtractTextFromResponse(resp))
+	simple, _ := utils.ParseKeyValueMap(text)
+	sig, _ := strconv.ParseFloat(strings.TrimSpace(simple["significance"]), 64)
+	fc, _ := strconv.ParseFloat(strings.TrimSpace(simple["future_commitment"]), 64)
 	out := &EvaluatorExtract{
-		Significance:     parsed.Significance,
-		Domain:           parsed.Domain,
-		FactToStore:      strings.TrimSpace(parsed.FactToStore),
-		FutureCommitment: parsed.FutureCommitment,
-		CommitmentIntent: strings.TrimSpace(parsed.CommitmentIntent),
+		Significance:     sig,
+		Domain:           strings.TrimSpace(simple["domain"]),
+		FactToStore:      strings.TrimSpace(simple["fact_to_store"]),
+		FutureCommitment: fc,
+		CommitmentIntent: strings.TrimSpace(simple["commitment_intent"]),
 	}
 	if out.Significance < 0 {
 		out.Significance = 0
@@ -303,15 +283,6 @@ func RunEvolutionAudit(ctx context.Context, queriesText, journalSummary, toolMan
 	if app == nil {
 		return nil, fmt.Errorf("no app in context")
 	}
-	schema := &genai.Schema{
-		Type: genai.TypeObject,
-		Properties: map[string]*genai.Schema{
-			"summary":            {Type: genai.TypeString, Description: "Architectural health check: 1-3 sentences on overall system friction."},
-			"facts":              {Type: genai.TypeArray, Items: &genai.Schema{Type: genai.TypeString}, Description: "Specific tool or knowledge gaps observed."},
-			"entities":           {Type: genai.TypeArray, Items: &genai.Schema{Type: genai.TypeString}, Description: "Proposals for new tools or code changes (Go-style)."},
-			"engineer_questions": {Type: genai.TypeArray, Items: &genai.Schema{Type: genai.TypeString}, Description: "Direct, actionable questions to ask the system engineer about building new tools or filling system capability gaps."},
-		},
-	}
 	systemPrompt := fmt.Sprintf(prompts.Specialist("evolution"), toolManifest) + prompts.DataSafety()
 	userPrompt := "## SYSTEM CAPABILITIES (Existing Tools):\n" + utils.WrapAsUserData(toolManifest) + "\n\n"
 	if personaBriefing != "" {
@@ -326,11 +297,10 @@ func RunEvolutionAudit(ctx context.Context, queriesText, journalSummary, toolMan
 		userPrompt += "\n\nRECENT JOURNAL THEMES (for context):\n" + utils.WrapAsUserData(utils.SanitizePrompt(journalSummary))
 	}
 	req := &infra.LLMRequest{
-		SystemPrompt:   systemPrompt,
-		Parts:         []*genai.Part{{Text: userPrompt}},
-		Model:         app.Config().DreamerModel,
-		GenConfig:     &infra.GenConfig{MaxOutputTokens: 2048, TopP: 0.9, ResponseMIMEType: infra.MIMETypeJSON},
-		ResponseSchema: schema,
+		SystemPrompt: systemPrompt,
+		Parts:       []*genai.Part{{Text: userPrompt}},
+		Model:       app.Config().DreamerModel,
+		GenConfig:   &infra.GenConfig{MaxOutputTokens: 2048, TopP: 0.9},
 	}
 	apiCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
@@ -342,32 +312,23 @@ func RunEvolutionAudit(ctx context.Context, queriesText, journalSummary, toolMan
 		return nil, infra.WrapLLMError(err)
 	}
 
-	text := infra.ExtractTextFromResponse(resp)
-	out, parseErr := llmjson.ParseLLMResponse[EvolutionAuditOutput](text, []string{"summary", "facts", "entities", "engineer_questions"})
-	if out == nil {
-		// Best-effort: try repair-only parse so evolution synthesis can still write something.
-		var repaired EvolutionAuditOutput
-		if err := llmjson.RepairAndUnmarshal(text, &repaired); err == nil {
-			infra.LoggerFrom(ctx).Info("evolution_audit recovered via repair", "summary_len", len(repaired.Summary), "facts", len(repaired.Facts))
-			return &repaired, nil
-		}
-		if parseErr == nil {
-			parseErr = errors.New("parse failed")
-		}
-		infra.LoggerFrom(ctx).Warn("evolution_audit parse failed, returning minimal output", "error", parseErr, "raw", utils.TruncateString(text, 400))
-		// Return minimal valid output so RunEvolutionSynthesis can still update system_evolution.
-		return &EvolutionAuditOutput{
-			Summary:           "Evolution audit response was truncated or malformed; partial raw: " + utils.TruncateString(strings.TrimSpace(text), 500),
-			Facts:             nil,
-			Entities:          nil,
-			EngineerQuestions: nil,
-		}, nil
+	text := strings.TrimSpace(infra.ExtractTextFromResponse(resp))
+	simple, sections := utils.ParseKeyValueMap(text)
+	out := &EvolutionAuditOutput{
+		Summary:           strings.TrimSpace(simple["summary"]),
+		Facts:             sections["facts"],
+		Entities:          sections["entities"],
+		EngineerQuestions: sections["engineer_questions"],
+	}
+	if out.Summary == "" && len(out.Facts) == 0 && len(out.Entities) == 0 && len(out.EngineerQuestions) == 0 {
+		infra.LoggerFrom(ctx).Warn("evolution_audit parse had no content, returning minimal output", "raw", utils.TruncateString(text, 400))
+		out.Summary = "Evolution audit response was truncated or malformed; partial raw: " + utils.TruncateString(text, 500)
 	}
 	infra.LoggerFrom(ctx).Info("evolution_audit done", "summary_len", len(out.Summary), "facts", len(out.Facts), "entities", len(out.Entities), "engineer_questions", len(out.EngineerQuestions))
 	return out, nil
 }
 
-// RunSpecialist runs a single specialist agent for final JSON extraction.
+// RunSpecialist runs a single specialist agent for key/value extraction.
 func RunSpecialist(ctx context.Context, domain Domain, input *SpecialistInput, modelOverride string) (*SpecialistOutput, error) {
 	ctx, span := infra.StartSpan(ctx, "agent."+string(domain))
 	defer span.End()
@@ -406,24 +367,14 @@ Recent journal context:
 	if modelOverride != "" {
 		model = app.Config().DreamerModel
 	}
-	schema := &genai.Schema{
-		Type: genai.TypeObject,
-		Properties: map[string]*genai.Schema{
-			"summary":  {Type: genai.TypeString},
-			"facts":    {Type: genai.TypeArray, Items: &genai.Schema{Type: genai.TypeString}},
-			"entities": {Type: genai.TypeArray, Items: &genai.Schema{Type: genai.TypeString}},
-		},
-	}
 	systemPrompt := specialistSystemPrompts[domain] +
-		"\n\nCRITICAL: Output at most 5 facts. Use the format '[CATEGORY] Subject: Detail'. " +
-		"Keep summaries to 1-2 sentences. Avoid conversational filler." +
+		"\n\nOutput structured key/value lines only. No JSON, no markdown, no code fences. Use this format:\nsummary: <1-2 sentences>\nfacts:\n<one fact per line, at most 5; use [CATEGORY] Subject: Detail>\nentities:\n<one per line>\n\nCRITICAL: Output at most 5 facts. Keep summaries to 1-2 sentences. Avoid conversational filler." +
 		prompts.DataSafety()
 	req := &infra.LLMRequest{
-		SystemPrompt:   systemPrompt,
-		Parts:          []*genai.Part{{Text: prompt}},
-		Model:          model,
-		GenConfig:      &infra.GenConfig{MaxOutputTokens: 2048, TopP: 0.9, ResponseMIMEType: infra.MIMETypeJSON},
-		ResponseSchema: schema,
+		SystemPrompt: systemPrompt,
+		Parts:       []*genai.Part{{Text: prompt}},
+		Model:       model,
+		GenConfig:   &infra.GenConfig{MaxOutputTokens: 2048, TopP: 0.9},
 	}
 
 	apiCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
@@ -451,40 +402,38 @@ Recent journal context:
 	}
 	infra.LoggerFrom(ctx).Info("specialist api_done", "domain", domain, "api_ms", apiMs)
 
-	text := infra.ExtractTextFromResponse(resp)
+	text := strings.TrimSpace(infra.ExtractTextFromResponse(resp))
 	totalMs := time.Since(t0).Milliseconds()
 	infra.LoggerFrom(ctx).Info("specialist total", "domain", domain, "total_ms", totalMs, "client_ms", clientMs, "api_ms", apiMs)
 	infra.LoggerFrom(ctx).Info("specialist response", "domain", domain, "response_len", len(text), "response", text)
 
-	var parsed struct {
-		Summary  string   `json:"summary"`
-		Facts    []string `json:"facts"`
-		Entities []string `json:"entities"`
-	}
-	parsedOut, parseErr := llmjson.ParseLLMResponse[struct {
-		Summary  string   `json:"summary"`
-		Facts    []string `json:"facts"`
-		Entities []string `json:"entities"`
-	}](text, []string{"summary", "facts", "entities"})
-	if parsedOut == nil {
-		infra.LoggerFrom(ctx).Warn("specialist output parse failed", "domain", domain, "error", parseErr, "raw_response_len", len(text), "raw", text)
+	simple, sections := utils.ParseKeyValueMap(text)
+	summary := strings.TrimSpace(simple["summary"])
+	facts := sections["facts"]
+	entities := sections["entities"]
+	if summary == "" && len(facts) == 0 && len(entities) == 0 {
+		infra.LoggerFrom(ctx).Warn("specialist output parse had no structured content", "domain", domain, "raw_response_len", len(text), "raw", text)
 		return &SpecialistOutput{Domain: domain, Summary: strings.TrimSpace(text)}, nil
 	}
-	parsed = *parsedOut
-
-	if len(parsed.Facts) == 0 {
-		infra.LoggerFrom(ctx).Info("specialist returned 0 facts", "domain", domain, "summary", parsed.Summary, "raw_response_len", len(text), "raw_response", text)
+	if len(facts) == 0 {
+		infra.LoggerFrom(ctx).Info("specialist returned 0 facts", "domain", domain, "summary", summary, "raw_response_len", len(text), "raw_response", text)
 	}
 
 	return &SpecialistOutput{
 		Domain:   domain,
-		Summary:  parsed.Summary,
-		Facts:    parsed.Facts,
-		Entities: parsed.Entities,
+		Summary:  summary,
+		Facts:    facts,
+		Entities: entities,
 	}, nil
 }
 
-const contextExtractorPrompt = `From the journal entries, list ongoing projects, plans, or events as short snake_case names only (e.g. party_planning, job_search, vacation_research). Ignore one-off questions and system commands. Return JSON: {"impacted_contexts": ["name1", "name2"]}.`
+const contextExtractorPrompt = `From the journal entries, list ongoing projects, plans, or events as short snake_case names only (e.g. party_planning, job_search, vacation_research). Ignore one-off questions and system commands.
+
+Output structured key/value lines only. No JSON, no markdown, no code fences.
+
+impacted_contexts:
+<snake_case context name>
+(one per line)`
 
 // RunContextExtractor uses Gemini to extract impacted_contexts from the journal.
 func RunContextExtractor(ctx context.Context, journalContext string) ([]string, error) {
@@ -495,19 +444,12 @@ func RunContextExtractor(ctx context.Context, journalContext string) ([]string, 
 	if app == nil {
 		return nil, fmt.Errorf("no app in context")
 	}
-	schema := &genai.Schema{
-		Type: genai.TypeObject,
-		Properties: map[string]*genai.Schema{
-			"impacted_contexts": {Type: genai.TypeArray, Items: &genai.Schema{Type: genai.TypeString}},
-		},
-	}
 	userPrompt := "Journal entries:\n" + utils.WrapAsUserData(utils.SanitizePrompt(journalContext))
 	req := &infra.LLMRequest{
-		SystemPrompt:   contextExtractorPrompt + prompts.DataSafety(),
-		Parts:         []*genai.Part{{Text: userPrompt}},
-		Model:         app.Config().DreamerModel,
-		GenConfig:     &infra.GenConfig{MaxOutputTokens: 1024, TopP: 0.9, ResponseMIMEType: infra.MIMETypeJSON},
-		ResponseSchema: schema,
+		SystemPrompt: contextExtractorPrompt + prompts.DataSafety(),
+		Parts:       []*genai.Part{{Text: userPrompt}},
+		Model:       app.Config().DreamerModel,
+		GenConfig:   &infra.GenConfig{MaxOutputTokens: 1024, TopP: 0.9},
 	}
 	apiCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
@@ -525,17 +467,21 @@ func RunContextExtractor(ctx context.Context, journalContext string) ([]string, 
 		infra.LoggerFrom(ctx).Debug("context_extractor empty response")
 		return nil, nil
 	}
-	parsedOut, parseErr := llmjson.ParseLLMResponse[struct{ ImpactedContexts []string }](text, []string{"impacted_contexts"})
-	if parseErr != nil || parsedOut == nil {
-		infra.LoggerFrom(ctx).Warn("context_extractor parse failed", "error", parseErr, "raw", utils.TruncateString(text, 300))
-		// Return empty slice (not nil) so dreamer continues with no impacted contexts instead of nil.
+	_, sections := utils.ParseKeyValueMap(text)
+	contexts := sections["impacted_contexts"]
+	if len(contexts) == 0 {
+		infra.LoggerFrom(ctx).Debug("context_extractor no impacted_contexts section", "raw", utils.TruncateString(text, 300))
 		return []string{}, nil
 	}
-	infra.LoggerFrom(ctx).Info("context_extractor done", "count", len(parsedOut.ImpactedContexts))
-	return parsedOut.ImpactedContexts, nil
+	infra.LoggerFrom(ctx).Info("context_extractor done", "count", len(contexts))
+	return contexts, nil
 }
 
-const queryAnalyzerPrompt = `Analyze the user's recent queries. (1) Group them into semantic clusters (e.g. "Jot Development", "Family Logistics"). (2) Identify Knowledge Gaps: What is the user asking that we couldn't answer? (3) Identify Curiosity Trends: What is the user becoming more interested in? Return JSON with a single string field "query_analysis" containing the full analysis.`
+const queryAnalyzerPrompt = `Analyze the user's recent queries. (1) Group them into semantic clusters (e.g. "Jot Development", "Family Logistics"). (2) Identify Knowledge Gaps: What is the user asking that we couldn't answer? (3) Identify Curiosity Trends: What is the user becoming more interested in?
+
+Output structured key/value lines only. No JSON, no markdown, no code fences.
+
+query_analysis: <full analysis text>`
 
 // RunQueryAnalyzer uses Gemini to analyze recent queries.
 func RunQueryAnalyzer(ctx context.Context, recentQueriesText string) (string, error) {
@@ -550,19 +496,12 @@ func RunQueryAnalyzer(ctx context.Context, recentQueriesText string) (string, er
 	if app == nil {
 		return "", fmt.Errorf("no app in context")
 	}
-	schema := &genai.Schema{
-		Type: genai.TypeObject,
-		Properties: map[string]*genai.Schema{
-			"query_analysis": {Type: genai.TypeString, Description: "Analysis: semantic clusters, knowledge gaps, curiosity trends"},
-		},
-	}
 	userPrompt := "Recent queries:\n" + utils.WrapAsUserData(utils.SanitizePrompt(recentQueriesText))
 	req := &infra.LLMRequest{
-		SystemPrompt:   queryAnalyzerPrompt + prompts.DataSafety(),
-		Parts:         []*genai.Part{{Text: userPrompt}},
-		Model:         app.Config().DreamerModel,
-		GenConfig:     &infra.GenConfig{MaxOutputTokens: 1024, TopP: 0.9, ResponseMIMEType: infra.MIMETypeJSON},
-		ResponseSchema: schema,
+		SystemPrompt: queryAnalyzerPrompt + prompts.DataSafety(),
+		Parts:       []*genai.Part{{Text: userPrompt}},
+		Model:       app.Config().DreamerModel,
+		GenConfig:   &infra.GenConfig{MaxOutputTokens: 1024, TopP: 0.9},
 	}
 	apiCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
@@ -580,12 +519,8 @@ func RunQueryAnalyzer(ctx context.Context, recentQueriesText string) (string, er
 		infra.LoggerFrom(ctx).Debug("query_analyzer empty response")
 		return "", nil
 	}
-	parsedOut, parseErr := llmjson.ParseLLMResponse[struct{ QueryAnalysis string }](text, []string{"query_analysis"})
-	if parseErr != nil || parsedOut == nil {
-		infra.LoggerFrom(ctx).Warn("query_analyzer parse failed", "error", parseErr, "raw", utils.TruncateString(text, 300))
-		return "", nil
-	}
-	out := strings.TrimSpace(parsedOut.QueryAnalysis)
+	simple, _ := utils.ParseKeyValueMap(text)
+	out := strings.TrimSpace(simple["query_analysis"])
 	infra.LoggerFrom(ctx).Info("query_analyzer done", "len", len(out))
 	return out, nil
 }
@@ -604,26 +539,13 @@ func DecomposeMessage(ctx context.Context, userMessage string) ([]Domain, error)
 	if app == nil {
 		return nil, fmt.Errorf("no app in context")
 	}
-	schema := &genai.Schema{
-		Type: genai.TypeObject,
-		Properties: map[string]*genai.Schema{
-			"domains": {
-				Type: genai.TypeArray,
-				Items: &genai.Schema{
-					Type: genai.TypeString,
-					Enum: []string{"relationship", "work", "task", "thought", "selfmodel"},
-				},
-			},
-		},
-	}
 	systemPrompt := prompts.Router() + prompts.DataSafety()
 	prompt := fmt.Sprintf("User message:\n%s\n\nWhich domains to consult?", utils.WrapAsUserData(utils.SanitizePrompt(userMessage)))
 	req := &infra.LLMRequest{
-		SystemPrompt:   systemPrompt,
-		Parts:         []*genai.Part{{Text: prompt}},
-		Model:         app.Config().GeminiModel,
-		GenConfig:     &infra.GenConfig{MaxOutputTokens: 1024, ResponseMIMEType: infra.MIMETypeJSON},
-		ResponseSchema: schema,
+		SystemPrompt: systemPrompt,
+		Parts:       []*genai.Part{{Text: prompt}},
+		Model:       app.Config().GeminiModel,
+		GenConfig:   &infra.GenConfig{MaxOutputTokens: 1024},
 	}
 	infra.GeminiCallsTotal.Inc()
 	resp, err := app.Dispatch(ctx, req)
@@ -632,17 +554,14 @@ func DecomposeMessage(ctx context.Context, userMessage string) ([]Domain, error)
 		return nil, infra.WrapLLMError(err)
 	}
 
-	text := infra.ExtractTextFromResponse(resp)
-	var result DecompositionResult
-	if err := json.Unmarshal([]byte(text), &result); err != nil {
-		infra.LoggerFrom(ctx).Warn("decomposition parse failed", "error", err, "raw", utils.TruncateString(text, 200))
-		return []Domain{DomainTask, DomainThought}, nil
-	}
+	text := strings.TrimSpace(infra.ExtractTextFromResponse(resp))
+	_, sections := utils.ParseKeyValueMap(text)
+	domainStrs := sections["domains"]
 
 	seen := make(map[Domain]bool)
 	var domains []Domain
-	for _, d := range result.Domains {
-		dom := Domain(d)
+	for _, d := range domainStrs {
+		dom := Domain(strings.TrimSpace(strings.ToLower(d)))
 		if dom == DomainRelationship || dom == DomainWork || dom == DomainTask || dom == DomainThought || dom == DomainSelfModel {
 			if !seen[dom] {
 				seen[dom] = true

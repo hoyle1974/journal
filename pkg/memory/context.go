@@ -14,7 +14,6 @@ import (
 	"google.golang.org/genai"
 	"github.com/jackstrohm/jot/internal/config"
 	"github.com/jackstrohm/jot/internal/prompts"
-	"github.com/jackstrohm/jot/llmjson"
 	"github.com/jackstrohm/jot/pkg/infra"
 	"github.com/jackstrohm/jot/pkg/journal"
 	"github.com/jackstrohm/jot/pkg/utils"
@@ -639,30 +638,11 @@ func analyzeForNewContext(ctx context.Context, entryContent string) (bool, strin
 		infra.LoggerFrom(ctx).Warn("failed to get app for context analysis")
 		return false, "", nil
 	}
-	schema := &genai.Schema{
-		Type: genai.TypeObject,
-		Properties: map[string]*genai.Schema{
-			"is_project_or_plan": {
-				Type:        genai.TypeBoolean,
-				Description: "True if this content describes a new project, plan, event, or ongoing activity that spans multiple sessions",
-			},
-			"context_name": {
-				Type:        genai.TypeString,
-				Description: "Short snake_case name for the context (e.g., party_planning, job_search, vacation_research)",
-			},
-			"entities": {
-				Type:        genai.TypeArray,
-				Items:       &genai.Schema{Type: genai.TypeString},
-				Description: "Key entities, dates, or topics mentioned",
-			},
-		},
-	}
 	prompt := prompts.FormatContextAnalyze(utils.WrapAsUserData(utils.SanitizePrompt(entryContent)))
 	req := &infra.LLMRequest{
-		Parts:           []*genai.Part{{Text: prompt}},
-		Model:           app.Config().GeminiModel,
-		GenConfig:       &infra.GenConfig{MaxOutputTokens: 512, ResponseMIMEType: infra.MIMETypeJSON},
-		ResponseSchema:  schema,
+		Parts:     []*genai.Part{{Text: prompt}},
+		Model:     app.Config().GeminiModel,
+		GenConfig: &infra.GenConfig{MaxOutputTokens: 512},
 	}
 	resp, err := app.Dispatch(ctx, req)
 	if err != nil {
@@ -670,19 +650,12 @@ func analyzeForNewContext(ctx context.Context, entryContent string) (bool, strin
 		return false, "", nil
 	}
 
-	jsonText := infra.ExtractText(resp)
-
-	type contextResult struct {
-		IsProjectOrPlan bool     `json:"is_project_or_plan"`
-		ContextName     string   `json:"context_name"`
-		Entities        []string `json:"entities"`
-	}
-	result, _ := llmjson.ParseLLMResponse[contextResult](jsonText, []string{"is_project_or_plan", "context_name", "entities"})
-	if result == nil {
-		infra.LoggerFrom(ctx).Warn("failed to parse context analysis response")
-		return false, "", nil
-	}
-	return result.IsProjectOrPlan, result.ContextName, result.Entities
+	text := strings.TrimSpace(infra.ExtractText(resp))
+	simple, sections := utils.ParseKeyValueMap(text)
+	isProject := strings.EqualFold(strings.TrimSpace(simple["is_project_or_plan"]), "true")
+	contextName := strings.TrimSpace(simple["context_name"])
+	entities := sections["entities"]
+	return isProject, contextName, entities
 }
 
 const maxSourceEntriesForSynthesis = 10

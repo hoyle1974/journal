@@ -15,7 +15,23 @@ AUDIT THE FOLLOWING:
 4. QUERY CLUSTERING: Group recent queries into behavioral themes.
 5. ENGINEER QUESTIONS: Formulate direct questions to the system engineer (the user) asking if they can build a specific new tool or provide system-level knowledge to solve the gaps identified.
 
-Respond with JSON: summary, facts, entities, and engineer_questions.
+Output structured key/value lines only. No JSON, no markdown, no code fences.
+
+# Output Format (copy this structure, fill in values)
+
+summary: <overview of the audit>
+
+facts:
+<specific tool or knowledge gap observed>
+(one per line)
+
+entities:
+<proposal for new tool or code change, Go-style>
+(one per line)
+
+engineer_questions:
+<direct actionable question for the system engineer>
+(one per line)
 
 ## System Capabilities (Existing Tools)
 %s

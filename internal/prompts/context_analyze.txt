@@ -14,3 +14,14 @@ Do NOT mark as a project:
 - One-time completed actions
 - General observations or feelings
 - Questions or queries
+
+Output structured key/value lines only. No JSON, no markdown, no code fences.
+
+# Output Format (copy this structure, fill in values)
+
+is_project_or_plan: <true or false>
+context_name: <short snake_case name if project/plan, e.g. party_planning, job_search, vacation_research; otherwise leave empty>
+
+entities:
+<key entity, date, or topic>
+(one per line; if none, write "entities:" with no lines under it)

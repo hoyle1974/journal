@@ -6,96 +6,83 @@ import (
 	"testing"
 )
 
-func TestParsePlanJSON(t *testing.T) {
+func TestParsePlanKeyValue(t *testing.T) {
 	tests := []struct {
 		name       string
-		jsonText   string
+		kvText     string
 		wantErr    bool
 		wantPhases int
 	}{
 		{
 			name: "valid plan with phases",
-			jsonText: `{
-				"phases": [
-					{"title": "Phase 1", "description": "First step", "dependencies": []},
-					{"title": "Phase 2", "description": "Second step", "dependencies": ["Phase 1"]}
-				]
-			}`,
+			kvText: `phases:
+Phase 1 | First step |
+Phase 2 | Second step | Phase 1`,
 			wantErr:    false,
 			wantPhases: 2,
 		},
 		{
-			name:       "valid plan with empty phases",
-			jsonText:   `{"phases": []}`,
+			name: "valid plan with empty phases",
+			kvText: `phases:
+`,
 			wantErr:    false,
 			wantPhases: 0,
 		},
 		{
 			name: "valid plan with dependencies",
-			jsonText: `{
-				"phases": [
-					{"title": "Setup", "description": "Initial setup", "dependencies": []},
-					{"title": "Build", "description": "Build phase", "dependencies": ["Setup"]},
-					{"title": "Deploy", "description": "Deployment", "dependencies": ["Build"]}
-				]
-			}`,
+			kvText: `phases:
+Setup | Initial setup |
+Build | Build phase | Setup
+Deploy | Deployment | Build`,
 			wantErr:    false,
 			wantPhases: 3,
 		},
 		{
-			name:     "invalid JSON",
-			jsonText: `{invalid json}`,
-			wantErr:  true,
-		},
-		{
 			name:     "empty string",
-			jsonText: "",
+			kvText:   "",
 			wantErr:  true,
 		},
 		{
-			name:       "null phases",
-			jsonText:   `{"phases": null}`,
-			wantErr:    false,
+			name:     "no phases section",
+			kvText:   "summary: something\nother: value",
+			wantErr:  false,
 			wantPhases: 0,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			plan, err := ParsePlanJSON(tt.jsonText)
+			plan, err := ParsePlanKeyValue(tt.kvText)
 			if tt.wantErr {
 				if err == nil {
-					t.Errorf("ParsePlanJSON() expected error, got nil")
+					t.Errorf("ParsePlanKeyValue() expected error, got nil")
 				}
 				return
 			}
 			if err != nil {
-				t.Errorf("ParsePlanJSON() unexpected error: %v", err)
+				t.Errorf("ParsePlanKeyValue() unexpected error: %v", err)
 				return
 			}
 			if plan == nil {
-				t.Errorf("ParsePlanJSON() returned nil plan")
+				t.Errorf("ParsePlanKeyValue() returned nil plan")
 				return
 			}
 			phaseCount := len(plan.Phases)
 			if phaseCount != tt.wantPhases {
-				t.Errorf("ParsePlanJSON() phases count = %d, want %d", phaseCount, tt.wantPhases)
+				t.Errorf("ParsePlanKeyValue() phases count = %d, want %d", phaseCount, tt.wantPhases)
 			}
 		})
 	}
 }
 
-func TestParsePlanJSON_PhaseStructure(t *testing.T) {
-	jsonText := `{
-		"phases": [
-			{"title": "Research", "description": "Gather requirements", "dependencies": []},
-			{"title": "Design", "description": "Create architecture", "dependencies": ["Research"]}
-		]
-	}`
+func TestParsePlanKeyValue_PhaseStructure(t *testing.T) {
+	kvText := `phases:
+Research | Gather requirements
+Design | Create architecture | Research`
 
-	plan, err := ParsePlanJSON(jsonText)
+	plan, err := ParsePlanKeyValue(kvText)
 	if err != nil {
-		t.Fatalf("ParsePlanJSON() error: %v", err)
+		t.Fatalf("ParsePlanKeyValue() error: %v", err)
 	}
 
 	if len(plan.Phases) != 2 {

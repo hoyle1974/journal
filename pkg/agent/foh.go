@@ -10,7 +10,6 @@ import (
 
 	"google.golang.org/genai"
 	"github.com/jackstrohm/jot/internal/prompts"
-	"github.com/jackstrohm/jot/llmjson"
 	"github.com/jackstrohm/jot/pkg/infra"
 	"github.com/jackstrohm/jot/pkg/utils"
 	"github.com/jackstrohm/jot/tools"
@@ -593,53 +592,23 @@ func runReflectionCheck(ctx context.Context, app *infra.App, answer, question st
 	if app == nil {
 		return true, "", nil
 	}
-	schema := &genai.Schema{
-		Type: genai.TypeObject,
-		Properties: map[string]*genai.Schema{
-			"pass":   {Type: genai.TypeBoolean, Description: "true if the answer is consistent and not cluttered with Gravel"},
-			"reason": {Type: genai.TypeString, Description: "Brief reason if pass is false"},
-		},
-		Required: []string{"pass", "reason"},
-	}
 	prompt := prompts.FormatReflectionCheck(utils.SanitizePrompt(answer), utils.SanitizePrompt(semanticMemory))
 	req := &infra.LLMRequest{
-		Parts:           []*genai.Part{{Text: prompt}},
-		Model:           app.Config().GeminiModel,
-		GenConfig:       &infra.GenConfig{MaxOutputTokens: 256, ResponseMIMEType: infra.MIMETypeJSON},
-		ResponseSchema:  schema,
+		Parts:     []*genai.Part{{Text: prompt}},
+		Model:     app.Config().GeminiModel,
+		GenConfig: &infra.GenConfig{MaxOutputTokens: 256},
 	}
 	infra.GeminiCallsTotal.Inc()
 	resp, err := app.Dispatch(ctx, req)
 	if err != nil {
 		return true, "", err
 	}
-	text := infra.ExtractTextFromResponse(resp)
-	var out struct {
-		Pass   bool   `json:"pass"`
-		Reason string `json:"reason"`
-	}
-	if json.Unmarshal([]byte(text), &out) == nil {
-		return out.Pass, out.Reason, nil
-	}
-	// Strip preamble (e.g. "Here is the JSON requested:\n```json") and repair truncated JSON.
-	if idx := strings.Index(text, "{"); idx >= 0 {
-		text = strings.TrimSpace(text[idx:])
-	}
-	if llmjson.RepairAndUnmarshal(text, &out) == nil {
-		return out.Pass, out.Reason, nil
-	}
-	// Best-effort: extract pass and reason from malformed or truncated response.
-	partial, _ := llmjson.PartialUnmarshalObject(text, []string{"pass", "reason"})
-	if len(partial) > 0 {
-		if raw, ok := partial["pass"]; ok && len(raw) > 0 {
-			_ = json.Unmarshal(raw, &out.Pass)
-		}
-		if raw, ok := partial["reason"]; ok && len(raw) > 0 {
-			_ = json.Unmarshal(raw, &out.Reason)
-		}
-		return out.Pass, out.Reason, nil
-	}
-	return true, "", nil
+	text := strings.TrimSpace(infra.ExtractTextFromResponse(resp))
+	simple, _ := utils.ParseKeyValueMap(text)
+	passStr := strings.TrimSpace(strings.ToLower(simple["pass"]))
+	pass = passStr == "true" || passStr == "yes" || passStr == "1"
+	reason = strings.TrimSpace(simple["reason"])
+	return pass, reason, nil
 }
 
 const synthesisPassRetrievedMaxBytes = 6000

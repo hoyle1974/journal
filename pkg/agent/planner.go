@@ -8,7 +8,6 @@ import (
 
 	"google.golang.org/genai"
 	"github.com/jackstrohm/jot/internal/prompts"
-	"github.com/jackstrohm/jot/llmjson"
 	"github.com/jackstrohm/jot/pkg/infra"
 	"github.com/jackstrohm/jot/pkg/memory"
 	"github.com/jackstrohm/jot/pkg/utils"
@@ -26,7 +25,7 @@ type GeneratedPlan struct {
 	Phases []PlanPhase `json:"phases"`
 }
 
-// CreateAndSavePlan forces Gemini to decompose a goal into JSON, then saves it to the Knowledge Graph.
+// CreateAndSavePlan forces Gemini to decompose a goal into key/value output, then saves it to the Knowledge Graph.
 func CreateAndSavePlan(ctx context.Context, goal string) (string, error) {
 	ctx, span := infra.StartSpan(ctx, "plan.create_and_save")
 	defer span.End()
@@ -35,29 +34,12 @@ func CreateAndSavePlan(ctx context.Context, goal string) (string, error) {
 	if app == nil {
 		return "", fmt.Errorf("no app in context")
 	}
-	schema := &genai.Schema{
-		Type: genai.TypeObject,
-		Properties: map[string]*genai.Schema{
-			"phases": {
-				Type: genai.TypeArray,
-				Items: &genai.Schema{
-					Type: genai.TypeObject,
-					Properties: map[string]*genai.Schema{
-						"title":        {Type: genai.TypeString},
-						"description":  {Type: genai.TypeString},
-						"dependencies": {Type: genai.TypeArray, Items: &genai.Schema{Type: genai.TypeString}},
-					},
-				},
-			},
-		},
-	}
 	prompt := fmt.Sprintf("Create a detailed, sequential plan to achieve this goal:\n%s\nBreak it down into clear phases with titles, descriptions, and any dependencies between phases.", utils.WrapAsUserData(utils.SanitizePrompt(goal)))
 	req := &infra.LLMRequest{
-		SystemPrompt:   prompts.PlanSystem(),
-		Parts:          []*genai.Part{{Text: prompt}},
-		Model:          app.Config().GeminiModel,
-		GenConfig:      &infra.GenConfig{MaxOutputTokens: 2048, ResponseMIMEType: infra.MIMETypeJSON},
-		ResponseSchema: schema,
+		SystemPrompt: prompts.PlanSystem(),
+		Parts:        []*genai.Part{{Text: prompt}},
+		Model:        app.Config().GeminiModel,
+		GenConfig:    &infra.GenConfig{MaxOutputTokens: 2048},
 	}
 	resp, err := app.Dispatch(ctx, req)
 	if err != nil {
@@ -65,8 +47,8 @@ func CreateAndSavePlan(ctx context.Context, goal string) (string, error) {
 		return "", fmt.Errorf("failed to generate plan: %w", err)
 	}
 
-	jsonText := infra.ExtractTextFromResponse(resp)
-	plan, err := parsePlanJSON(jsonText)
+	text := strings.TrimSpace(infra.ExtractTextFromResponse(resp))
+	plan, err := parsePlanKeyValue(text)
 	if err != nil {
 		span.RecordError(err)
 		return "", err
@@ -106,18 +88,35 @@ func CreateAndSavePlan(ctx context.Context, goal string) (string, error) {
 	return strings.Join(resultLines, "\n"), nil
 }
 
-// ParsePlanJSON parses JSON text into a GeneratedPlan. Exported for testing.
-func ParsePlanJSON(jsonText string) (*GeneratedPlan, error) {
-	return parsePlanJSON(jsonText)
+// ParsePlanKeyValue parses key/value text into a GeneratedPlan. Exported for testing.
+func ParsePlanKeyValue(text string) (*GeneratedPlan, error) {
+	return parsePlanKeyValue(text)
 }
 
-func parsePlanJSON(jsonText string) (*GeneratedPlan, error) {
-	plan, parseErr := llmjson.ParseLLMResponse[GeneratedPlan](jsonText, []string{"phases"})
-	if plan == nil {
-		if parseErr == nil {
-			parseErr = fmt.Errorf("parse failed")
-		}
-		return nil, fmt.Errorf("failed to parse plan JSON: %w", parseErr)
+func parsePlanKeyValue(text string) (*GeneratedPlan, error) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return nil, fmt.Errorf("empty input")
 	}
-	return plan, nil
+	_, sections := utils.ParseKeyValueMap(text)
+	phaseLines := sections["phases"]
+	var phases []PlanPhase
+	for _, line := range phaseLines {
+		parts := strings.SplitN(line, " | ", 3)
+		if len(parts) < 2 {
+			continue
+		}
+		title := strings.TrimSpace(parts[0])
+		desc := strings.TrimSpace(parts[1])
+		var deps []string
+		if len(parts) >= 3 && strings.TrimSpace(parts[2]) != "" {
+			for _, d := range strings.Split(parts[2], ",") {
+				if d := strings.TrimSpace(d); d != "" {
+					deps = append(deps, d)
+				}
+			}
+		}
+		phases = append(phases, PlanPhase{Title: title, Description: desc, Dependencies: deps})
+	}
+	return &GeneratedPlan{Phases: phases}, nil
 }

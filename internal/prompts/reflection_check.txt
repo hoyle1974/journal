@@ -8,4 +8,9 @@ Answer:
 Semantic Memory:
 %s
 
-Reply with JSON: { "pass": true/false, "reason": "..." }
+Output structured key/value lines only. No JSON, no markdown, no code fences.
+
+# Output Format (copy this structure, fill in values)
+
+pass: <true or false>
+reason: <brief reason if pass is false; otherwise leave empty or "ok">

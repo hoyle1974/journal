@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -10,7 +9,6 @@ import (
 	"cloud.google.com/go/firestore"
 	"google.golang.org/genai"
 	"github.com/jackstrohm/jot/internal/prompts"
-	"github.com/jackstrohm/jot/llmjson"
 	"github.com/jackstrohm/jot/pkg/infra"
 	"github.com/jackstrohm/jot/pkg/journal"
 	"github.com/jackstrohm/jot/pkg/memory"
@@ -55,26 +53,14 @@ func RunGapDetection(ctx context.Context, journalContext string, entryUUIDs []st
 
 	// Inject app capabilities so the gap-detector LLM knows what Jot can do (entry points, agents, memory, tools).
 	capabilitiesAndTools := prompts.AppCapabilities() + "\n\n## Existing tools (compact)\n" + tools.GetCompactDirectory()
-	schema := &genai.Schema{
-		Type: genai.TypeArray,
-		Items: &genai.Schema{
-			Type: genai.TypeObject,
-			Properties: map[string]*genai.Schema{
-				"kind":     {Type: genai.TypeString},
-				"question": {Type: genai.TypeString},
-				"context":  {Type: genai.TypeString},
-			},
-		},
-	}
 	userPrompt := prompts.FormatGapDetector(
 		utils.WrapAsUserData(utils.SanitizePrompt(journalContext)),
 		utils.WrapAsUserData(relevantKnowledge),
 		utils.WrapAsUserData(capabilitiesAndTools))
 	req := &infra.LLMRequest{
-		Parts:           []*genai.Part{{Text: userPrompt}},
-		Model:           app.Config().DreamerModel,
-		GenConfig:       &infra.GenConfig{MaxOutputTokens: 1024, ResponseMIMEType: infra.MIMETypeJSON},
-		ResponseSchema:  schema,
+		Parts:     []*genai.Part{{Text: userPrompt}},
+		Model:     app.Config().DreamerModel,
+		GenConfig: &infra.GenConfig{MaxOutputTokens: 1024},
 	}
 	apiCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
@@ -84,13 +70,22 @@ func RunGapDetection(ctx context.Context, journalContext string, entryUUIDs []st
 		span.RecordError(err)
 		return infra.WrapLLMError(err)
 	}
-	text := infra.ExtractTextFromResponse(resp)
+	text := strings.TrimSpace(infra.ExtractTextFromResponse(resp))
+	_, sections := utils.ParseKeyValueMap(text)
+	issueLines := sections["issues"]
 	var items []gapDetectItem
-	if err := json.Unmarshal([]byte(text), &items); err != nil {
-		if err := llmjson.RepairAndUnmarshal(text, &items); err != nil {
-			infra.LoggerFrom(ctx).Debug("gap detection parse failed", "error", err, "raw", utils.TruncateString(text, 300))
-			return nil
+	for _, line := range issueLines {
+		parts := strings.SplitN(line, " | ", 3)
+		if len(parts) < 2 {
+			continue
 		}
+		kind := strings.TrimSpace(strings.ToLower(parts[0]))
+		question := strings.TrimSpace(parts[1])
+		contextStr := ""
+		if len(parts) >= 3 {
+			contextStr = strings.TrimSpace(parts[2])
+		}
+		items = append(items, gapDetectItem{Kind: kind, Question: question, Context: contextStr})
 	}
 	if len(items) == 0 {
 		return nil

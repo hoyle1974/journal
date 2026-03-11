@@ -12,6 +12,8 @@ import (
 	"github.com/jackstrohm/jot/pkg/journal"
 	"github.com/jackstrohm/jot/pkg/memory"
 	"github.com/jackstrohm/jot/pkg/task"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // ProcessEntry runs evaluator, context detection, journal analysis, and embedding for an entry.
@@ -107,7 +109,7 @@ func ProcessEntry(ctx context.Context, app *infra.App, entryUUID, content, times
 	}
 	infra.LoggerFrom(ctx).Debug("process-entry: writing embedding and analysis to Firestore", "entry_uuid", entryUUID, "reason", "persist for RAG and rollups")
 	t4 := time.Now()
-	_, err = client.Collection(journal.EntriesCollection).Doc(entryUUID).Update(ctx, updates)
+	err = updateEntryWithRetry(ctx, client, entryUUID, content, timestamp, source, updates)
 	firestoreWrite += time.Since(t4)
 	if err != nil {
 		infra.LoggerFrom(ctx).Warn("failed to store entry embedding", "entry_uuid", entryUUID, "error", err)
@@ -129,6 +131,61 @@ func ProcessEntry(ctx context.Context, app *infra.App, entryUUID, content, times
 	infra.LoggerFrom(ctx).Info("process-entry done", doneAttrs...)
 	infra.LoggerFrom(ctx).Debug("process-entry: done", "entry_uuid", entryUUID, "reason", "evaluator, context links, analysis, and embedding all completed")
 	return breakdown, nil
+}
+
+// updateEntryWithRetry runs Update on the entry doc, retrying on NotFound with backoff. If the doc is still
+// missing after retries (e.g. entry was never created or create didn't propagate), creates the entry in one
+// Merge Set with base fields and update fields so process-entry does not fail and we avoid a second write.
+func updateEntryWithRetry(ctx context.Context, client *firestore.Client, entryUUID, content, timestamp, source string, updates []firestore.Update) error {
+	const maxAttempts = 6
+	backoff := []time.Duration{
+		200 * time.Millisecond, // give AddEntry write time to propagate before first attempt
+		400 * time.Millisecond, 800 * time.Millisecond, 1600 * time.Millisecond,
+		3200 * time.Millisecond, 3200 * time.Millisecond,
+	}
+	ref := client.Collection(journal.EntriesCollection).Doc(entryUUID)
+	var lastErr error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if attempt > 0 && backoff[attempt] > 0 {
+			infra.LoggerFrom(ctx).Debug("process-entry: retrying entry update after NotFound", "entry_uuid", entryUUID, "attempt", attempt+1, "max_attempts", maxAttempts, "backoff_ms", backoff[attempt].Milliseconds())
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(backoff[attempt]):
+			}
+		} else if attempt == 0 && backoff[0] > 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(backoff[0]):
+			}
+		}
+		_, lastErr = ref.Update(ctx, updates)
+		if lastErr == nil {
+			return nil
+		}
+		if status.Code(lastErr) != codes.NotFound {
+			return lastErr
+		}
+	}
+	// Document still missing after retries: create in one Merge Set (base + embedding/analysis) to avoid race.
+	if status.Code(lastErr) == codes.NotFound {
+		infra.LoggerFrom(ctx).Warn("process-entry: entry doc missing after retries, creating from payload", "entry_uuid", entryUUID, "reason", "entry may not have been written before task ran")
+		merge := map[string]interface{}{
+			"content":   content,
+			"source":    source,
+			"timestamp": timestamp,
+		}
+		for _, u := range updates {
+			merge[u.Path] = u.Value
+		}
+		_, createErr := ref.Set(ctx, merge, firestore.MergeAll)
+		if createErr != nil {
+			return fmt.Errorf("create entry after NotFound: %w", createErr)
+		}
+		return nil
+	}
+	return lastErr
 }
 
 func buildBreakdown(start time.Time, llm, embedding, firestoreWrite time.Duration) *infra.LatencyBreakdown {
