@@ -50,8 +50,6 @@ Gemini’s `responseSchema` works well only for **simple, flat** structures. For
 
 ## Modern Go (2025/2026)
 
-Long-term refactoring targets (from huizhou92-style modernization). Apply when touching code; do not block other work.
-
 - **Type erasure:** Prefer `any` over `interface{}`. Use generics `[T any]` for collection utilities, heaps, and middleware where it improves type safety.
 - **Slice allocation:** When the length or capacity is known, pre-allocate: `make([]T, 0, length)` for append loops, `make([]T, length)` for index assignment. Avoid `var x []T` then many appends when size is predictable.
 - **Context-first I/O:** Use `http.NewRequestWithContext(ctx, method, url, body)` for all HTTP requests. I/O-bound functions must take `ctx context.Context` as the first parameter for cancellation and tracing.
@@ -93,4 +91,4 @@ All in-progress feature and task work is tracked as **briefs** in `briefs/active
 - At the start of every session, read the relevant brief to restore context
 - At the end of every session, append a short summary to the brief's Session Log section
 - When a feature is merged or abandoned, move its brief from `briefs/active/` to `briefs/done/`
-- Each brief maps 1:1 to a git worktree and branch (see worktree rules above)
+- Each brief maps 1:1 to a git worktree and branch 
