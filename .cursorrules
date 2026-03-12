@@ -27,7 +27,7 @@
 
 ## LLM Structured Output (genai.Schema)
 
-Gemini’s `responseSchema` works well only for **simple, flat** structures. For complex or conditional JSON, use a prompt-first approach and post-validate. See: [Why Google Gemini’s responseSchema isn’t ready for complex JSON](https://ubaidullahmomer.medium.com/why-google-geminis-response-schema-isn-t-ready-for-complex-json-46f35c3aaaea).
+Gemini’s `responseSchema` works well only for **simple, flat** structures. For complex or conditional JSON, use a prompt-first approach and post-validate.
 
 - **Use schema when:** Flat objects, basic types (`string`, `number`, `boolean`, `object`, `array`), simple enums, and arrays of such objects. Keep nesting minimal.
 - **Skip schema for complex output:** Use `GenConfig.ResponseMIMEType = infra.MIMETypeJSON` (or `"application/json"`) and drive the structure via the prompt (exact structure, example output, conditional rules). Post-validate in app code.
@@ -76,7 +76,7 @@ Gemini’s `responseSchema` works well only for **simple, flat** structures. For
 
 - **Rule:** All composite indexes used by queries must be defined in `firestore.indexes.json`.
 - **Requirement:** After adding or changing an index, run `firebase deploy --only firestore:indexes` (or use `./scripts/deploy.sh`, which deploys indexes first).
-- **Janitor:** The janitor (garbage collection) requires the composite index on `knowledge_nodes` with fields `last_recalled_at`, `significance_weight` (order matters).
+- **Janitor:** The janitor (garbage collection) requires the composite index on `knowledge_nodes` with fields `significance_weight`, `last_recalled_at` (order matters).
 
 ## Feature Work Tracking
 

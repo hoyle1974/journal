@@ -73,6 +73,14 @@ _Check all that apply and note specifics:_
 
 ---
 
+Key Files
+List the files Cursor should @mention at session start. Keep this tight — only what's directly touched by this feature.
+
+briefs/active/YYYYMMDD_<name>.md (this file)
+...
+
+---
+
 ## Session Log
 
 _The LLM appends a short bullet summary here at the end of each session. Most recent first._
