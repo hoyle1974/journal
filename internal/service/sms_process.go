@@ -4,12 +4,11 @@ import (
 	"context"
 	"strings"
 
-	"github.com/jackstrohm/jot/pkg/agent"
 	"github.com/jackstrohm/jot/pkg/infra"
 )
 
-// ProcessIncomingSMS processes an incoming SMS and returns a response.
-func ProcessIncomingSMS(ctx context.Context, msg *infra.TwilioWebhookRequest) string {
+// ProcessIncomingSMS processes an incoming SMS and returns a response. app must be non-nil.
+func ProcessIncomingSMS(ctx context.Context, app *infra.App, msg *infra.TwilioWebhookRequest) string {
 	ctx, span := infra.StartSpan(ctx, "twilio.process_sms")
 	defer span.End()
 
@@ -25,14 +24,13 @@ func ProcessIncomingSMS(ctx context.Context, msg *infra.TwilioWebhookRequest) st
 	)
 
 	// Same as jot app default: plain text is always treated as a query (FOH). No "?" required.
-	return processQuerySMS(ctx, text, msg.From)
+	return processQuerySMS(ctx, app, text, msg.From)
 }
 
-func processQuerySMS(ctx context.Context, query, from string) string {
+func processQuerySMS(ctx context.Context, app *infra.App, query, from string) string {
 	ctx, span := infra.StartSpan(ctx, "twilio.process_query")
 	defer span.End()
 
-	app := infra.GetApp(ctx)
 	if app == nil {
 		return "Service unavailable. Please try again later."
 	}
@@ -42,27 +40,4 @@ func processQuerySMS(ctx context.Context, query, from string) string {
 		return "Sorry, I couldn't process your query. Please try again."
 	}
 	return result.Answer
-}
-
-func processEntrySMS(ctx context.Context, text, from string) string {
-	ctx, span := infra.StartSpan(ctx, "twilio.process_entry")
-	defer span.End()
-
-	infra.EntriesTotal.Inc()
-
-	app := infra.GetApp(ctx)
-	if app == nil {
-		infra.LoggerFrom(ctx).Error("no app in context for SMS entry")
-		return "Service unavailable. Please try again later."
-	}
-	ctx = infra.WithApp(ctx, app)
-	id, err := agent.AddEntryAndEnqueue(ctx, text, "sms", nil)
-	if err != nil {
-		infra.LoggerFrom(ctx).Error("failed to store entry", "error", err)
-		infra.ErrorsTotal.Inc()
-		return "Failed to save entry. Please try again."
-	}
-
-	infra.LoggerFrom(ctx).Info("entry created via SMS", "id", id, "content_length", len(text))
-	return "Noted!"
 }

@@ -8,14 +8,18 @@ import (
 	"github.com/jackstrohm/jot/pkg/infra"
 )
 
+// ConfigGetter returns the current config (allows tests to override).
+type ConfigGetter func() *config.Config
+
 // SMSService handles Twilio/SMS operations for the API.
 type SMSService struct {
 	getConfig ConfigGetter
+	app       *infra.App
 }
 
-// NewSMSService returns an SMSService. getConfig is called for Twilio/config-dependent operations.
-func NewSMSService(getConfig ConfigGetter) *SMSService {
-	return &SMSService{getConfig: getConfig}
+// NewSMSService returns an SMSService. getConfig is for Twilio/config; app is passed to ProcessIncomingSMS.
+func NewSMSService(getConfig ConfigGetter, app *infra.App) *SMSService {
+	return &SMSService{getConfig: getConfig, app: app}
 }
 
 func (s *SMSService) cfg() *config.Config {
@@ -45,7 +49,7 @@ func (s *SMSService) ProcessIncomingSMS(ctx context.Context, msg *infra.TwilioWe
 	if msg == nil {
 		return ""
 	}
-	return ProcessIncomingSMS(ctx, msg)
+	return ProcessIncomingSMS(ctx, s.app, msg)
 }
 
 // SendSMS sends an SMS via Twilio.
