@@ -14,12 +14,11 @@ type ConfigGetter func() *config.Config
 // SMSService handles Twilio/SMS operations for the API.
 type SMSService struct {
 	getConfig ConfigGetter
-	app       *infra.App
 }
 
-// NewSMSService returns an SMSService. getConfig is for Twilio/config; app is passed to ProcessIncomingSMS.
-func NewSMSService(getConfig ConfigGetter, app *infra.App) *SMSService {
-	return &SMSService{getConfig: getConfig, app: app}
+// NewSMSService returns an SMSService. getConfig is for Twilio/config. Callers pass app to ProcessIncomingSMS.
+func NewSMSService(getConfig ConfigGetter) *SMSService {
+	return &SMSService{getConfig: getConfig}
 }
 
 func (s *SMSService) cfg() *config.Config {
@@ -44,12 +43,12 @@ func (s *SMSService) IsAllowedPhoneNumber(phone string) bool {
 	return infra.IsAllowedPhoneNumber(s.cfg(), phone)
 }
 
-// ProcessIncomingSMS processes an incoming SMS and returns the response body.
-func (s *SMSService) ProcessIncomingSMS(ctx context.Context, msg *infra.TwilioWebhookRequest) string {
+// ProcessIncomingSMS processes an incoming SMS and returns the response body. app must be non-nil.
+func (s *SMSService) ProcessIncomingSMS(ctx context.Context, app *infra.App, msg *infra.TwilioWebhookRequest) string {
 	if msg == nil {
 		return ""
 	}
-	return ProcessIncomingSMS(ctx, s.app, msg)
+	return ProcessIncomingSMS(ctx, app, msg)
 }
 
 // SendSMS sends an SMS via Twilio.

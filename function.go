@@ -57,7 +57,7 @@ func init() {
 	journalSvc := service.NewJournalService()
 	memorySvc := service.NewMemoryService()
 	agentSvc := service.NewAgentService(app)
-	smsSvc := service.NewSMSService(getConfig, app)
+	smsSvc := service.NewSMSService(getConfig)
 	defaultServer = api.NewServer(app, defaultConfig, infra.Logger, journalSvc, memorySvc, agentSvc, smsSvc, api.Router)
 }
 

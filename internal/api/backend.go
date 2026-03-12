@@ -97,6 +97,6 @@ type SMSService interface {
 	ValidateTwilioSignature(r *http.Request, webhookURL string) bool
 	ParseTwilioWebhook(r *http.Request) (*infra.TwilioWebhookRequest, error)
 	IsAllowedPhoneNumber(phone string) bool
-	ProcessIncomingSMS(ctx context.Context, msg *infra.TwilioWebhookRequest) string
+	ProcessIncomingSMS(ctx context.Context, app *infra.App, msg *infra.TwilioWebhookRequest) string
 	SendSMS(ctx context.Context, to, body string) error
 }

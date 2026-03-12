@@ -1,7 +1,7 @@
 # Brief: Fix infra.GetApp(ctx) in sms_process.go
 
 **Date:** 20260311
-**Status:** `in-progress`
+**Status:** `done`
 **Branch:** `feature/sms-explicit-app`
 **Worktree:** `../journal-sms-explicit-app`
 
@@ -77,33 +77,33 @@ The `api.SMSService` interface in `internal/api/backend.go` must be updated to m
 ## Checklist
 
 **Implementation**
-- [ ] `infra.GetApp(ctx)` does not appear anywhere in `sms_process.go` after the change
-- [ ] `ProcessIncomingSMS`, `processQuerySMS` receive `app *infra.App` explicitly
-- [ ] `processEntrySMS` deleted (or retained with explicit justification in Session Log)
-- [ ] `SMSService.ProcessIncomingSMS` signature updated in `sms_service.go`
-- [ ] `api.SMSService` interface updated in `internal/api/backend.go`
-- [ ] `handler_sms.go` passes `s.App` to `ProcessIncomingSMS` — including in the goroutine fallback
-- [ ] `handler_tasks.go` passes `s.App` to `ProcessIncomingSMS`
-- [ ] New code passes `*infra.App` explicitly — no `infra.GetApp(ctx)` in new code
-- [ ] All logging uses `LoggerFrom(ctx)` — no `fmt.Print` or raw `slog`
-- [ ] Errors wrapped with `%w`, not `%v`
-- [ ] No file exceeds 400 lines
+- [x] `infra.GetApp(ctx)` does not appear anywhere in `sms_process.go` after the change
+- [x] `ProcessIncomingSMS`, `processQuerySMS` receive `app *infra.App` explicitly
+- [x] `processEntrySMS` deleted (or retained with explicit justification in Session Log)
+- [x] `SMSService.ProcessIncomingSMS` signature updated in `sms_service.go`
+- [x] `api.SMSService` interface updated in `internal/api/backend.go`
+- [x] `handler_sms.go` passes `s.App` to `ProcessIncomingSMS` — including in the goroutine fallback
+- [x] `handler_tasks.go` passes `s.App` to `ProcessIncomingSMS`
+- [x] New code passes `*infra.App` explicitly — no `infra.GetApp(ctx)` in new code
+- [x] All logging uses `LoggerFrom(ctx)` — no `fmt.Print` or raw `slog`
+- [x] Errors wrapped with `%w`, not `%v`
+- [x] No file exceeds 400 lines
 
 **Firestore (if applicable)**
 - [ ] N/A — no index changes
 
 **Wrap-up**
-- [ ] `app_capabilities.txt` — no update needed
-- [ ] `blueprint.md` — not touched
-- [ ] `go build ./...` passes
-- [ ] `go test ./...` passes
-- [ ] Brief status set to `done` and file moved to `briefs/done/`
+- [x] `app_capabilities.txt` — no update needed
+- [x] `blueprint.md` — not touched
+- [x] `go build ./...` passes
+- [x] `go test ./...` passes
+- [x] Brief status set to `done` and file moved to `briefs/done/`
 
 ---
 
 ## Key Files
 
-- `briefs/active/20260311_sms-explicit-app.md` (this file)
+- `briefs/done/20260311_sms_explicit_app.md` (this file)
 - `internal/service/sms_process.go` — primary change; remove `GetApp(ctx)` calls
 - `internal/service/sms_service.go` — update `ProcessIncomingSMS` signature
 - `internal/api/backend.go` — update `SMSService` interface and `APIBackend` wrapper
@@ -115,6 +115,9 @@ The `api.SMSService` interface in `internal/api/backend.go` must be updated to m
 ## Session Log
 
 <!-- Most recent first -->
+
+<!-- 20260311 (session 2) -->
+- Worktree `../journal-sms-explicit-app` created (branch `feature/sms-explicit-app`). `sms_process.go` already had explicit `app` and no `GetApp(ctx)`; `processEntrySMS` already removed. Implemented preferred shape: removed `app` field from `SMSService`; `ProcessIncomingSMS(ctx, app *infra.App, msg)` now takes `app` at call site. Updated `api.SMSService` interface in `backend.go`; `sms_service.go` now `NewSMSService(getConfig)` only and `ProcessIncomingSMS(ctx, app, msg)` forwards to `service.ProcessIncomingSMS`. Handlers pass `s.App.(*infra.App)` (Server holds `AppLike`). `function.go` calls `NewSMSService(getConfig)`. `go build ./...` and `go test ./...` pass.
 
 <!-- 20260311 -->
 - Brief created. Two live `infra.GetApp(ctx)` calls confirmed in `sms_process.go`. `processEntrySMS` identified as dead code — default decision is to delete. Interface update in `api.SMSService` is the load-bearing change that will surface all stale call sites at compile time.

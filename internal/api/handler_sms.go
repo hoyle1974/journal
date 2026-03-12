@@ -79,7 +79,7 @@ func handleSMS(s *Server, w http.ResponseWriter, r *http.Request) {
 		bgCtx := s.App.WithContext(context.Background())
 		bgCtx = infra.WithCorrelation(bgCtx, taskID, parentTraceID)
 		infra.LoggerFrom(bgCtx).Info("sms processing (goroutine fallback)", "from", msg.From)
-		response := s.SMS.ProcessIncomingSMS(bgCtx, msg)
+		response := s.SMS.ProcessIncomingSMS(bgCtx, s.App.(*infra.App), msg)
 		if response == "" {
 			response = "I couldn't process that. Please try again."
 		}

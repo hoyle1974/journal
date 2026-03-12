@@ -98,7 +98,7 @@ func handleProcessSMSQuery(s *Server, w http.ResponseWriter, r *http.Request) {
 	LogHandlerRequest(ctx, r.Method, path, "from", data.From, "message_sid", data.MessageSid, "body_length", len(data.Body), "task_id", data.TaskID, "parent_trace_id", data.ParentTraceID)
 	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
-	response := s.SMS.ProcessIncomingSMS(ctx, msg)
+	response := s.SMS.ProcessIncomingSMS(ctx, s.App.(*infra.App), msg)
 	if response == "" {
 		response = "I couldn't process that. Please try again."
 	}
