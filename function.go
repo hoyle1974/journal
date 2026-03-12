@@ -54,6 +54,11 @@ func init() {
 		return
 	}
 	app, _ := infra.GetDefaultApp()
+	if app != nil {
+		if err := service.RunFirstRunOnboarding(context.Background(), app); err != nil {
+			log.Printf("first-run onboarding skipped: %v", err)
+		}
+	}
 	journalSvc := service.NewJournalService()
 	memorySvc := service.NewMemoryService()
 	agentSvc := service.NewAgentService(app)

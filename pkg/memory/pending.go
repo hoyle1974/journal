@@ -115,15 +115,34 @@ func GetUnresolvedPendingQuestions(ctx context.Context, limit int) ([]PendingQue
 }
 
 // ResolvePendingQuestion sets resolved_at and answer for a pending question.
+// If the question has kind "onboarding", the answer is also upserted as a user_identity
+// knowledge node in a goroutine (non-blocking).
 func ResolvePendingQuestion(ctx context.Context, uuid, answer string) error {
 	client, err := infra.GetFirestoreClient(ctx)
 	if err != nil {
 		return err
 	}
+	ref := client.Collection(PendingQuestionsCollection).Doc(uuid)
+	doc, getErr := ref.Get(ctx)
+	var kind string
+	if getErr == nil {
+		kind = infra.GetStringField(doc.Data(), "kind")
+	}
 	now := time.Now().Format(time.RFC3339)
-	_, err = client.Collection(PendingQuestionsCollection).Doc(uuid).Update(ctx, []firestore.Update{
+	_, err = ref.Update(ctx, []firestore.Update{
 		{Path: "resolved_at", Value: now},
 		{Path: "answer", Value: answer},
 	})
-	return err
+	if err != nil {
+		return err
+	}
+	if kind == "onboarding" && answer != "" {
+		bgCtx := context.WithoutCancel(ctx)
+		go func() {
+			if _, upErr := UpsertSemanticMemory(bgCtx, answer, "user_identity", "selfmodel", 1.0, nil, nil); upErr != nil {
+				infra.LoggerFrom(bgCtx).Warn("onboarding answer upsert failed", "error", upErr)
+			}
+		}()
+	}
+	return nil
 }

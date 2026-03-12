@@ -8,3 +8,6 @@ const DeployMetaDoc = "deploy_meta"
 
 // DreamRunDoc is the _system document ID for the current/latest async dream run (lock, status, phase, log).
 const DreamRunDoc = "dream_run"
+
+// OnboardingDoc is the _system document ID for first-run onboarding (seeded_at, status, version).
+const OnboardingDoc = "onboarding"

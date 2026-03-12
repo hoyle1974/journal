@@ -6,6 +6,7 @@ Jot is a personal journaling and memory system. It ingests journal entries, extr
 - **CLI**: log, query, sync (Google Doc), dream, janitor, plan, recall (dream narrative), edit, entries.
 - **API**: POST /query, /log, /dream, /rollup, /janitor, /plan; GET /dream/latest, GET /dream/status; GET /metrics (Prometheus exposition format for Google Cloud Prometheus). POST /dream returns 202 and runs the dream async (single run at a time; poll GET /dream/status for progress). Cloud Tasks for async work (e.g. process-sms-query, dream-run).
 - **Cron**: Dreamer (daily) consolidates last 24h journal into semantic memory; Janitor (weekly) evicts low-significance, rarely recalled nodes.
+- **First-run onboarding**: On cold start, if _system/onboarding is absent, the system seeds pending_questions with onboarding prompts (name, family, work, role); answers are stored as user_identity nodes.
 
 ## Agents
 - **FOH (Front of House)**: Query loop. Uses system prompt, identity, active contexts, knowledge-gap block, open todos; can call tools (journal, knowledge, context, task, web, utility). Produces an answer; may save queries as knowledge gaps (is_gap).
