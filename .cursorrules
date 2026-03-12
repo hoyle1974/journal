@@ -88,7 +88,16 @@ All in-progress feature and task work is tracked as **briefs** in `briefs/active
 
 **Rules:**
 - Before starting any new feature or task, create a brief from the template
+- When creating a brief, immediately run:
+  `git worktree add ../<project>-<name> -b feature/<name>`
+  and confirm the worktree exists before writing any code
+- When asked to work on an existing brief, check whether the worktree already exists
+  with `git worktree list`. If it exists, switch into it. If it does not exist
+  (e.g. after a fresh clone or pruned worktrees), recreate it with:
+  `git worktree add ../<project>-<name> feature/<name>`
+  (without `-b` so it reuses the existing branch rather than creating a new one)
+- All feature work must be done inside the worktree directory, not in the main tree
 - At the start of every session, read the relevant brief to restore context
 - At the end of every session, append a short summary to the brief's Session Log section
-- When a feature is merged or abandoned, move its brief from `briefs/active/` to `briefs/done/`
-- Each brief maps 1:1 to a git worktree and branch 
+- When a feature is merged or abandoned, run `git worktree remove ../<project>-<name>`
+  and move the brief from `briefs/active/` to `briefs/done/`
