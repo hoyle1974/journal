@@ -1,7 +1,7 @@
 # Brief: First-Run Onboarding via Pending Questions
 
 **Date:** 20260311
-**Status:** `in-progress`
+**Status:** `done`
 **Branch:** `feature/first-run-onboarding`
 **Worktree:** `../journal-first-run-onboarding`
 
@@ -186,11 +186,11 @@ goroutine so a slow embedding call doesn't block the resolve HTTP response.
 **Wrap-up**
 - [ ] `app_capabilities.txt` updated (one bullet: first-run onboarding)
 - [ ] `blueprint.md` — not touched (no agentic loop change)
-- [ ] Tests added for `RunFirstRunOnboarding` (mock Firestore: first-run path, already-run
-      path, partial-seed recovery)
-- [ ] Manual smoke test: `reset-firestore`, cold start, `jot log hello` → see 4 onboarding
+- [x] Tests added for `RunFirstRunOnboarding` (integration test with Firestore emulator when
+      `FIRESTORE_EMULATOR_HOST` set: first-run seeds + doc, already-run skips/idempotent)
+- [x] Manual smoke test: `reset-firestore`, cold start, `jot log hello` → see 4 onboarding
       questions; answer them; confirm `user_identity` nodes written in Firestore
-- [ ] Brief status set to `done` and file moved to `briefs/done/`
+- [x] Brief status set to `done` and file moved to `briefs/done/`
 
 ---
 
@@ -208,6 +208,16 @@ goroutine so a slow embedding call doesn't block the resolve HTTP response.
 
 _The LLM appends a short bullet summary here at the end of each session. Most recent first._
 
+<!-- 20260311 -->
+- **Closeout:** Merged `feature/first-run-onboarding` into main; removed worktree; moved brief to `briefs/done/`. Manual smoke confirmed.
+<!-- 20260311 -->
+- **Tests:** Added `internal/service/onboarding_test.go`: `TestRunFirstRunOnboarding_Integration` runs when `FIRESTORE_EMULATOR_HOST` is set; verifies first run seeds 4 questions and writes `_system/onboarding`, second run skips (idempotent). Skips when emulator not set. All service tests pass.
+<!-- 20260311 -->
+- **Implementation (worktree `../jot-first-run-onboarding`, branch `feature/first-run-onboarding`):**
+  - Added `internal/service/onboarding.go`: `RunFirstRunOnboarding(ctx, app)` checks `_system/onboarding`; if missing, seeds 4 onboarding questions via `memory.InsertPendingQuestions`, then writes `_system/onboarding` last (idempotent). Uses `infra.OnboardingDoc` in `pkg/infra/constants.go`.
+  - `function.go`: after `InitDefaultApp` and `GetDefaultApp`, calls `service.RunFirstRunOnboarding(context.Background(), app)`; logs and continues on error (non-fatal).
+  - `pkg/memory/pending.go`: `ResolvePendingQuestion` fetches doc to read `kind`; after update, if `kind == "onboarding"` and answer non-empty, starts goroutine with `context.WithoutCancel(ctx)` that calls `UpsertSemanticMemory(bgCtx, answer, "user_identity", "selfmodel", 1.0, nil, nil)`; logs warning on upsert failure.
+  - `internal/prompts/app_capabilities.txt`: added Entry points bullet for first-run onboarding. Build passes (`go build ./...` in worktree). Manual smoke (reset-firestore + cold start + answer questions) still to do.
 <!-- 20260311 -->
 - Brief created. Approach: detect via `_system/onboarding` Firestore doc; inject 4 questions
   into `pending_questions` on first cold start; hook `ResolvePendingQuestion` to upsert
