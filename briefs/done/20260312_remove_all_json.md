@@ -1,8 +1,8 @@
 Brief: Total Migration from JSON to Simple K/V Line Formats
 Date: 20260312
-Status: in-progress
-Branch: feature/remove-json-responses
-Worktree: ../jot-remove-json
+Status: done
+Branch: feature/remove-json (merged to main)
+Worktree: removed
 
 Goal
 Standardize all LLM communication to use the "Simplest Output Available." This project will eliminate the use of JSON as an output format from all LLM prompts and agentic loops, replacing it with flat, newline-delimited Key/Value (K/V) or Pipe-Separated Value (PSV) formats. This migration minimizes token overhead, eliminates JSON-specific parsing failures (like missing braces), and aligns the implementation with the project's existing prompt engineering style.
@@ -122,7 +122,7 @@ Wrap-up
 
 [ ] blueprint.md updated to reflect the removal of llmjson.
 
-[ ] Brief status set to done and moved to briefs/done/.
+[x] Brief status set to done and moved to briefs/done/.
 
 Key Files
 pkg/utils/kvparse.go
@@ -143,3 +143,5 @@ Format Specs: Defined "TOOL/ARGS" and "PHASE" block structures.
 Pruning Plan: Scheduled llmjson for deletion.
 
 2026-03-12: Implemented K/V tool-call parsing and removed llmjson. tool_call.go now uses utils.ParseKeyValueMap for TOOL/ARGS format (no JSON). Updated bootstrap_tools, prompter, dreamer prompts to require key/value lines; added debug logging at FOH, dreamer, planner for raw text before parse. kvparse: section lines are now collected raw so values may contain ":". Deleted llmjson package; updated .cursorrules, blueprint.md, app_capabilities.txt, briefs/TEMPLATE.md. Added tool_call_test.go (K/V cases) and kvparse test for section-with-colon. go build ./... and tests pass.
+
+2026-03-13: Closeout. Committed feature/remove-json work in worktree; merged feature/remove-json into main. Resolved stash conflict in prompter.go (kept "MUST call discovery_search" wording). Main now has: K/V tool calls, llmjson removed, current time in context, MISSING INFO prompt, compact LLM_CONTEXT_SENT log. Brief moved to done; worktree removed.
