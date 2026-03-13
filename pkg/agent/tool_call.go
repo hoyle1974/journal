@@ -1,39 +1,40 @@
 package agent
 
 import (
-	"encoding/json"
-	"regexp"
 	"strings"
+
+	"github.com/jackstrohm/jot/pkg/utils"
 )
 
-// StructuredToolCall is the MCP-style payload when using compact tools: model outputs JSON with tool name and args.
-type StructuredToolCall struct {
-	Tool string                 `json:"tool"`
-	Args map[string]interface{} `json:"args"`
-}
-
 // ParseStructuredToolCall extracts a single tool call from model output.
-// Looks for a fenced JSON block (```json ... ``` or ``` ... ```) containing {"tool": "name", "args": {...}}.
+// Expects K/V format: TOOL: name, then ARGS: section with "param_name | value" lines.
 // Returns name, args, true if a valid block was found; otherwise "", nil, false.
 func ParseStructuredToolCall(text string) (name string, args map[string]interface{}, found bool) {
 	text = strings.TrimSpace(text)
-	// Match ```json ... ``` or ``` ... ```
-	re := regexp.MustCompile("(?s)```(?:json)?\\s*\\n?\\s*([^`]+)```")
-	matches := re.FindStringSubmatch(text)
-	if len(matches) < 2 {
+	if text == "" {
 		return "", nil, false
 	}
-	block := strings.TrimSpace(matches[1])
-	var payload StructuredToolCall
-	if err := json.Unmarshal([]byte(block), &payload); err != nil {
-		return "", nil, false
-	}
-	name = strings.TrimSpace(payload.Tool)
+	simple, sections := utils.ParseKeyValueMap(text)
+	name = strings.TrimSpace(simple["tool"])
 	if name == "" {
 		return "", nil, false
 	}
-	if payload.Args == nil {
-		payload.Args = make(map[string]interface{})
+	args = make(map[string]interface{})
+	for _, line := range sections["args"] {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "|", 2)
+		k := strings.TrimSpace(parts[0])
+		if k == "" {
+			continue
+		}
+		v := ""
+		if len(parts) >= 2 {
+			v = strings.TrimSpace(parts[1])
+		}
+		args[k] = v
 	}
-	return name, payload.Args, true
+	return name, args, true
 }

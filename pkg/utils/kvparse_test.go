@@ -51,6 +51,14 @@ func TestParseKeyValueMap(t *testing.T) {
 			},
 			wantSections: map[string][]string{},
 		},
+		{
+			name: "section line with colon in value (raw)",
+			text: "TOOL: upsert_knowledge\nARGS:\ncontent | Note: use a | b for options",
+			wantSimple: map[string]string{"tool": "upsert_knowledge"},
+			wantSections: map[string][]string{
+				"args": {"content | Note: use a | b for options"},
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

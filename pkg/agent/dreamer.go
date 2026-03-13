@@ -332,7 +332,7 @@ func runDreamerTaskPhase(ctx context.Context, dreamerRunID string, journalContex
 
 	systemPrompt := dreamerTaskPhaseSystemPrompt
 	if useCompactTools {
-		systemPrompt += "\n\n---\n## TOOLS (compact)\nTo call a tool, respond with ONLY a fenced JSON block (```json ... ```): {\"tool\": \"tool_name\", \"args\": {\"param\": \"value\", ...}}.\n\n" + tools.GetCompactDirectoryByCategory("task")
+		systemPrompt += "\n\n---\n## TOOLS (compact)\nTo call a tool, respond with ONLY key/value lines: TOOL: tool_name then ARGS: then one line per argument as param_name | value. No JSON, no markdown, no code fences.\n\n" + tools.GetCompactDirectoryByCategory("task")
 		infra.LoggerFrom(ctx).Debug("dreamer task phase: compact tools mode", "dreamer_run_id", dreamerRunID, "phase", "task_phase")
 	}
 
@@ -360,6 +360,7 @@ func runDreamerTaskPhase(ctx context.Context, dreamerRunID string, journalContex
 	for iteration < DreamerTaskPhaseMaxIterations {
 		if useCompactTools {
 			text := infra.ExtractTextFromResponse(resp)
+			infra.LoggerFrom(ctx).Debug("dreamer task phase: parsing structured tool call (K/V)", "dreamer_run_id", dreamerRunID, "raw_text", text)
 			toolName, toolArgs, found := ParseStructuredToolCall(text)
 			if !found {
 				break
