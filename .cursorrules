@@ -102,7 +102,7 @@ All in-progress feature and task work is tracked as **briefs** in `briefs/active
   (e.g. after a fresh clone or pruned worktrees), recreate it with:
   `git worktree add ../<project>-<name> feature/<name>`
   (without `-b` so it reuses the existing branch rather than creating a new one)
-- All feature work must be done inside the worktree directory, not in the main tree
+- All feature work *must* be done inside the worktree directory, not in the main tree
 - At the start of every session, read the relevant brief to restore context
 - At the end of every session, append a short summary to the brief's Session Log section
 - When a feature is done and committed: complete closeout so all changes are back in the original branch and directory. From the main repo directory: `git checkout main && git merge feature/<name>`, then `git worktree remove ../<project>-<name>`. Move the brief from `briefs/active/` to `briefs/done/` when marking the brief done (before or as part of the merge). The agent should perform the merge and worktree removal, not leave it to the user.
