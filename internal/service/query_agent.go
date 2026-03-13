@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"strings"
 
 	"github.com/jackstrohm/jot/pkg/agent"
 	"github.com/jackstrohm/jot/pkg/infra"
@@ -28,35 +27,8 @@ func RunQueryWithDebug(ctx context.Context, app *infra.App, question, source str
 	return agent.RunQueryWithDebug(ctx, app, question, source, debug)
 }
 
-// GetAnswer returns just the answer string (for sync compatibility).
-func GetAnswer(ctx context.Context, app *infra.App, question, source string) string {
-	result := RunQuery(ctx, app, question, source)
-	return result.Answer
-}
-
 // CreateAndSavePlan forces Gemini to decompose a goal into JSON, then saves it to the Knowledge Graph.
 func CreateAndSavePlan(ctx context.Context, app *infra.App, goal string) (string, error) {
 	ctx = infra.WithApp(ctx, app)
 	return agent.CreateAndSavePlan(ctx, goal)
-}
-
-// looksLikeQuestion checks if the input looks like a question or information request (for tests and SMS routing).
-func looksLikeQuestion(input string) bool {
-	input = strings.ToLower(strings.TrimSpace(input))
-	if strings.HasSuffix(input, "?") {
-		return true
-	}
-	questionPrefixes := []string{
-		"what ", "what's ", "whats ", "where ", "where's ", "wheres ", "when ", "when's ", "whens ",
-		"who ", "who's ", "whos ", "why ", "why's ", "whys ", "how ", "how's ", "hows ",
-		"which ", "whose ", "is ", "are ", "was ", "were ", "will ", "would ", "could ", "should ", "can ",
-		"do ", "does ", "did ", "tell me ", "show me ", "find ", "search ", "look up ", "lookup ",
-		"list ", "describe ", "explain ",
-	}
-	for _, prefix := range questionPrefixes {
-		if strings.HasPrefix(input, prefix) {
-			return true
-		}
-	}
-	return false
 }

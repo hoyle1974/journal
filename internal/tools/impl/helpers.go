@@ -7,7 +7,14 @@ import (
 
 	"github.com/jackstrohm/jot/pkg/journal"
 	"github.com/jackstrohm/jot/pkg/memory"
+	"github.com/jackstrohm/jot/pkg/utils"
 )
+
+// resolveToolDateRange resolves start_date and end_date (natural language or YYYY-MM-DD) to YYYY-MM-DD strings for tool/DB use.
+// Use this in all tools that accept date ranges (get_entries_by_date_range, get_queries_by_date, etc.) for consistent behavior.
+func resolveToolDateRange(startExpr, endExpr string) (startStr, endStr string, err error) {
+	return utils.ResolveDateRange(startExpr, endExpr)
+}
 
 const maxSourceDatesPerNode = 5
 const maxEntryIDsToResolve = 25
