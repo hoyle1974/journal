@@ -153,10 +153,12 @@ func (cs *ChatSession) SendMessage(ctx context.Context, parts ...*genai.Part) (*
 	// Log full context sent to Gemini (system + history + current turn; excludes tool definitions).
 	history := cs.chat.History(true)
 	contextSent := formatContextSent(cs.config.SystemInstruction, history, sanitized)
+	// Info: compact line only (context_len + short preview). Full context is in LLM_RAW_REQUEST at Debug.
+	// Large payloads inlined into the log message can exceed Cloud Logging limits and cause the entry to be dropped.
 	LoggerFrom(ctx).Info("LLM_CONTEXT_SENT | context sent to Gemini (system + history + current)",
 		slog.String("event", "LLM_CONTEXT_SENT"),
 		slog.Int("context_len", len(contextSent)),
-		slog.String("context", contextSent),
+		slog.String("context_preview", utils.TruncateString(contextSent, 300)),
 	)
 	hasTools := len(cs.config.Tools) > 0
 	LogLLMRequest(ctx, llmID, cs.modelName, contextSent, hasTools)

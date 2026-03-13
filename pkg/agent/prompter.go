@@ -26,6 +26,7 @@ type ActiveContextItem struct {
 func BuildSystemPrompt(ctx context.Context) string {
 	now := time.Now()
 	today := now.Format("2006-01-02")
+	currentTime := now.Format("15:04 MST")
 	_, week := now.ISOWeek()
 	currentWeek := fmt.Sprintf("%d-W%02d", now.Year(), week)
 	lastWeek := now.AddDate(0, 0, -7)
@@ -105,12 +106,12 @@ func BuildSystemPrompt(ctx context.Context) string {
 		"event", "LLM_CONTEXT_SENT",
 		"context_sections", injectedSections)
 
-	// Template order: preamble (cacheable) then ======= then dynamic. Placeholders: delimOpen, delimClose, sourceCodeBlock, today, currentWeek, lastWeekStr, currentMonth, identity, activeContextsStr, recentConversation, proactiveSignals, knowledgeGapBlock, openTodoBlock.
-	prompt := fmt.Sprintf(prompts.SystemPromptTemplate(), utils.UserDataDelimOpen, utils.UserDataDelimClose, sourceCodeBlock, today, currentWeek, lastWeekStr, currentMonth, identityWrapped, activeContextsWrapped, recentConversationWrapped, proactiveSignalsWrapped, knowledgeGapBlockWrapped, openTodoBlockWrapped)
+	// Template order: preamble (cacheable) then ======= then dynamic. Placeholders: delimOpen, delimClose, sourceCodeBlock, today, currentTime, currentWeek, lastWeekStr, currentMonth, identity, activeContextsStr, recentConversation, proactiveSignals, knowledgeGapBlock, openTodoBlock.
+	prompt := fmt.Sprintf(prompts.SystemPromptTemplate(), utils.UserDataDelimOpen, utils.UserDataDelimClose, sourceCodeBlock, today, currentTime, currentWeek, lastWeekStr, currentMonth, identityWrapped, activeContextsWrapped, recentConversationWrapped, proactiveSignalsWrapped, knowledgeGapBlockWrapped, openTodoBlockWrapped)
 
 	// Map vs Manual: compressed manifest + 3 core tools (semantic_search, upsert_knowledge, discovery_search). Everything else via discovery_search(intent) → JIT schema injection.
 	if app := infra.GetApp(ctx); app != nil && app.Config() != nil && app.Config().UseCompactTools {
-		prompt += "\n\n---\n## TOOLS (Map)\nYou have access to tool suites: journaling, task_management, knowledge_graph, web_research.\nYou have these tools always available: semantic_search, upsert_knowledge, discovery_search.\nFor any other action (create task, search journal, wikipedia, etc.), first call discovery_search(intent=\"your_reasoning\") to receive the specific tool schemas; then invoke that tool with key/value lines only: TOOL: tool_name then ARGS: then one line per argument as param_name | value. No JSON, no markdown, no code fences. Do not output any other text when making a tool call."
+		prompt += "\n\n---\n## TOOLS (Map)\nWhen you lack information to answer (e.g. current time, calculation, definition), you MUST call discovery_search first — never respond \"I do not have access\" without calling it. You have: semantic_search, upsert_knowledge, discovery_search. For any other action or missing info, call discovery_search(intent=\"your_reasoning\") to get tool schemas; then invoke that tool with key/value lines only: TOOL: tool_name then ARGS: then one line per argument as param_name | value. No JSON, no markdown, no code fences. Do not output any other text when making a tool call."
 		infra.LoggerFrom(ctx).Debug("system prompt: Map vs Manual (core tools + discovery)", "reason", "JOT_USE_COMPACT_TOOLS=true")
 	}
 
