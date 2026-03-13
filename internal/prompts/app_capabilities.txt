@@ -26,7 +26,7 @@ Jot is a personal journaling and memory system. It ingests journal entries, extr
 
 ## Tools (by category)
 - **knowledge**: semantic_search, upsert_knowledge, list_knowledge, get_entity_network (discovers related facts via vector search and synthesizes a concise profile), generate_plan, check_proactive_signals, get_latest_dream.
-- **journal**: get_recent_entries, get_oldest_entries, get_entries_by_date_range, search_entries, count_entries, list_sources, get_entries_by_source, query_activity_history, query_entities, summarize_daily_activities.
+- **journal**: get_recent_entries, get_oldest_entries, get_entries_by_date_range, search_entries, count_entries, list_sources, get_entries_by_source, query_activity_history, query_entities, summarize_daily_activities. Date-range tools (get_entries_by_date_range, get_queries_by_date, query_activity_history, summarize_daily_activities) accept YYYY-MM-DD or natural expressions (yesterday, last week, today); phrases like "last 6 months" are not supported.
 - **context**: list_contexts, create_context, touch_context, delete_context, get_system_health_audit, get_project_timeline, update_project_status.
 - **task**: create_task, get_task, update_task, update_task_status, search_tasks.
 - **query**: get_recent_queries, search_queries, get_queries_by_date.

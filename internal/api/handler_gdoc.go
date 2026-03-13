@@ -36,10 +36,6 @@ const (
 	syncLockTimeout    = 15 * time.Minute
 )
 
-func sanitizeResponseForDoc(response string) string {
-	return response
-}
-
 func docIndexLen(s string) int64 {
 	return int64(len(utf16.Encode([]rune(s))))
 }
@@ -269,7 +265,7 @@ func buildSyncRequests(ctx context.Context, s *Server, doneStartIndex, doneEndIn
 	queryStart := time.Now()
 	response := s.Agent.RunQuery(ctx, text, source).Answer
 	infra.LoggerFrom(ctx).Info("input processed", "duration_ms", time.Since(queryStart).Milliseconds())
-	inserted := "\n" + sanitizeResponseForDoc(response)
+	inserted := "\n" + response
 	insertEndIndex := block.startIndex + docIndexLen(inserted)
 	requests = append(requests,
 		&docs.Request{InsertText: &docs.InsertTextRequest{Location: &docs.Location{Index: block.startIndex}, Text: inserted}},

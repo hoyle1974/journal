@@ -68,7 +68,7 @@ func registerJournalTools() {
 			if !ok {
 				return tools.MissingParam("end_date")
 			}
-			startStr, endStr, err := utils.ResolveDateRange(startDate, endDate)
+			startStr, endStr, err := resolveToolDateRange(startDate, endDate)
 			if err != nil {
 				return tools.Fail("Date range error: %v", err)
 			}
@@ -103,7 +103,7 @@ func registerJournalTools() {
 			categoryFilter := strings.ToLower(strings.TrimSpace(args.String("category", "")))
 			var entries []journal.Entry
 			if categoryFilter != "" {
-				startStr, endStr, err := utils.ResolveDateRange("last month", "today")
+				startStr, endStr, err := resolveToolDateRange("last month", "today")
 				if err != nil {
 					return tools.Fail("Date range error: %v", err)
 				}
@@ -245,7 +245,7 @@ func registerJournalTools() {
 			timeframe := args.String("timeframe", "")
 			var entries []journal.Entry
 			if timeframe != "" {
-				startStr, endStr, err := utils.ResolveDateRange(timeframe, "today")
+				startStr, endStr, err := resolveToolDateRange(timeframe, "today")
 				if err != nil {
 					return tools.Fail("Invalid timeframe: %v", err)
 				}
@@ -308,7 +308,7 @@ func registerJournalTools() {
 		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
 			startDate := args.String("start_date", "30 days ago")
 			endDate := args.String("end_date", "today")
-			startStr, endStr, err := utils.ResolveDateRange(startDate, endDate)
+			startStr, endStr, err := resolveToolDateRange(startDate, endDate)
 			if err != nil {
 				return tools.Fail("Date range error: %v", err)
 			}
@@ -370,7 +370,7 @@ func registerJournalTools() {
 			if !ok {
 				return tools.MissingParam("date")
 			}
-			startStr, endStr, err := utils.ResolveDateRange(dateArg, dateArg)
+			startStr, endStr, err := resolveToolDateRange(dateArg, dateArg)
 			if err != nil {
 				return tools.Fail("Invalid date: %v", err)
 			}
