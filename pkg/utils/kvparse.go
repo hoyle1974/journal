@@ -19,6 +19,11 @@ func ParseKeyValueMap(text string) (simple map[string]string, sections map[strin
 		if line == "" {
 			continue
 		}
+		// While in a section, collect lines raw (so section content may contain ":" or "|").
+		if currentSection != "" {
+			sections[currentSection] = append(sections[currentSection], line)
+			continue
+		}
 		idx := strings.Index(line, ":")
 		if idx >= 0 {
 			key := strings.TrimSpace(line[:idx])
@@ -32,9 +37,6 @@ func ParseKeyValueMap(text string) (simple map[string]string, sections map[strin
 			currentSection = ""
 			simple[keyLower] = value
 			continue
-		}
-		if currentSection != "" {
-			sections[currentSection] = append(sections[currentSection], line)
 		}
 	}
 	return simple, sections

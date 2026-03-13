@@ -48,6 +48,7 @@ func CreateAndSavePlan(ctx context.Context, goal string) (string, error) {
 	}
 
 	text := strings.TrimSpace(infra.ExtractTextFromResponse(resp))
+	infra.LoggerFrom(ctx).Debug("planner: parsing plan (K/V)", "raw_text", text)
 	plan, err := parsePlanKeyValue(text)
 	if err != nil {
 		span.RecordError(err)

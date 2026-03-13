@@ -74,7 +74,7 @@ Domains: **relationship** (Anthropologist), **work** (Architect), **task** (Exec
 - **App / DI:** Prefer passing `*infra.App` (or env structs like `FOHEnv`) explicitly. Avoid hiding app in `context.Context` except at the outermost request boundary. Legacy use of `infra.GetApp(ctx)` is acceptable where refactoring would be large.
 - **Logging:** Use `LoggerFrom(ctx)` for all logs; no raw `slog` or `fmt.Print`. Debug logs must not truncate content.
 - **Tools:** Register via `tools.Register` in `init()`; keep implementations in domain-specific files (e.g. `journal_tools.go`, `web_tools.go`).
-- **Prompt safety:** Wrap user-origin strings in `<user_data>` via `WrapAsUserData()`. Use `llmjson.RepairAndUnmarshal` (or `ParseLLMResponse`) for LLM JSON.
+- **Prompt safety:** Wrap user-origin strings in `<user_data>` via `WrapAsUserData()`. Parse LLM output as key/value lines (e.g. `pkg/utils.ParseKeyValueMap`); no JSON from LLM responses.
 - **Observability:** Use `StartSpan(ctx, "operation_name")` for significant steps; set attributes and `defer span.End()`.
 - **Feature work:** Track in `briefs/active/`; move to `briefs/done/` when merged or abandoned.
 - **Firestore indexes:** All composite indexes in `firestore.indexes.json`; deploy with `./scripts/deploy.sh` or `firebase deploy --only firestore:indexes`.

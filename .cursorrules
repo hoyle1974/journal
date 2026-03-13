@@ -33,7 +33,7 @@ Gemini’s `responseSchema` works well only for **simple, flat** structures. For
 - **Skip schema for complex output:** Use `GenConfig.ResponseMIMEType = infra.MIMETypeJSON` (or `"application/json"`) and drive the structure via the prompt (exact structure, example output, conditional rules). Post-validate in app code.
 - **Nullable/optional:** Schema does not support `type: ["string", "null"]`. Use optional fields (omit from `required`) instead.
 - **Not supported by genai.Schema:** `maxLength`, `minLength`, `pattern`, `minimum`, `maxItems`; `$ref`/definitions; `if`/`then`, `oneOf`, `allOf`, `not`; discriminator/polymorphism. Rely on prompt instructions and post-processing (e.g. truncate or drop oversize fields) for constraints.
-- **Rule:** Use `llmjson.RepairAndUnmarshal` (or `ParseLLMResponse`) for all LLM JSON parsing to handle truncation and minor malformations.
+- **Rule:** Parse LLM output as key/value lines via `pkg/utils` (e.g. `ParseKeyValueMap`). No JSON from LLM responses; use K/V or pipe-separated formats only.
 - **Checklist before using ResponseSchema:** Flat structure ✓; basic types and simple enums ✓; no `$ref`/conditionals/union types ✗.
 
 ## Documentation

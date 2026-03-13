@@ -169,12 +169,13 @@ func RunQueryWithDebug(ctx context.Context, app *infra.App, question, source str
 				hasCalls = true
 			} else {
 				answerText = infra.ExtractTextFromResponse(resp)
-				discoveredToolName, discoveredToolArgs, hasCalls = ParseStructuredToolCall(answerText)
+				infra.LoggerFrom(ctx).Debug("FOH: parsing structured tool call (K/V)", "query_run_id", queryRunID, "raw_text", answerText)
+			discoveredToolName, discoveredToolArgs, hasCalls = ParseStructuredToolCall(answerText)
 			}
 			if hasCalls && !infra.HasFunctionCalls(resp) {
 				// Discovered tool invoked via JSON block
 				logDebug("[iter %d] LLM response: discovered tool_call=%s", iteration, discoveredToolName)
-				infra.LoggerFrom(ctx).Debug("FOH: discovered tool call (JSON)", "query_run_id", queryRunID, "phase", "tool_execution", "iter", iteration, "tool", discoveredToolName)
+				infra.LoggerFrom(ctx).Debug("FOH: discovered tool call (K/V)", "query_run_id", queryRunID, "phase", "tool_execution", "iter", iteration, "tool", discoveredToolName)
 				infra.ToolCallsTotal.Inc()
 				toolResult := tools.Execute(ctx, discoveredToolName, discoveredToolArgs)
 				toolCalls = append(toolCalls, map[string]interface{}{

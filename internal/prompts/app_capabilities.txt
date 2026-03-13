@@ -33,7 +33,7 @@ Jot is a personal journaling and memory system. It ingests journal entries, extr
 - **web**: fetch_url, define_word, wikipedia, web_search, bookmark, countdown, github_read.
 - **utility**: calculate, date_calc, text_stats, convert_units, random, timezone_convert, encode_decode.
 - **specialist**: consult_anthropologist, consult_architect, consult_executive, consult_philosopher (and any other consult_*).
-- **bootstrap**: discovery_search (intent → tool schemas).
+- **bootstrap**: discovery_search (intent → tool schemas). When using compact tools, invoke discovered tools via key/value lines only: TOOL: name, then ARGS: with param_name | value per line; no JSON, no code fences.
 
 ## Data terms
 - **Gold**: Permanent, high-value facts for semantic memory.
