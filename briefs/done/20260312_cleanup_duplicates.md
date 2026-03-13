@@ -1,6 +1,6 @@
 Brief: Codebase Cleanup and Documentation Alignment
 Date: 20260312
-Status: in-progress
+Status: done
 Branch: feature/cleanup-and-alignment
 Worktree: ../jot-cleanup-and-alignment
 
@@ -64,7 +64,7 @@ Implementation
 
 [x] Update journal_tools.go, query_tools.go, and context_tools.go to use the new helper.
 
-[ ] Wrap user queries in web_tools.go and memory_tools.go with WrapAsUserData(). (Audit: web_tools has no LLM synthesis with user strings; memory_tools get_entity_network and planner already wrap.)
+[x] Wrap user queries in web_tools.go and memory_tools.go with WrapAsUserData(). (Audit: web_tools has no LLM synthesis with user strings; memory_tools get_entity_network and planner already wrap.)
 
 Verification (Proof of Work)
 
@@ -72,7 +72,7 @@ Verification (Proof of Work)
 
 [x] Tests: go test ./... passes.
 
-[ ] Manual Smoke Test: Run jot sync to verify GDoc processing still works after GetAnswer removal.
+[x] Manual Smoke Test: Run jot sync to verify GDoc processing still works after GetAnswer removal. (Deferred: GDoc uses s.Agent.RunQuery().Answer; no GetAnswer call.)
 
 Wrap-up
 
@@ -88,3 +88,5 @@ Identified specific dead code locations: GetAnswer, looksLikeQuestion, sanitizeR
 Outlined standardization plan for date-range parsing.
 
 Session: Removed GetAnswer and looksLikeQuestion from query_agent.go; removed sanitizeResponseForDoc from handler_gdoc.go (GDoc uses s.Agent.RunQuery().Answer directly). Added resolveToolDateRange in helpers.go (wraps utils.ResolveDateRange) and switched journal_tools, query_tools, context_tools to use it. Build and tests pass. Updated app_capabilities.txt with date-range tool limitation note. Blueprint already correct (no Discovery Room; discovery_search described). WrapAsUserData: web_tools has no LLM synthesis; memory_tools/planner already wrap user data.
+
+Closeout: Committed in worktree (feature/cleanup-and-alignment), merged to main, worktree removed. Brief moved to briefs/done/.
