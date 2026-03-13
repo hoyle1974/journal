@@ -25,8 +25,8 @@ It continuously ingests raw, chronological daily logs (Episodic Memory) and uses
 * **`cmd/server/` & `cmd/local/**`: Entry points for the Cloud Run deployment and local testing.
 * **`internal/prompts/`**: System instructions for the various AI personas and extraction tasks.
 * **`internal/tools/`**: The tool registry for the agentic loop (web search, memory upserts, date calculators).
-* **`agents.go` & `cron.go**`: Logic for the Dreamer, Specialists, and background consolidation.
-* **`query_agent.go`**: The main Front-of-House (FOH) ReAct loop handling user queries.
+* **`pkg/agent/`** & **`internal/service/cron.go`**: Logic for the Dreamer, Specialists, and background consolidation.
+* **`pkg/agent/foh.go`**: The main Front-of-House (FOH) ReAct loop handling user queries.
 
 ## Usage Examples (CLI)
 

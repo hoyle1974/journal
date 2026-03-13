@@ -19,7 +19,7 @@ JOT is a single-user "Agentic Second Brain." It creates a high-fidelity bridge b
 | `knowledge_nodes`  | Semantic Memory      | Distilled facts (people, projects, goals, preferences, etc.). Vector embeddings; context nodes (e.g. `user_profile`, `latest_dream`, `system_evolution`) live here. |
 | `queries`          | System History       | Past Q&A. Used for context and Identifying Knowledge Gaps.            |
 | `pending_questions`| Pending clarifications| Gaps/contradictions from Dreamer gap detection.                       |
-| `_system`          | State                | `dream_run` (async dream status/lock), `deploy_meta`, etc.           |
+| `_system`          | State                | `dream_run`, `deploy_meta`, `sync_lock`, `sync_state`, `sync_debounce`, `onboarding`.           |
 
 ## 3. Core Component Architecture
 
@@ -66,7 +66,7 @@ Domains: **relationship** (Anthropologist), **work** (Architect), **task** (Exec
 ## 4. Entry Points
 
 - **CLI** (`cmd/jot`): log, query, sync (Google Doc), dream, janitor, plan, recall (dream narrative), edit, entries, etc.
-- **API:** POST /query, /log, /dream, /rollup, /janitor, /plan; GET /dream/latest, /dream/status, /metrics. POST /dream returns 202 and runs the dream asynchronously (single run at a time; poll GET /dream/status). Cloud Tasks for async work (e.g. process-sms-query, dream-run).
+- **API:** POST /query, /log, /dream, /rollup, /janitor, /plan, /sync, /decay-contexts, /backfill-embeddings, /webhook, /sms; GET /dream/latest, /dream/status, /metrics, /entries, /pending-questions; POST /pending-questions/:id/resolve. POST /dream returns 202 and runs the dream asynchronously (single run at a time; poll GET /dream/status). Cloud Tasks for async work (e.g. process-sms-query, dream-run).
 - **Cron:** Dreamer (daily), Janitor (weekly).
 
 ## 5. Engineering Patterns (see also `.cursorrules`)
