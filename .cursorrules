@@ -102,8 +102,9 @@ All in-progress feature and task work is tracked as **briefs** in `briefs/active
   (e.g. after a fresh clone or pruned worktrees), recreate it with:
   `git worktree add ../<project>-<name> feature/<name>`
   (without `-b` so it reuses the existing branch rather than creating a new one)
-- All feature work *must* be done inside the worktree directory, not in the main tree
+- All feature work *must* be done inside the worktree directory, not in the main tree.
+- **Worktree path for edits:** When working on a brief that has a worktree, use the **worktree directory path** for every file read, edit, and write. Do not use the default workspace root. For example, if the brief specifies `Worktree: ../jot-cleanup-and-alignment`, perform all edits under that path (e.g. `../jot-cleanup-and-alignment/internal/...` or the full absolute path). This is required because multiple agents may work on the codebase at once; main must stay clean for other merges, and all changes for the brief must live only in the worktree.
 - At the start of every session, read the relevant brief to restore context
 - At the end of every session, append a short summary to the brief's Session Log section
 - When a feature is done and committed: complete closeout so all changes are back in the original branch and directory. From the main repo directory: `git checkout main && git merge feature/<name>`, then `git worktree remove ../<project>-<name>`. Move the brief from `briefs/active/` to `briefs/done/` when marking the brief done (before or as part of the merge). The agent should perform the merge and worktree removal, not leave it to the user.
-- When a feature is abandoned (not merged), run `git worktre\e remove ../<project>-<name>` and move the brief from `briefs/active/` to `briefs/done/`.
+- When a feature is abandoned (not merged), run `git worktree remove ../<project>-<name>` and move the brief from `briefs/active/` to `briefs/done/`.
