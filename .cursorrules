@@ -36,6 +36,10 @@ Gemini’s `responseSchema` works well only for **simple, flat** structures. For
 - **Rule:** Use `llmjson.RepairAndUnmarshal` (or `ParseLLMResponse`) for all LLM JSON parsing to handle truncation and minor malformations.
 - **Checklist before using ResponseSchema:** Flat structure ✓; basic types and simple enums ✓; no `$ref`/conditionals/union types ✗.
 
+## Documentation
+
+The Immutable Source of Truth Rule: internal/prompts/app_capabilities.txt and blueprint.md are our system's nervous system. If a feature implementation changes the API surface, adds a tool, or changes a Firestore collection, you MUST update these files in the exact same step/commit as the code change. Do not mark a brief as done until these docs are synchronized.
+
 ## Observability
 
 - **Rule:** Every significant agentic step must be traceable.
@@ -56,6 +60,8 @@ Gemini’s `responseSchema` works well only for **simple, flat** structures. For
 - **Test lifecycle:** In tests, use `t.Cleanup(func() { ... })` instead of `defer` for cleanup (e.g. `server.Close()`, temp file removal). Cleanup runs even on failure and with `t.Parallel()`.
 - **Error handling in tests:** In test code, `t.Fatalf("msg: %v", err)` is acceptable for failing the test; in application code always use `%w` when wrapping.
 - **Optional (when refactoring):** Consider `io/fs` and `fs.FS` for file-like access (embed, local, or cloud). Consider Go 1.22+ `net/http.ServeMux` method/wildcard routing if replacing the router. Use `sync/atomic` type-safe APIs (e.g. `atomic.Int64`) if adding atomics. For critical parsing paths, add `testing.F` fuzz tests. Prefer opaque, strongly-typed config structs injected at init (already the pattern for `*config.Config`).
+
+
 
 ## Domain Terms
 
@@ -100,4 +106,4 @@ All in-progress feature and task work is tracked as **briefs** in `briefs/active
 - At the start of every session, read the relevant brief to restore context
 - At the end of every session, append a short summary to the brief's Session Log section
 - When a feature is done and committed: complete closeout so all changes are back in the original branch and directory. From the main repo directory: `git checkout main && git merge feature/<name>`, then `git worktree remove ../<project>-<name>`. Move the brief from `briefs/active/` to `briefs/done/` when marking the brief done (before or as part of the merge). The agent should perform the merge and worktree removal, not leave it to the user.
-- When a feature is abandoned (not merged), run `git worktree remove ../<project>-<name>` and move the brief from `briefs/active/` to `briefs/done/`.
+- When a feature is abandoned (not merged), run `git worktre\e remove ../<project>-<name>` and move the brief from `briefs/active/` to `briefs/done/`.

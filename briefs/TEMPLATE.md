@@ -29,6 +29,13 @@ _Narrative of what we're doing and why. Update this as decisions are made — th
 
 ---
 
+## Edge Cases & Pre-Flight Checks
+_AI: Before writing code, list 2-3 edge cases or potential architectural conflicts this feature might introduce (e.g., Firestore index limits, prompt token limits, race conditions)._
+1. 
+2.
+
+---
+
 ## Affected Areas
 
 _Check all that apply and note specifics:_
@@ -65,6 +72,14 @@ _Check all that apply and note specifics:_
 - [ ] Composite indexes defined in `firestore.indexes.json`
 - [ ] `firebase deploy --only firestore:indexes` run (or `./scripts/deploy.sh`)
 
+**Verification (Proof of Work)**
+_The AI must complete these steps and paste the final successful output or command used before marking this brief as done._
+
+- [ ] **Compilation:** `go build ./...` passes cleanly.
+- [ ] **Tests:** `go test ./...` passes. (Paste relevant test output below).
+- [ ] **Lint/Format:** Code is formatted and passes `go vet`.
+- [ ] **Manual Smoke Test:** (Describe the exact CLI command or API curl used to verify the feature).
+
 **Wrap-up**
 - [ ] `app_capabilities.txt` updated if capabilities changed
 - [ ] `blueprint.md` consulted if core agentic loop was touched
@@ -84,6 +99,8 @@ briefs/active/YYYYMMDD_<name>.md (this file)
 ## Session Log
 
 _The LLM appends a short bullet summary here at the end of each session. Most recent first._
+
+Context Management: When appending to the Session Log in the active brief, you must proactively "compact" older entries. If the log exceeds 5 bullet points, summarize the older points into a single "Prior Context" bullet. Keep the brief dense and token-efficient.
 
 <!-- YYYYMMDD -->
 - ...
