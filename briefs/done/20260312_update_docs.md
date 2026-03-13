@@ -1,9 +1,9 @@
 # Brief: Synchronize Documentation with Codebase State
 
 **Date:** 20260312
-**Status:** `in-progress`
+**Status:** `done`
 **Branch:** `chore/update-docs`
-**Worktree:** `../jot-update-docs`
+**Worktree:** _(removed after merge)_
 
 ---
 
@@ -75,7 +75,7 @@ A review of the codebase compared to the `.md` and `.txt` files reveals a few ar
 
 **Wrap-up**
 - [x] Changes reviewed for accuracy against `router.go` and `app.go`.
-- [ ] Brief status set to `done` and file moved to `briefs/done/`
+- [x] Brief status set to `done` and file moved to `briefs/done/`
 
 ---
 
