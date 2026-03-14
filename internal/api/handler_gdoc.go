@@ -13,14 +13,12 @@ import (
 	"unicode/utf16"
 
 	"cloud.google.com/go/compute/metadata"
-	"cloud.google.com/go/firestore"
 	"github.com/jackstrohm/jot/internal/config"
 	"github.com/jackstrohm/jot/pkg/infra"
+	"github.com/jackstrohm/jot/pkg/system"
 	"github.com/jackstrohm/jot/pkg/utils"
 	"google.golang.org/api/docs/v1"
 	"google.golang.org/api/option"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	cloudtasks "cloud.google.com/go/cloudtasks/apiv2"
@@ -29,12 +27,6 @@ import (
 )
 
 var googleDocIDRe = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
-
-const (
-	syncLockDocument   = "sync_lock"
-	syncStateDocument  = "sync_state"
-	syncLockTimeout    = 15 * time.Minute
-)
 
 func docIndexLen(s string) int64 {
 	return int64(len(utf16.Encode([]rune(s))))
@@ -282,55 +274,6 @@ func syncApplyBatchUpdate(docsService *docs.Service, documentID string, requests
 	return err
 }
 
-func acquireSyncLock(ctx context.Context, s *Server) (bool, error) {
-	client, err := s.App.Firestore(ctx)
-	if err != nil || client == nil {
-		return true, nil
-	}
-	lockRef := client.Collection(infra.SystemCollection).Doc(syncLockDocument)
-	err = client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
-		doc, err := tx.Get(lockRef)
-		now := time.Now()
-		if err != nil {
-			if status.Code(err) == codes.NotFound {
-				return tx.Set(lockRef, map[string]interface{}{
-					"locked_at": now,
-					"locked_by": "sync",
-				})
-			}
-			return err
-		}
-		if lockedAt, ok := doc.Data()["locked_at"].(time.Time); ok {
-			if now.Sub(lockedAt) > syncLockTimeout {
-				return tx.Set(lockRef, map[string]interface{}{
-					"locked_at": now,
-					"locked_by": "sync",
-				})
-			}
-		}
-		return fmt.Errorf("lock held")
-	})
-	if err != nil {
-		if err.Error() == "lock held" {
-			return false, nil
-		}
-		return false, err
-	}
-	return true, nil
-}
-
-func releaseSyncLock(ctx context.Context, s *Server) {
-	client, err := s.App.Firestore(ctx)
-	if err != nil || client == nil {
-		return
-	}
-	lockRef := client.Collection(infra.SystemCollection).Doc(syncLockDocument)
-	_, err = lockRef.Delete(ctx)
-	if err != nil {
-		infra.LoggerFrom(ctx).Error("failed to release sync lock", "error", err)
-	}
-}
-
 func handleSync(s *Server, w http.ResponseWriter, r *http.Request) {
 	startTime := time.Now()
 	ctx := r.Context()
@@ -362,7 +305,7 @@ func handleSync(s *Server, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	lockAcquired, lockErr := acquireSyncLock(ctx, s)
+	lockAcquired, lockErr := system.AcquireSyncLock(ctx, s.App)
 	if lockErr != nil {
 		infra.LoggerFrom(ctx).Error("failed to check sync lock", "error", lockErr)
 		LogHandlerResponse(ctx, r.Method, path, http.StatusInternalServerError, "error", "Failed to check sync lock")
@@ -375,7 +318,7 @@ func handleSync(s *Server, w http.ResponseWriter, r *http.Request) {
 		WriteJSON(w, http.StatusConflict, map[string]string{"error": "Another sync is already in progress. Please wait and try again."})
 		return
 	}
-	defer releaseSyncLock(ctx, s)
+	defer system.ReleaseSyncLock(ctx, s.App)
 
 	docsService, err := syncCreateDocsService(ctx, s.Config)
 	if err != nil {
@@ -450,16 +393,10 @@ func handleSync(s *Server, w http.ResponseWriter, r *http.Request) {
 	if block != nil && strings.TrimSpace(block.text) != "" {
 		h := sha256.Sum256([]byte(block.text))
 		blockHash := hex.EncodeToString(h[:])
-		fsClient, err := s.App.Firestore(ctx)
-		if err == nil && fsClient != nil {
-			stateRef := fsClient.Collection(infra.SystemCollection).Doc(syncStateDocument)
-			stateDoc, err := stateRef.Get(ctx)
-			if err == nil && stateDoc.Exists() {
-				if lastHash, ok := stateDoc.Data()["last_block_hash"].(string); ok && lastHash == blockHash {
-					infra.LoggerFrom(ctx).Info("sync skipped", "reason", "duplicate block (already processed)")
-					blockToProcess = nil
-				}
-			}
+		lastHash, exists, err := system.GetSyncStateLastBlockHash(ctx, s.App)
+		if err == nil && exists && lastHash == blockHash {
+			infra.LoggerFrom(ctx).Info("sync skipped", "reason", "duplicate block (already processed)")
+			blockToProcess = nil
 		}
 	}
 	requests, entriesAdded, questionsAnswered, actionsExecuted := buildSyncRequests(ctx, s, doneStartIndex, doneEndIndex, blockToProcess)
@@ -478,15 +415,8 @@ func handleSync(s *Server, w http.ResponseWriter, r *http.Request) {
 		if blockToProcess != nil && strings.TrimSpace(blockToProcess.text) != "" {
 			h := sha256.Sum256([]byte(blockToProcess.text))
 			blockHash := hex.EncodeToString(h[:])
-			fsClient, err := s.App.Firestore(ctx)
-			if err == nil && fsClient != nil {
-				_, err = fsClient.Collection(infra.SystemCollection).Doc(syncStateDocument).Set(ctx, map[string]interface{}{
-					"last_block_hash":   blockHash,
-					"last_processed_at": time.Now(),
-				})
-				if err != nil {
-					infra.LoggerFrom(ctx).Warn("failed to store sync_state", "error", err)
-				}
+			if err := system.SetSyncStateAfterProcess(ctx, s.App, blockHash); err != nil {
+				infra.LoggerFrom(ctx).Warn("failed to store sync_state", "error", err)
 			}
 		}
 	}
@@ -547,21 +477,12 @@ func handleWebhook(s *Server, w http.ResponseWriter, r *http.Request) {
 	}
 	defer tasksClient.Close()
 	parent := fmt.Sprintf("projects/%s/locations/%s/queues/%s", s.Config.GoogleCloudProject, s.Config.CloudTasksLocation, s.Config.CloudTasksQueue)
-	fsClient, err := s.App.Firestore(ctx)
-	if err != nil {
-		LogHandlerResponse(ctx, r.Method, path, http.StatusInternalServerError, "error", err.Error())
-		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("Failed to get Firestore client: %v", err)})
-		return
-	}
-	debounceRef := fsClient.Collection(infra.SystemCollection).Doc("sync_debounce")
-	if doc, err := debounceRef.Get(ctx); err == nil && doc.Exists() {
-		data := doc.Data()
-		if oldTaskName, ok := data["task_name"].(string); ok && oldTaskName != "" {
-			if err := tasksClient.DeleteTask(ctx, &cloudtaskspb.DeleteTaskRequest{Name: oldTaskName}); err != nil {
-				infra.LoggerFrom(ctx).Debug("failed to delete old task (may have already executed)", "error", err)
-			} else {
-				infra.LoggerFrom(ctx).Debug("cancelled previous sync task")
-			}
+	oldTaskName, _ := system.GetDebounceState(ctx, s.App)
+	if oldTaskName != "" {
+		if err := tasksClient.DeleteTask(ctx, &cloudtaskspb.DeleteTaskRequest{Name: oldTaskName}); err != nil {
+			infra.LoggerFrom(ctx).Debug("failed to delete old task (may have already executed)", "error", err)
+		} else {
+			infra.LoggerFrom(ctx).Debug("cancelled previous sync task")
 		}
 	}
 	taskID := fmt.Sprintf("jot-sync-%s", uuid.New().String()[:8])
@@ -589,9 +510,7 @@ func handleWebhook(s *Server, w http.ResponseWriter, r *http.Request) {
 	infra.LoggerFrom(ctx).Info("webhook", "event", "Drive change, sync scheduled", "delay_seconds", debounceSeconds, "task_id", taskID)
 	LogHandlerResponse(ctx, r.Method, path, http.StatusOK, "status", "scheduled", "task_id", taskID, "delay_seconds", debounceSeconds)
 	s.App.SubmitAsync(func() {
-		if _, err := debounceRef.Set(ctx, map[string]interface{}{
-			"task_name": taskName, "scheduled_time": scheduleTime.Format(time.RFC3339),
-		}); err != nil {
+		if err := system.SetDebounceState(context.Background(), s.App, taskName, scheduleTime); err != nil {
 			infra.LoggerFrom(ctx).Warn("failed to store debounce state", "error", err)
 		}
 	})

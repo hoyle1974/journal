@@ -3,11 +3,9 @@ package impl
 import (
 	"context"
 
-	"github.com/jackstrohm/jot/pkg/infra"
+	"github.com/jackstrohm/jot/pkg/system"
 	"github.com/jackstrohm/jot/tools"
 )
-
-const latestDreamDoc = "latest_dream"
 
 func init() {
 	registerDreamTools()
@@ -20,27 +18,20 @@ func registerDreamTools() {
 		Category:    "knowledge",
 		Params:      nil,
 		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
-			client, err := infra.GetFirestoreClient(ctx)
+			latest, err := system.GetLatestDreamFromContext(ctx)
 			if err != nil {
 				return tools.Fail("Error getting Firestore: %v", err)
 			}
-			doc, err := client.Collection(infra.SystemCollection).Doc(latestDreamDoc).Get(ctx)
-			if err != nil {
-				return tools.Fail("Error reading latest dream: %v", err)
-			}
-			if !doc.Exists() {
+			if latest == nil {
 				return tools.OK("No dream narrative has been generated yet. The nightly Dreamer writes one after it runs (e.g. via cron).")
 			}
-			data := doc.Data()
-			narrative, _ := data["narrative"].(string)
-			timestamp, _ := data["timestamp"].(string)
-			if narrative == "" {
+			if latest.Narrative == "" {
 				return tools.OK("A dream document exists but the narrative is empty.")
 			}
-			if timestamp != "" {
-				return tools.OK("Dream from %s:\n\n%s", timestamp, narrative)
+			if latest.Timestamp != "" {
+				return tools.OK("Dream from %s:\n\n%s", latest.Timestamp, latest.Narrative)
 			}
-			return tools.OK("%s", narrative)
+			return tools.OK("%s", latest.Narrative)
 		},
 	})
 }

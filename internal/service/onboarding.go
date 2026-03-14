@@ -5,11 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
-
 	"github.com/jackstrohm/jot/pkg/infra"
 	"github.com/jackstrohm/jot/pkg/memory"
+	"github.com/jackstrohm/jot/pkg/system"
 )
 
 // onboardingQuestions is the seed set injected on first run.
@@ -31,18 +29,13 @@ const onboardingContext = "Initial setup — your answers will be stored as long
 // Writes _system/onboarding only after all questions are committed (write-last for idempotency).
 func RunFirstRunOnboarding(ctx context.Context, app *infra.App) error {
 	ctx = infra.WithApp(ctx, app)
-	client, err := app.Firestore(ctx)
+	exists, err := system.OnboardingDocExists(ctx, app)
 	if err != nil {
-		return fmt.Errorf("onboarding firestore client: %w", err)
+		return err
 	}
-	ref := client.Collection(infra.SystemCollection).Doc(infra.OnboardingDoc)
-	_, err = ref.Get(ctx)
-	if err == nil {
+	if exists {
 		infra.LoggerFrom(ctx).Debug("first-run onboarding skipped", "reason", "already_complete")
 		return nil
-	}
-	if status.Code(err) != codes.NotFound {
-		return fmt.Errorf("onboarding check: %w", err)
 	}
 	// Doc not found → first run. Seed questions then write the doc last.
 
@@ -61,13 +54,8 @@ func RunFirstRunOnboarding(ctx context.Context, app *infra.App) error {
 	}
 	infra.LoggerFrom(ctx).Info("first-run onboarding seeded", "count", len(questions))
 
-	_, err = ref.Set(ctx, map[string]interface{}{
-		"status":    "complete",
-		"seeded_at": now,
-		"version":   1,
-	})
-	if err != nil {
-		return fmt.Errorf("onboarding mark complete: %w", err)
+	if err := system.SetOnboardingComplete(ctx, app, "complete", now, 1); err != nil {
+		return err
 	}
 	return nil
 }

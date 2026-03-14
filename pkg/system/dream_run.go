@@ -1,4 +1,4 @@
-package api
+package system
 
 import (
 	"context"
@@ -10,12 +10,7 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// dreamRunStateApp is the minimal interface needed to read/write dream run state (avoids coupling to full AppLike).
-type dreamRunStateApp interface {
-	Firestore(ctx context.Context) (*firestore.Client, error)
-}
-
-// DreamRunStatus is the status of the current dream run.
+// Dream run status constants and document name.
 const (
 	DreamRunStatusPending   = "pending"
 	DreamRunStatusRunning   = "running"
@@ -23,7 +18,7 @@ const (
 	DreamRunStatusFailed    = "failed"
 )
 
-// DreamRunStaleThreshold is how old a run must be (no completed_at) before we allow a new one (avoids stuck "running" forever).
+// DreamRunStaleThreshold is how old a run must be (no completed_at) before we allow a new one.
 const DreamRunStaleThreshold = 2 * time.Hour
 
 // DreamRunState is the shape of _system/dream_run for polling and display.
@@ -36,11 +31,11 @@ type DreamRunState struct {
 	Error          string                 `json:"error,omitempty"`
 	Log            []string               `json:"log"`
 	Result         map[string]interface{} `json:"result,omitempty"`
-	AlreadyRunning bool                   `json:"already_running,omitempty"` // true when POST /dream returned 202 because a run was already in progress
+	AlreadyRunning bool                   `json:"already_running,omitempty"`
 }
 
 // GetDreamRunState reads the current dream run state from Firestore for polling.
-func GetDreamRunState(ctx context.Context, app dreamRunStateApp) (*DreamRunState, error) {
+func GetDreamRunState(ctx context.Context, app FirestoreProvider) (*DreamRunState, error) {
 	client, err := app.Firestore(ctx)
 	if err != nil {
 		return nil, err
@@ -48,7 +43,7 @@ func GetDreamRunState(ctx context.Context, app dreamRunStateApp) (*DreamRunState
 	doc, err := client.Collection(infra.SystemCollection).Doc(infra.DreamRunDoc).Get(ctx)
 	if err != nil {
 		if status.Code(err) == codes.NotFound {
-			return nil, nil // doc never created yet
+			return nil, nil
 		}
 		return nil, err
 	}
@@ -93,8 +88,8 @@ func dreamRunStateFromDoc(doc *firestore.DocumentSnapshot) *DreamRunState {
 }
 
 // TryAcquireDreamRunLock sets status to pending and started_at if no run is in progress or the existing run is stale.
-// Returns (acquired, existingRunID). When acquired is false, existingRunID is the in-progress run's ID for the 202 response.
-func TryAcquireDreamRunLock(ctx context.Context, app dreamRunStateApp, runID string) (acquired bool, existingRunID string, err error) {
+// Returns (acquired, existingRunID). When acquired is false, existingRunID is the in-progress run's ID.
+func TryAcquireDreamRunLock(ctx context.Context, app FirestoreProvider, runID string) (acquired bool, existingRunID string, err error) {
 	client, err := app.Firestore(ctx)
 	if err != nil {
 		return false, "", err
@@ -115,7 +110,7 @@ func TryAcquireDreamRunLock(ctx context.Context, app dreamRunStateApp, runID str
 			}
 			if st == DreamRunStatusRunning || st == DreamRunStatusPending {
 				if time.Since(startedAt) < DreamRunStaleThreshold {
-					return nil, nil // cannot acquire
+					return nil, nil
 				}
 			}
 		}
@@ -130,11 +125,10 @@ func TryAcquireDreamRunLock(ctx context.Context, app dreamRunStateApp, runID str
 			"result":        nil,
 		}, nil
 	}
-	committed, err := runTransaction(ctx, client, ref, acquireFn)
+	committed, err := runDreamRunTransaction(ctx, client, ref, acquireFn)
 	if err != nil && status.Code(err) == codes.NotFound {
-		// Doc still missing (e.g. eventual consistency); ensure again and retry once.
 		_ = ensureDreamRunDocExists(ctx, client, ref)
-		committed, err = runTransaction(ctx, client, ref, acquireFn)
+		committed, err = runDreamRunTransaction(ctx, client, ref, acquireFn)
 	}
 	if err != nil {
 		return false, "", err
@@ -145,14 +139,12 @@ func TryAcquireDreamRunLock(ctx context.Context, app dreamRunStateApp, runID str
 	return true, "", nil
 }
 
-// ensureDreamRunDocExists creates _system/dream_run with a completed placeholder if it does not exist,
-// so the transaction in TryAcquireDreamRunLock never does Get on a missing doc (which can abort with NotFound).
 func ensureDreamRunDocExists(ctx context.Context, client *firestore.Client, ref *firestore.DocumentRef) error {
 	placeholder := map[string]interface{}{
 		"status":        DreamRunStatusCompleted,
 		"dream_run_id":  "",
 		"current_phase": "complete",
-		"completed_at":  time.Now().Add(-DreamRunStaleThreshold), // old so next run can acquire
+		"completed_at":  time.Now().Add(-DreamRunStaleThreshold),
 		"log":           []string{},
 		"error":         "",
 		"result":        nil,
@@ -172,7 +164,7 @@ func ensureDreamRunDocExists(ctx context.Context, client *firestore.Client, ref 
 	return nil
 }
 
-func runTransaction(ctx context.Context, client *firestore.Client, ref *firestore.DocumentRef, fn func(*firestore.DocumentSnapshot, *firestore.Transaction) (map[string]interface{}, error)) (committed bool, err error) {
+func runDreamRunTransaction(ctx context.Context, client *firestore.Client, ref *firestore.DocumentRef, fn func(*firestore.DocumentSnapshot, *firestore.Transaction) (map[string]interface{}, error)) (committed bool, err error) {
 	err = client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
 		doc, err := tx.Get(ref)
 		if err != nil {
@@ -183,7 +175,7 @@ func runTransaction(ctx context.Context, client *firestore.Client, ref *firestor
 			return err
 		}
 		if updates == nil {
-			return nil // caller chose not to update (e.g. lock not acquired)
+			return nil
 		}
 		committed = true
 		return tx.Set(ref, updates, firestore.MergeAll)
@@ -192,7 +184,7 @@ func runTransaction(ctx context.Context, client *firestore.Client, ref *firestor
 }
 
 // UpdateDreamRunPhase updates current_phase and appends a log line.
-func UpdateDreamRunPhase(ctx context.Context, app dreamRunStateApp, runID string, phase string, logLine string) error {
+func UpdateDreamRunPhase(ctx context.Context, app FirestoreProvider, runID string, phase string, logLine string) error {
 	client, err := app.Firestore(ctx)
 	if err != nil {
 		return err
@@ -210,7 +202,7 @@ func UpdateDreamRunPhase(ctx context.Context, app dreamRunStateApp, runID string
 }
 
 // SetDreamRunCompleted sets status to completed, result, and completed_at.
-func SetDreamRunCompleted(ctx context.Context, app dreamRunStateApp, runID string, result map[string]interface{}) error {
+func SetDreamRunCompleted(ctx context.Context, app FirestoreProvider, runID string, result map[string]interface{}) error {
 	client, err := app.Firestore(ctx)
 	if err != nil {
 		return err
@@ -227,7 +219,7 @@ func SetDreamRunCompleted(ctx context.Context, app dreamRunStateApp, runID strin
 }
 
 // SetDreamRunFailed sets status to failed, error message, and completed_at.
-func SetDreamRunFailed(ctx context.Context, app dreamRunStateApp, runID string, errMsg string) error {
+func SetDreamRunFailed(ctx context.Context, app FirestoreProvider, runID string, errMsg string) error {
 	client, err := app.Firestore(ctx)
 	if err != nil {
 		return err
@@ -244,7 +236,7 @@ func SetDreamRunFailed(ctx context.Context, app dreamRunStateApp, runID string, 
 }
 
 // AppendDreamRunLog appends a line to the log without changing phase.
-func AppendDreamRunLog(ctx context.Context, app dreamRunStateApp, runID string, logLine string) error {
+func AppendDreamRunLog(ctx context.Context, app FirestoreProvider, runID string, logLine string) error {
 	client, err := app.Firestore(ctx)
 	if err != nil {
 		return err

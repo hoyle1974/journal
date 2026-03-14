@@ -12,6 +12,7 @@ import (
 	"github.com/jackstrohm/jot/pkg/infra"
 	"github.com/jackstrohm/jot/pkg/journal"
 	"github.com/jackstrohm/jot/pkg/memory"
+	"github.com/jackstrohm/jot/pkg/system"
 	"github.com/jackstrohm/jot/pkg/task"
 	"github.com/jackstrohm/jot/pkg/utils"
 	"github.com/jackstrohm/jot/tools"
@@ -221,9 +222,6 @@ func dreamerSynthesizeContexts(ctx context.Context, contextUUIDs map[string]stru
 	return synthesized, skippedLazy, nil
 }
 
-const systemCollection = "_system"
-const latestDreamDoc = "latest_dream"
-
 // dreamNarrativeInput holds the data passed to the Dream Narrative generator.
 type dreamNarrativeInput struct {
 	EntriesProcessed    int
@@ -279,17 +277,8 @@ func writeDreamNarrative(ctx context.Context, app *infra.App, in *dreamNarrative
 		return nil
 	}
 
-	client, err := infra.GetFirestoreClient(ctx)
-	if err != nil {
-		return err
-	}
 	now := time.Now().Format(time.RFC3339)
-	_, err = client.Collection(systemCollection).Doc(latestDreamDoc).Set(ctx, map[string]interface{}{
-		"narrative": narrative,
-		"timestamp": now,
-		"unread":    true,
-	})
-	if err != nil {
+	if err := system.WriteLatestDream(ctx, app, narrative, now, true); err != nil {
 		return err
 	}
 	infra.LoggerFrom(ctx).Info("dream narrative written", "len", len(narrative))

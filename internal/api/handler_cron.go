@@ -6,12 +6,9 @@ import (
 	"net/http"
 	"time"
 
-	"cloud.google.com/go/firestore"
 	"github.com/jackstrohm/jot/pkg/infra"
+	"github.com/jackstrohm/jot/pkg/system"
 )
-
-const systemCollection = "_system"
-const latestDreamDoc = "latest_dream"
 
 // handleDreamLatest serves GET /dream/latest: returns the latest dream narrative and optionally marks it read.
 func handleDreamLatest(s *Server, w http.ResponseWriter, r *http.Request) {
@@ -23,14 +20,13 @@ func handleDreamLatest(s *Server, w http.ResponseWriter, r *http.Request) {
 		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
 		return
 	}
-	client, err := s.App.Firestore(ctx)
+	latest, err := system.GetLatestDream(ctx, s.App)
 	if err != nil {
 		infra.LoggerFrom(ctx).Error("dream latest: firestore", "error", err)
 		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	doc, err := client.Collection(systemCollection).Doc(latestDreamDoc).Get(ctx)
-	if err != nil || !doc.Exists() {
+	if latest == nil {
 		LogHandlerResponse(ctx, r.Method, path, http.StatusOK)
 		WriteJSON(w, http.StatusOK, map[string]interface{}{
 			"narrative": "",
@@ -39,14 +35,11 @@ func handleDreamLatest(s *Server, w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	data := doc.Data()
-	narrative, _ := data["narrative"].(string)
-	timestamp, _ := data["timestamp"].(string)
-	unread, _ := data["unread"].(bool)
+	narrative := latest.Narrative
+	timestamp := latest.Timestamp
+	unread := latest.Unread
 	if markRead := r.URL.Query().Get("mark_read"); markRead == "true" && unread {
-		_, _ = client.Collection(systemCollection).Doc(latestDreamDoc).Update(ctx, []firestore.Update{
-			{Path: "unread", Value: false},
-		})
+		_ = system.MarkLatestDreamRead(ctx, s.App)
 		unread = false
 	}
 	LogHandlerResponse(ctx, r.Method, path, http.StatusOK)
@@ -59,16 +52,16 @@ func handleDreamLatest(s *Server, w http.ResponseWriter, r *http.Request) {
 
 // dreamRunProgress writes phase and log to Firestore for async dream run polling.
 type dreamRunProgress struct {
-	app   dreamRunStateApp
+	app   system.FirestoreProvider
 	runID string
 }
 
 func (p *dreamRunProgress) OnPhase(ctx context.Context, phase string) {
-	_ = UpdateDreamRunPhase(ctx, p.app, p.runID, phase, "")
+	_ = system.UpdateDreamRunPhase(ctx, p.app, p.runID, phase, "")
 }
 
 func (p *dreamRunProgress) OnLog(ctx context.Context, msg string) {
-	_ = AppendDreamRunLog(ctx, p.app, p.runID, msg)
+	_ = system.AppendDreamRunLog(ctx, p.app, p.runID, msg)
 }
 
 func handleDream(s *Server, w http.ResponseWriter, r *http.Request) {
@@ -81,7 +74,7 @@ func handleDream(s *Server, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	runID := infra.GenShortRunID()
-	acquired, existingRunID, err := TryAcquireDreamRunLock(ctx, s.App, runID)
+	acquired, existingRunID, err := system.TryAcquireDreamRunLock(ctx, s.App, runID)
 	if err != nil {
 		infra.LoggerFrom(ctx).Error("dream lock failed", "error", err)
 		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -116,11 +109,11 @@ func runDreamInBackground(ctx context.Context, s *Server, runID string) {
 	progress := &dreamRunProgress{app: s.App, runID: runID}
 	result, err := s.Agent.RunDreamerWithProgress(runCtx, runID, progress)
 	if err != nil {
-		_ = SetDreamRunFailed(runCtx, s.App, runID, err.Error())
+		_ = system.SetDreamRunFailed(runCtx, s.App, runID, err.Error())
 		infra.LoggerFrom(runCtx).Error("dream run failed", "dream_run_id", runID, "error", err)
 		return
 	}
-	_ = SetDreamRunCompleted(runCtx, s.App, runID, map[string]interface{}{
+	_ = system.SetDreamRunCompleted(runCtx, s.App, runID, map[string]interface{}{
 		"entries_processed":    result.EntriesProcessed,
 		"facts_extracted":       result.FactsExtracted,
 		"facts_written":         result.FactsWritten,
@@ -151,17 +144,17 @@ func handleDreamRun(s *Server, w http.ResponseWriter, r *http.Request) {
 	// Long timeout so the dream can complete (Cloud Run allows up to 60 min).
 	runCtx, cancel := context.WithTimeout(ctx, 55*time.Minute)
 	defer cancel()
-	_ = UpdateDreamRunPhase(runCtx, s.App, runID, "running", "Dream run started.")
+	_ = system.UpdateDreamRunPhase(runCtx, s.App, runID, "running", "Dream run started.")
 	progress := &dreamRunProgress{app: s.App, runID: runID}
 	result, err := s.Agent.RunDreamerWithProgress(runCtx, runID, progress)
 	if err != nil {
-		_ = SetDreamRunFailed(runCtx, s.App, runID, err.Error())
+		_ = system.SetDreamRunFailed(runCtx, s.App, runID, err.Error())
 		infra.ErrorsTotal.Inc()
 		infra.LoggerFrom(ctx).Error("dream run failed", "dream_run_id", runID, "error", err)
 		WriteJSON(w, http.StatusOK, map[string]interface{}{"success": false, "error": err.Error()})
 		return
 	}
-	_ = SetDreamRunCompleted(runCtx, s.App, runID, map[string]interface{}{
+	_ = system.SetDreamRunCompleted(runCtx, s.App, runID, map[string]interface{}{
 		"entries_processed":    result.EntriesProcessed,
 		"facts_extracted":      result.FactsExtracted,
 		"facts_written":         result.FactsWritten,
@@ -186,7 +179,7 @@ func handleDreamStatus(s *Server, w http.ResponseWriter, r *http.Request) {
 		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
 		return
 	}
-	state, err := GetDreamRunState(ctx, s.App)
+	state, err := system.GetDreamRunState(ctx, s.App)
 	if err != nil {
 		infra.LoggerFrom(ctx).Error("dream status failed", "error", err)
 		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
