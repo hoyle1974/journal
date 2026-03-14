@@ -38,12 +38,13 @@ type Server struct {
 	Memory  MemoryService
 	Agent   AgentService
 	SMS     SMSService
+	System  SystemService
 	router  RouterFunc
 }
 
 // NewServer builds a Server. The router is called after the request context has the app attached.
-// Domain services (Journal, Memory, Agent, SMS) must be non-nil for handlers that use them.
-func NewServer(app AppLike, cfg *config.Config, logger *slog.Logger, journal JournalService, memory MemoryService, agent AgentService, sms SMSService, router RouterFunc) *Server {
+// Domain services (Journal, Memory, Agent, SMS, System) must be non-nil for handlers that use them.
+func NewServer(app AppLike, cfg *config.Config, logger *slog.Logger, journal JournalService, memory MemoryService, agent AgentService, sms SMSService, system SystemService, router RouterFunc) *Server {
 	return &Server{
 		App:     app,
 		Config:  cfg,
@@ -52,6 +53,7 @@ func NewServer(app AppLike, cfg *config.Config, logger *slog.Logger, journal Jou
 		Memory:  memory,
 		Agent:   agent,
 		SMS:     sms,
+		System:  system,
 		router:  router,
 	}
 }

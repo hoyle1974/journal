@@ -15,7 +15,6 @@ import (
 	"cloud.google.com/go/compute/metadata"
 	"github.com/jackstrohm/jot/internal/config"
 	"github.com/jackstrohm/jot/pkg/infra"
-	"github.com/jackstrohm/jot/pkg/system"
 	"github.com/jackstrohm/jot/pkg/utils"
 	"google.golang.org/api/docs/v1"
 	"google.golang.org/api/option"
@@ -305,7 +304,7 @@ func handleSync(s *Server, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	lockAcquired, lockErr := system.AcquireSyncLock(ctx, s.App)
+	lockAcquired, lockErr := s.System.AcquireSyncLock(ctx)
 	if lockErr != nil {
 		infra.LoggerFrom(ctx).Error("failed to check sync lock", "error", lockErr)
 		LogHandlerResponse(ctx, r.Method, path, http.StatusInternalServerError, "error", "Failed to check sync lock")
@@ -318,7 +317,7 @@ func handleSync(s *Server, w http.ResponseWriter, r *http.Request) {
 		WriteJSON(w, http.StatusConflict, map[string]string{"error": "Another sync is already in progress. Please wait and try again."})
 		return
 	}
-	defer system.ReleaseSyncLock(ctx, s.App)
+	defer s.System.ReleaseSyncLock(ctx)
 
 	docsService, err := syncCreateDocsService(ctx, s.Config)
 	if err != nil {
@@ -393,7 +392,7 @@ func handleSync(s *Server, w http.ResponseWriter, r *http.Request) {
 	if block != nil && strings.TrimSpace(block.text) != "" {
 		h := sha256.Sum256([]byte(block.text))
 		blockHash := hex.EncodeToString(h[:])
-		lastHash, exists, err := system.GetSyncStateLastBlockHash(ctx, s.App)
+		lastHash, exists, err := s.System.GetSyncStateLastBlockHash(ctx)
 		if err == nil && exists && lastHash == blockHash {
 			infra.LoggerFrom(ctx).Info("sync skipped", "reason", "duplicate block (already processed)")
 			blockToProcess = nil
@@ -415,7 +414,7 @@ func handleSync(s *Server, w http.ResponseWriter, r *http.Request) {
 		if blockToProcess != nil && strings.TrimSpace(blockToProcess.text) != "" {
 			h := sha256.Sum256([]byte(blockToProcess.text))
 			blockHash := hex.EncodeToString(h[:])
-			if err := system.SetSyncStateAfterProcess(ctx, s.App, blockHash); err != nil {
+			if err := s.System.SetSyncStateAfterProcess(ctx, blockHash); err != nil {
 				infra.LoggerFrom(ctx).Warn("failed to store sync_state", "error", err)
 			}
 		}
@@ -477,7 +476,7 @@ func handleWebhook(s *Server, w http.ResponseWriter, r *http.Request) {
 	}
 	defer tasksClient.Close()
 	parent := fmt.Sprintf("projects/%s/locations/%s/queues/%s", s.Config.GoogleCloudProject, s.Config.CloudTasksLocation, s.Config.CloudTasksQueue)
-	oldTaskName, _ := system.GetDebounceState(ctx, s.App)
+	oldTaskName, _ := s.System.GetDebounceState(ctx)
 	if oldTaskName != "" {
 		if err := tasksClient.DeleteTask(ctx, &cloudtaskspb.DeleteTaskRequest{Name: oldTaskName}); err != nil {
 			infra.LoggerFrom(ctx).Debug("failed to delete old task (may have already executed)", "error", err)
@@ -510,7 +509,7 @@ func handleWebhook(s *Server, w http.ResponseWriter, r *http.Request) {
 	infra.LoggerFrom(ctx).Info("webhook", "event", "Drive change, sync scheduled", "delay_seconds", debounceSeconds, "task_id", taskID)
 	LogHandlerResponse(ctx, r.Method, path, http.StatusOK, "status", "scheduled", "task_id", taskID, "delay_seconds", debounceSeconds)
 	s.App.SubmitAsync(func() {
-		if err := system.SetDebounceState(context.Background(), s.App, taskName, scheduleTime); err != nil {
+		if err := s.System.SetDebounceState(context.Background(), taskName, scheduleTime); err != nil {
 			infra.LoggerFrom(ctx).Warn("failed to store debounce state", "error", err)
 		}
 	})

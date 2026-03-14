@@ -3,10 +3,38 @@ package api
 import (
 	"context"
 	"net/http"
+	"time"
 
 	"github.com/jackstrohm/jot/pkg/agent"
 	"github.com/jackstrohm/jot/pkg/infra"
+	"github.com/jackstrohm/jot/pkg/system"
 )
+
+// SystemService provides _system collection operations (locks, dream state, debounce, onboarding) for HTTP handlers.
+// Implemented by internal/service.SystemService wrapping pkg/system.
+type SystemService interface {
+	// Sync
+	AcquireSyncLock(ctx context.Context) (bool, error)
+	ReleaseSyncLock(ctx context.Context)
+	GetSyncStateLastBlockHash(ctx context.Context) (hash string, exists bool, err error)
+	SetSyncStateAfterProcess(ctx context.Context, blockHash string) error
+	GetDebounceState(ctx context.Context) (taskName string, err error)
+	SetDebounceState(ctx context.Context, taskName string, scheduledTime time.Time) error
+	// Latest dream
+	GetLatestDream(ctx context.Context) (*system.LatestDream, error)
+	MarkLatestDreamRead(ctx context.Context) error
+	WriteLatestDream(ctx context.Context, narrative, timestamp string, unread bool) error
+	// Dream run
+	GetDreamRunState(ctx context.Context) (*system.DreamRunState, error)
+	TryAcquireDreamRunLock(ctx context.Context, runID string) (acquired bool, existingRunID string, err error)
+	UpdateDreamRunPhase(ctx context.Context, runID, phase, logLine string) error
+	SetDreamRunCompleted(ctx context.Context, runID string, result map[string]interface{}) error
+	SetDreamRunFailed(ctx context.Context, runID string, errMsg string) error
+	AppendDreamRunLog(ctx context.Context, runID string, logLine string) error
+	// Onboarding
+	OnboardingDocExists(ctx context.Context) (bool, error)
+	SetOnboardingComplete(ctx context.Context, statusVal, seededAt string, version int) error
+}
 
 // PulseResult is the outcome of a pulse audit run (returned by AgentService.RunPulseAudit).
 type PulseResult struct {
