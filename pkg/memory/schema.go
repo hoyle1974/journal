@@ -53,6 +53,7 @@ type UserIdentityMeta struct {
 // Project/Goal status values (metadataStatus and existing code expect lowercase).
 const (
 	StatusActive    = "active"
+	StatusArchived  = "archived"
 	StatusBlocked   = "blocked"
 	StatusDone      = "done"
 	StatusPlanning  = "planning"
@@ -241,7 +242,7 @@ func normalizePerson(m map[string]any) (map[string]any, error) {
 }
 
 var projectGoalStatuses = map[string]bool{
-	StatusActive: true, StatusBlocked: true, StatusDone: true,
+	StatusActive: true, StatusArchived: true, StatusBlocked: true, StatusDone: true,
 	StatusPlanning: true, StatusPending: true, StatusCompleted: true,
 }
 

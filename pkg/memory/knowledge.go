@@ -535,6 +535,83 @@ func FindEntityNodeByName(ctx context.Context, entityName string) (*KnowledgeNod
 	return nil, nil
 }
 
+// FindProjectOrGoalByName finds the nearest project or goal knowledge node by semantic similarity to the given name.
+// Returns nil if no project/goal node is found within the search results.
+func FindProjectOrGoalByName(ctx context.Context, projectName string) (*KnowledgeNode, error) {
+	app := infra.GetApp(ctx)
+	if app == nil || app.Config() == nil {
+		return nil, fmt.Errorf("no app in context")
+	}
+	projectID := app.Config().GoogleCloudProject
+	vec, err := infra.GenerateEmbedding(ctx, projectID, "Project: "+projectName)
+	if err != nil {
+		return nil, err
+	}
+	nodes, err := QuerySimilarNodes(ctx, vec, 5)
+	if err != nil {
+		return nil, err
+	}
+	for i := range nodes {
+		if nodes[i].NodeType == NodeTypeProject || nodes[i].NodeType == NodeTypeGoal {
+			return &nodes[i], nil
+		}
+	}
+	return nil, nil
+}
+
+// UpdateProjectStatus sets the status field on a project or goal node's metadata and updates last_recalled_at.
+// The node must exist and have node_type "project" or "goal"; status is validated against the project/goal schema.
+func UpdateProjectStatus(ctx context.Context, nodeID, status string) error {
+	ctx, span := infra.StartSpan(ctx, "knowledge.update_project_status")
+	defer span.End()
+
+	node, err := GetKnowledgeNodeByID(ctx, nodeID)
+	if err != nil {
+		return err
+	}
+	if node == nil {
+		return fmt.Errorf("knowledge node %q not found", nodeID)
+	}
+	if node.NodeType != NodeTypeProject && node.NodeType != NodeTypeGoal {
+		return fmt.Errorf("node %q is not a project or goal (node_type=%q)", nodeID, node.NodeType)
+	}
+
+	var meta map[string]any
+	if node.Metadata != "" {
+		_ = json.Unmarshal([]byte(node.Metadata), &meta)
+	}
+	if meta == nil {
+		meta = make(map[string]any)
+	}
+	meta["status"] = strings.ToLower(strings.TrimSpace(status))
+	if err := ValidateMetadata(node.NodeType, meta); err != nil {
+		return fmt.Errorf("invalid status: %w", err)
+	}
+	normalized, err := NormalizeMetadata(node.NodeType, meta)
+	if err != nil {
+		return fmt.Errorf("normalize metadata: %w", err)
+	}
+	metaJSON, err := MetadataToJSON(normalized)
+	if err != nil {
+		return err
+	}
+
+	client, err := infra.GetFirestoreClient(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = client.Collection(KnowledgeCollection).Doc(nodeID).Update(ctx, []firestore.Update{
+		{Path: "metadata", Value: metaJSON},
+		{Path: "last_recalled_at", Value: time.Now().Format(time.RFC3339)},
+	})
+	if err != nil {
+		span.RecordError(err)
+		return err
+	}
+	span.SetAttributes(map[string]string{"node_id": nodeID, "status": status})
+	return nil
+}
+
 // DiscoverRelatedNodes finds nodes semantically related to an entity name that may not be in entity_links.
 // Excludes person nodes whose content contains the entity name (to avoid returning the primary entity card).
 func DiscoverRelatedNodes(ctx context.Context, entityName string, limit int) ([]KnowledgeNode, error) {

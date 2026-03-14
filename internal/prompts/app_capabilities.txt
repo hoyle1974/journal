@@ -15,7 +15,7 @@ Jot is a personal journaling and memory system. It ingests journal entries, extr
 - **Planner**: Generates step-by-step plans from a goal; stores phases in knowledge graph.
 
 ## Memory
-- **Semantic memory**: Knowledge nodes (Firestore). Types: person, project, goal, preference, event, milestone, place, asset, tool, generic, weekly_summary, monthly_summary, identity_anchor, user_identity. For project/goal nodes, status must be one of: active, blocked, done, planning, pending, completed. Recalled by embedding similarity; janitor evicts by last_recalled_at and significance_weight.
+- **Semantic memory**: Knowledge nodes (Firestore). Types: person, project, goal, preference, event, milestone, place, asset, tool, generic, weekly_summary, monthly_summary, identity_anchor, user_identity. For project/goal nodes, status must be one of: active, archived, blocked, done, planning, pending, completed. Recalled by embedding similarity; janitor evicts by last_recalled_at and significance_weight.
 - **Context nodes**: Named, typed (permanent/auto). Used for active projects, plans, living context. Touch updates relevance; some created by Dreamer context extractor.
 - **Reserved names**: user_profile (identity), system_evolution (audit/friction), latest_dream (narrative). Janitor must not delete identity_anchor / user_identity.
 

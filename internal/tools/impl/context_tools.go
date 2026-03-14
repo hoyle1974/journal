@@ -5,9 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
 
-	"cloud.google.com/go/firestore"
 	"github.com/jackstrohm/jot/pkg/agent"
 	"github.com/jackstrohm/jot/pkg/infra"
 	"github.com/jackstrohm/jot/pkg/journal"
@@ -269,7 +267,7 @@ func registerProjectStatusTools() {
 		},
 	})
 
-	tools.Register(&tools.Tool{
+		tools.Register(&tools.Tool{
 		Name:        "update_project_status",
 		Description: "Update the status of an ongoing goal or project (e.g. 'active', 'blocked', 'completed', 'archived'). Use this when the user indicates a project phase is done or finished.",
 		Category:    "context",
@@ -286,38 +284,14 @@ func registerProjectStatusTools() {
 			if status == "" {
 				return tools.MissingParam("status")
 			}
-			app := infra.GetApp(ctx)
-			if app == nil || app.Config() == nil {
-				return tools.Fail("Error: no app in context")
-			}
-			vec, err := infra.GenerateEmbedding(ctx, app.Config().GoogleCloudProject, "Project: "+projectName)
+			node, err := memory.FindProjectOrGoalByName(ctx, projectName)
 			if err != nil {
 				return tools.Fail("Error finding project: %v", err)
 			}
-			nodes, err := memory.QuerySimilarNodes(ctx, vec, 3)
-			if err != nil || len(nodes) == 0 {
+			if node == nil {
 				return tools.Fail("Project '%s' not found.", projectName)
 			}
-			nodeID := nodes[0].UUID
-			var meta map[string]interface{}
-			if nodes[0].Metadata != "" {
-				_ = json.Unmarshal([]byte(nodes[0].Metadata), &meta)
-			}
-			if meta == nil {
-				meta = make(map[string]interface{})
-			}
-			meta["status"] = status
-			metaJSON, _ := json.Marshal(meta)
-
-			client, err := app.Firestore(ctx)
-			if err != nil {
-				return tools.Fail("Error updating: %v", err)
-			}
-			_, err = client.Collection(memory.KnowledgeCollection).Doc(nodeID).Update(ctx, []firestore.Update{
-				{Path: "metadata", Value: string(metaJSON)},
-				{Path: "last_recalled_at", Value: time.Now().Format(time.RFC3339)},
-			})
-			if err != nil {
+			if err := memory.UpdateProjectStatus(ctx, node.UUID, status); err != nil {
 				return tools.Fail("Failed to update status: %v", err)
 			}
 			return tools.OK("Project '%s' is now marked as %s.", projectName, status)
