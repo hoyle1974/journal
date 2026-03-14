@@ -17,10 +17,10 @@ Given a topic (e.g. "migraines", "work stress", "Jot app") and a list of journal
 # Input
 
 ## Topic
-%s
+{{.Topic}}
 
 ## Timeframe (if any)
-%s
+{{.Timeframe}}
 
 ## Journal entries (chronological)
-%s
+{{.EntriesText}}

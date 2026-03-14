@@ -23,7 +23,7 @@ type ActiveContextItem struct {
 
 // BuildSystemPrompt creates the system prompt with current date context and recent history.
 // For which parts are static vs dynamic (context caching), see docs/context-caching-analysis.md.
-func BuildSystemPrompt(ctx context.Context) string {
+func BuildSystemPrompt(ctx context.Context) (string, error) {
 	now := time.Now()
 	today := now.Format("2006-01-02")
 	currentTime := now.Format("15:04 MST")
@@ -106,8 +106,26 @@ func BuildSystemPrompt(ctx context.Context) string {
 		"event", "LLM_CONTEXT_SENT",
 		"context_sections", injectedSections)
 
-	// Template order: preamble (cacheable) then ======= then dynamic. Placeholders: delimOpen, delimClose, sourceCodeBlock, today, currentTime, currentWeek, lastWeekStr, currentMonth, identity, activeContextsStr, recentConversation, proactiveSignals, knowledgeGapBlock, openTodoBlock.
-	prompt := fmt.Sprintf(prompts.SystemPromptTemplate(), utils.UserDataDelimOpen, utils.UserDataDelimClose, sourceCodeBlock, today, currentTime, currentWeek, lastWeekStr, currentMonth, identityWrapped, activeContextsWrapped, recentConversationWrapped, proactiveSignalsWrapped, knowledgeGapBlockWrapped, openTodoBlockWrapped)
+	promptData := prompts.SystemPromptData{
+		DelimOpen:          utils.UserDataDelimOpen,
+		DelimClose:         utils.UserDataDelimClose,
+		SourceCodeBlock:    sourceCodeBlock,
+		Today:              today,
+		CurrentTime:        currentTime,
+		CurrentWeek:        currentWeek,
+		LastWeek:           lastWeekStr,
+		CurrentMonth:       currentMonth,
+		IdentityBlock:      identityWrapped,
+		ActiveContexts:     activeContextsWrapped,
+		RecentConversation: recentConversationWrapped,
+		ProactiveSignals:   proactiveSignalsWrapped,
+		KnowledgeGapBlock:  knowledgeGapBlockWrapped,
+		OpenTodoBlock:      openTodoBlockWrapped,
+	}
+	prompt, err := prompts.BuildSystemPrompt(promptData)
+	if err != nil {
+		return "", fmt.Errorf("build system prompt: %w", err)
+	}
 
 	// Map vs Manual: compressed manifest + 3 core tools (semantic_search, upsert_knowledge, discovery_search). Everything else via discovery_search(intent) → JIT schema injection.
 	if app := infra.GetApp(ctx); app != nil && app.Config() != nil && app.Config().UseCompactTools {
@@ -116,7 +134,7 @@ func BuildSystemPrompt(ctx context.Context) string {
 	}
 
 	infra.LoggerFrom(ctx).Debug("system prompt built", "prompt_len", len(prompt), "reason", "inject date, active contexts, recent conversation, signals, gap block, open todo roots")
-	return prompt
+	return prompt, nil
 }
 
 // formatContextSection builds the ACTIVE CONTEXTS block with --- and ## header; tag by name/relevance, Briefing for content.

@@ -116,7 +116,14 @@ func AnalyzeJournalEntry(ctx context.Context, entryContent, entryUUID, entryTime
 		entryDate = "unknown"
 	}
 
-	prompt := prompts.FormatJournalAnalyze(entryUUID, entryDate, utils.WrapAsUserData(utils.SanitizePrompt(entryContent)))
+	prompt, err := prompts.BuildJournalAnalyze(prompts.JournalAnalyzeData{
+		EntryID:   entryUUID,
+		Date:      entryDate,
+		EntryText: utils.WrapAsUserData(utils.SanitizePrompt(entryContent)),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("build journal analyze prompt: %w", err)
+	}
 	req := &infra.LLMRequest{
 		Parts:     []*genai.Part{{Text: prompt}},
 		Model:     app.Config().GeminiModel,

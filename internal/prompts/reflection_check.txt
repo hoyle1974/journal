@@ -3,10 +3,10 @@ You just drafted this answer. Check it against the Semantic Memory below.
 (2) Is this answer too cluttered with "Gravel" (temporary logistics, one-off details)?
 
 Answer:
-%s
+{{.Answer}}
 
 Semantic Memory:
-%s
+{{.SemanticMemory}}
 
 Output structured key/value lines only. No JSON, no markdown, no code fences.
 

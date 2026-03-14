@@ -638,7 +638,13 @@ func analyzeForNewContext(ctx context.Context, entryContent string) (bool, strin
 		infra.LoggerFrom(ctx).Warn("failed to get app for context analysis")
 		return false, "", nil
 	}
-	prompt := prompts.FormatContextAnalyze(utils.WrapAsUserData(utils.SanitizePrompt(entryContent)))
+	prompt, err := prompts.BuildContextAnalyze(prompts.ContextAnalyzeData{
+		EntryContent: utils.WrapAsUserData(utils.SanitizePrompt(entryContent)),
+	})
+	if err != nil {
+		infra.LoggerFrom(ctx).Warn("context analysis prompt build failed", "error", err)
+		return false, "", nil
+	}
 	req := &infra.LLMRequest{
 		Parts:     []*genai.Part{{Text: prompt}},
 		Model:     app.Config().GeminiModel,

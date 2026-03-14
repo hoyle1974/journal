@@ -21,10 +21,10 @@ issues:
 # Inputs
 
 ## Recent journal
-%s
+{{.RecentJournal}}
 
 ## Relevant knowledge
-%s
+{{.RelevantKnowledge}}
 
 ## System Capabilities (what Jot can do + existing tools)
-%s
+{{.ToolManifest}}

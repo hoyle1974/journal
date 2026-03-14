@@ -53,10 +53,14 @@ func RunGapDetection(ctx context.Context, journalContext string, entryUUIDs []st
 
 	// Inject app capabilities so the gap-detector LLM knows what Jot can do (entry points, agents, memory, tools).
 	capabilitiesAndTools := prompts.AppCapabilities() + "\n\n## Existing tools (compact)\n" + tools.GetCompactDirectory()
-	userPrompt := prompts.FormatGapDetector(
-		utils.WrapAsUserData(utils.SanitizePrompt(journalContext)),
-		utils.WrapAsUserData(relevantKnowledge),
-		utils.WrapAsUserData(capabilitiesAndTools))
+	userPrompt, err := prompts.BuildGapDetector(prompts.GapDetectorData{
+		RecentJournal:      utils.WrapAsUserData(utils.SanitizePrompt(journalContext)),
+		RelevantKnowledge:  utils.WrapAsUserData(relevantKnowledge),
+		ToolManifest:        utils.WrapAsUserData(capabilitiesAndTools),
+	})
+	if err != nil {
+		return fmt.Errorf("build gap detector prompt: %w", err)
+	}
 	req := &infra.LLMRequest{
 		Parts:     []*genai.Part{{Text: userPrompt}},
 		Model:     app.Config().DreamerModel,

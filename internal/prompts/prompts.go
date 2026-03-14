@@ -1,11 +1,14 @@
 // Package prompts provides static prompt text loaded from embedded files via go:embed.
 // Large prompt blocks live in .txt files and are loaded at init for use by the jot agent.
+// Parameterized prompts use text/template with strongly-typed data structs.
 package prompts
 
 import (
 	_ "embed"
+	"bytes"
 	"fmt"
 	"sync"
+	"text/template"
 )
 
 //go:embed system_prompt.txt
@@ -81,7 +84,18 @@ var synthesisPassTxt string
 var appCapabilitiesTxt string
 
 var (
-	specialistMap   map[string]string
+	systemPromptTmpl    = template.Must(template.New("system").Parse(systemPromptTxt))
+	contextAnalyzeTmpl  = template.Must(template.New("context").Parse(contextAnalyzeTxt))
+	journalAnalyzeTmpl  = template.Must(template.New("journal").Parse(journalAnalyzeTxt))
+	reflectionCheckTmpl = template.Must(template.New("reflection").Parse(reflectionCheckTxt))
+	knowledgeGapTmpl    = template.Must(template.New("knowledgeGap").Parse(knowledgeGapTxt))
+	gapDetectorTmpl     = template.Must(template.New("gapDetector").Parse(gapDetectorTxt))
+	rollUpTmpl          = template.Must(template.New("rollUp").Parse(rollUpTxt))
+	activityHistoryTmpl = template.Must(template.New("activityHistory").Parse(activityHistoryTxt))
+)
+
+var (
+	specialistMap     map[string]string
 	specialistMapOnce sync.Once
 )
 
@@ -96,9 +110,138 @@ func initSpecialistMap() {
 	}
 }
 
-// SystemPromptTemplate returns the main FOH system prompt template with 13 %s placeholders.
-// Order: delimOpen, delimClose, sourceCodeBlock (preamble, cacheable), then after "=======": today, currentWeek, lastWeekStr, currentMonth, identityBlock, activeContextsStr, recentConversation, proactiveSignals, knowledgeGapBlock, openTodoBlock (dynamic).
-func SystemPromptTemplate() string { return systemPromptTxt }
+// SystemPromptData holds all inputs for the main FOH system prompt.
+type SystemPromptData struct {
+	DelimOpen          string
+	DelimClose         string
+	SourceCodeBlock    string
+	Today              string
+	CurrentTime        string
+	CurrentWeek        string
+	LastWeek           string
+	CurrentMonth       string
+	IdentityBlock      string
+	ActiveContexts     string
+	RecentConversation string
+	ProactiveSignals   string
+	KnowledgeGapBlock  string
+	OpenTodoBlock      string
+}
+
+// BuildSystemPrompt executes the system prompt template with the given data.
+func BuildSystemPrompt(data SystemPromptData) (string, error) {
+	var buf bytes.Buffer
+	if err := systemPromptTmpl.Execute(&buf, data); err != nil {
+		return "", fmt.Errorf("execute system prompt: %w", err)
+	}
+	return buf.String(), nil
+}
+
+// ContextAnalyzeData holds the entry content for context analysis.
+type ContextAnalyzeData struct {
+	EntryContent string
+}
+
+// BuildContextAnalyze executes the context-analyze template.
+func BuildContextAnalyze(data ContextAnalyzeData) (string, error) {
+	var buf bytes.Buffer
+	if err := contextAnalyzeTmpl.Execute(&buf, data); err != nil {
+		return "", fmt.Errorf("execute context analyze: %w", err)
+	}
+	return buf.String(), nil
+}
+
+// JournalAnalyzeData holds entry ID, date, and text for journal analysis.
+type JournalAnalyzeData struct {
+	EntryID   string
+	Date      string
+	EntryText string
+}
+
+// BuildJournalAnalyze executes the journal-analyze template.
+func BuildJournalAnalyze(data JournalAnalyzeData) (string, error) {
+	var buf bytes.Buffer
+	if err := journalAnalyzeTmpl.Execute(&buf, data); err != nil {
+		return "", fmt.Errorf("execute journal analyze: %w", err)
+	}
+	return buf.String(), nil
+}
+
+// ReflectionCheckData holds answer and semantic memory for reflection check.
+type ReflectionCheckData struct {
+	Answer         string
+	SemanticMemory string
+}
+
+// BuildReflectionCheck executes the reflection-check template.
+func BuildReflectionCheck(data ReflectionCheckData) (string, error) {
+	var buf bytes.Buffer
+	if err := reflectionCheckTmpl.Execute(&buf, data); err != nil {
+		return "", fmt.Errorf("execute reflection check: %w", err)
+	}
+	return buf.String(), nil
+}
+
+// KnowledgeGapData holds the gap list content for the knowledge-gap block.
+type KnowledgeGapData struct {
+	GapListContent string
+}
+
+// BuildKnowledgeGap executes the knowledge-gap template.
+func BuildKnowledgeGap(data KnowledgeGapData) (string, error) {
+	var buf bytes.Buffer
+	if err := knowledgeGapTmpl.Execute(&buf, data); err != nil {
+		return "", fmt.Errorf("execute knowledge gap: %w", err)
+	}
+	return buf.String(), nil
+}
+
+// GapDetectorData holds recent journal, relevant knowledge, and tool manifest for gap detection.
+type GapDetectorData struct {
+	RecentJournal    string
+	RelevantKnowledge string
+	ToolManifest     string
+}
+
+// BuildGapDetector executes the gap-detector template.
+func BuildGapDetector(data GapDetectorData) (string, error) {
+	var buf bytes.Buffer
+	if err := gapDetectorTmpl.Execute(&buf, data); err != nil {
+		return "", fmt.Errorf("execute gap detector: %w", err)
+	}
+	return buf.String(), nil
+}
+
+// RollUpData holds period label and analyses text for roll-up.
+type RollUpData struct {
+	PeriodLabel  string
+	AnalysesText string
+}
+
+// BuildRollUp executes the roll-up template.
+func BuildRollUp(data RollUpData) (string, error) {
+	var buf bytes.Buffer
+	if err := rollUpTmpl.Execute(&buf, data); err != nil {
+		return "", fmt.Errorf("execute roll up: %w", err)
+	}
+	return buf.String(), nil
+}
+
+// ActivityHistoryData holds topic, timeframe, and entries text for activity history summarization.
+type ActivityHistoryData struct {
+	Topic      string
+	Timeframe  string
+	EntriesText string
+}
+
+// BuildActivityHistory executes the activity-history template.
+func BuildActivityHistory(data ActivityHistoryData) (string, error) {
+	var buf bytes.Buffer
+	if err := activityHistoryTmpl.Execute(&buf, data); err != nil {
+		return "", fmt.Errorf("execute activity history: %w", err)
+	}
+	return buf.String(), nil
+}
 
 // SourceCodeBlock returns the static source-code block appended to the system prompt.
 func SourceCodeBlock() string { return sourceCodeTxt }
@@ -115,18 +258,6 @@ func Router() string { return routerTxt }
 // PlanSystem returns the plan-generation system instruction.
 func PlanSystem() string { return planSystemTxt }
 
-// ContextAnalyzeTemplate returns the context-analysis prompt template with one %s (entry content).
-func ContextAnalyzeTemplate() string { return contextAnalyzeTxt }
-
-// JournalAnalyzeTemplate returns the journal-analysis prompt template with three %s: entryID, date, entryText.
-func JournalAnalyzeTemplate() string { return journalAnalyzeTxt }
-
-// ReflectionCheckTemplate returns the reflection-check prompt template with two %s (answer, semanticMemory).
-func ReflectionCheckTemplate() string { return reflectionCheckTxt }
-
-// KnowledgeGapTemplate returns the knowledge-gap block template with one %s (gap list).
-func KnowledgeGapTemplate() string { return knowledgeGapTxt }
-
 // ExecutiveSummary returns the living-context executive summary prompt.
 func ExecutiveSummary() string { return executiveSummaryTxt }
 
@@ -142,59 +273,14 @@ func Specialist(domain string) string {
 	return ""
 }
 
-// FormatContextAnalyze formats the context-analyze template with the given entry content.
-func FormatContextAnalyze(entryContent string) string {
-	return fmt.Sprintf(ContextAnalyzeTemplate(), entryContent)
-}
-
-// FormatJournalAnalyze formats the journal-analyze template with entry ID, date, and entry text (content).
-func FormatJournalAnalyze(entryID, date, entryText string) string {
-	return fmt.Sprintf(JournalAnalyzeTemplate(), entryID, date, entryText)
-}
-
-// FormatReflectionCheck formats the reflection-check template with answer and semantic memory.
-func FormatReflectionCheck(answer, semanticMemory string) string {
-	return fmt.Sprintf(ReflectionCheckTemplate(), answer, semanticMemory)
-}
-
-// FormatKnowledgeGap formats the knowledge-gap block with the given gap list content.
-func FormatKnowledgeGap(gapListContent string) string {
-	return fmt.Sprintf(KnowledgeGapTemplate(), gapListContent)
-}
-
 // DreamStoryTemplate returns the dream narrative (morning readout) system prompt.
 func DreamStoryTemplate() string { return dreamStoryTxt }
 
 // SynthesisPass returns the synthesis-pass system prompt (retrieve-and-summarize refinement).
 func SynthesisPass() string { return synthesisPassTxt }
 
-// GapDetectorTemplate returns the gap-detector prompt template with three %s placeholders: recent journal, relevant knowledge, tool manifest.
-func GapDetectorTemplate() string { return gapDetectorTxt }
-
-// FormatGapDetector formats the gap-detector template with journal, knowledge, and tool manifest text.
-// The third argument is typically AppCapabilities() + "\n\n" + tools.GetCompactDirectory() so the LLM sees what Jot can do and the tool list.
-func FormatGapDetector(recentJournal, relevantKnowledge, toolManifest string) string {
-	return fmt.Sprintf(GapDetectorTemplate(), recentJournal, relevantKnowledge, toolManifest)
-}
-
 // AppCapabilities returns the static, LLM-readable description of Jot's parts (entry points, agents, memory, journal, tools).
 // Injected into gap-detection during dreaming so the model understands current capabilities. Keep app_capabilities.txt up to date when the codebase changes.
 func AppCapabilities() string {
 	return appCapabilitiesTxt
-}
-
-// RollUpTemplate returns the roll-up prompt template with two %s: period label, journal analyses text.
-func RollUpTemplate() string { return rollUpTxt }
-
-// FormatRollUp formats the roll-up template with period and analyses text.
-func FormatRollUp(periodLabel, analysesText string) string {
-	return fmt.Sprintf(RollUpTemplate(), periodLabel, analysesText)
-}
-
-// ActivityHistoryTemplate returns the activity-history summarization prompt template with three %s: topic, timeframe, entriesText.
-func ActivityHistoryTemplate() string { return activityHistoryTxt }
-
-// FormatActivityHistory formats the activity-history template with topic, timeframe, and entries text.
-func FormatActivityHistory(topic, timeframe, entriesText string) string {
-	return fmt.Sprintf(ActivityHistoryTemplate(), topic, timeframe, entriesText)
 }

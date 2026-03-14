@@ -49,7 +49,13 @@ func runRollUpLLM(ctx context.Context, app *infra.App, periodLabel, analysesText
 	if app == nil {
 		return "", nil, fmt.Errorf("no app in context")
 	}
-	userPrompt := prompts.FormatRollUp(periodLabel, utils.WrapAsUserData(utils.SanitizePrompt(analysesText)))
+	userPrompt, err := prompts.BuildRollUp(prompts.RollUpData{
+		PeriodLabel:  periodLabel,
+		AnalysesText: utils.WrapAsUserData(utils.SanitizePrompt(analysesText)),
+	})
+	if err != nil {
+		return "", nil, fmt.Errorf("build roll up prompt: %w", err)
+	}
 	req := &infra.LLMRequest{
 		Parts:     []*genai.Part{{Text: userPrompt}},
 		Model:     app.Config().DreamerModel,

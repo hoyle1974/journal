@@ -107,7 +107,17 @@ func RunQueryWithDebug(ctx context.Context, app *infra.App, question, source str
 
 	logDebug("[start] Question: %s", question)
 
-	systemPrompt := BuildSystemPrompt(ctx)
+	systemPrompt, err := BuildSystemPrompt(ctx)
+	if err != nil {
+		infra.ErrorsTotal.Inc()
+		span.RecordError(err)
+		return &QueryResult{
+			Answer:     fmt.Sprintf("Error building system prompt: %v", err),
+			Iterations: 0,
+			Error:      true,
+			DebugLogs:  debugLogs,
+		}
+	}
 	infra.LoggerFrom(ctx).Debug("FOH: system prompt built", "query_run_id", queryRunID, "phase", "start", "prompt_len", len(systemPrompt), "reason", "inject date, contexts, recent history")
 	logDebug("[prompt] %s", systemPrompt)
 
@@ -593,7 +603,13 @@ func runReflectionCheck(ctx context.Context, app *infra.App, answer, question st
 	if app == nil {
 		return true, "", nil
 	}
-	prompt := prompts.FormatReflectionCheck(utils.SanitizePrompt(answer), utils.SanitizePrompt(semanticMemory))
+	prompt, err := prompts.BuildReflectionCheck(prompts.ReflectionCheckData{
+		Answer:         utils.SanitizePrompt(answer),
+		SemanticMemory: utils.SanitizePrompt(semanticMemory),
+	})
+	if err != nil {
+		return true, "", fmt.Errorf("build reflection check prompt: %w", err)
+	}
 	req := &infra.LLMRequest{
 		Parts:     []*genai.Part{{Text: prompt}},
 		Model:     app.Config().GeminiModel,

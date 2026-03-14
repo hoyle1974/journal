@@ -26,7 +26,7 @@ open_loops_summary: <1-3 sentences on outstanding tasks or unanswered questions 
 # Input
 
 ## Period
-%s
+{{.PeriodLabel}}
 
 ## Journal analyses (one per entry)
-%s
+{{.AnalysesText}}

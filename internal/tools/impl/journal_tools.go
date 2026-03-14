@@ -277,7 +277,14 @@ func registerJournalTools() {
 			if app == nil || app.Config() == nil {
 				return tools.Fail("App not available for summarization")
 			}
-			userPrompt := prompts.FormatActivityHistory(topic, timeframe, utils.WrapAsUserData(utils.SanitizePrompt(entriesText)))
+			userPrompt, err := prompts.BuildActivityHistory(prompts.ActivityHistoryData{
+				Topic:       topic,
+				Timeframe:   timeframe,
+				EntriesText: utils.WrapAsUserData(utils.SanitizePrompt(entriesText)),
+			})
+			if err != nil {
+				return tools.Fail("Failed to build activity history prompt: %v", err)
+			}
 			systemPrompt := prompts.DataSafety()
 			summary, err := infra.GenerateContentSimple(ctx, systemPrompt, userPrompt, app.Config(), &infra.GenConfig{MaxOutputTokens: 1024})
 			if err != nil {
