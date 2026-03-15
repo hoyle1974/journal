@@ -23,7 +23,7 @@ JOT is a single-user "Agentic Second Brain." It creates a high-fidelity bridge b
 
 ## 3. Core Component Architecture
 
-### A. The Front of House (FOH) — `pkg/agent/foh.go`
+### A. The Front of House (FOH) — `internal/agent/foh.go`
 
 The main query loop. Invoked via `internal/service` (`RunQuery` → `agent.RunQueryWithDebug`). User input is saved to the journal at the start of each request (before the LLM runs).
 
@@ -35,7 +35,7 @@ The main query loop. Invoked via `internal/service` (`RunQuery` → `agent.RunQu
 
 Tools include journal, knowledge (semantic_search, upsert_knowledge, etc.), context, task, web, utility, and specialists. `discovery_search` maps intent to tool schemas when the model is unsure which tool to use.
 
-### B. The Dreamer (Nightly) — `pkg/agent/dreamer.go` + `internal/service/cron.go`
+### B. The Dreamer (Nightly) — `internal/agent/dreamer.go` + `internal/service/cron.go`
 
 Consolidates the last 24h of journal entries. Entry point: `service.RunDreamer` (cron or API).
 
@@ -49,11 +49,11 @@ Consolidates the last 24h of journal entries. Entry point: `service.RunDreamer` 
 8. **Narrative:** Write the morning readout to `_system/latest_dream`.
 9. **Task phase:** Tool-calling phase to create or update tasks from the night's journal.
 
-### C. The Specialist Agents — `pkg/agent/specialists.go`
+### C. The Specialist Agents — `internal/agent/specialists.go`
 
 Domains: **relationship** (Anthropologist), **work** (Architect), **task** (Executive), **thought** (Philosopher), **selfmodel**, **evolution** (Cognitive Engineer). Used in Dreamer for extraction and colloquium; consultable via tools (`consult_anthropologist`, `consult_architect`, etc.). `RunCommittee` runs selected specialists in parallel; `RunEvolutionAudit` is the Cognitive Engineer’s nightly analysis (friction, suggested changes).
 
-### D. The Planner — `pkg/agent/planner.go`
+### D. The Planner — `internal/agent/planner.go`
 
 `CreateAndSavePlan(goal)` uses the LLM to decompose a goal into phases, then stores the goal and phase nodes in the knowledge graph (goal + task nodes with `parent_goal`, `step_number`, `dependencies`). Exposed via CLI and `generate_plan` tool.
 
@@ -66,12 +66,12 @@ Domains: **relationship** (Anthropologist), **work** (Architect), **task** (Exec
 ## 4. Entry Points
 
 - **CLI** (`cmd/jot`): log, query, sync (Google Doc), dream, janitor, plan, recall (dream narrative), edit, entries, etc.
-- **API:** POST /query, /log, /dream, /rollup, /janitor, /plan, /sync, /decay-contexts, /backfill-embeddings, /webhook, /sms; GET /dream/latest, /dream/status, /metrics, /entries, /pending-questions; POST /pending-questions/:id/resolve. POST /dream returns 202 and runs the dream asynchronously (single run at a time; poll GET /dream/status). Cloud Tasks for async work (e.g. process-sms-query, dream-run).
+- **API:** POST /query, /log, /dream, /rollup, /janitor, /plan, /sync, /decay-contexts, /backfill-embeddings, /webhook, /sms; GET /dream/latest, /dream/status, /metrics, /entries, /pending-questions; POST /pending-questions/:id/resolve. POST /dream returns 202 and runs the dream asynchronously (single run at a time; poll GET /dream/status). Cloud Tasks for async work (e.g. process-sms-query, dream-run). Handler is wired in `function.go`: `init()` only registers the HTTP handler; config and server are created lazily on first request (or explicitly via `InitDefaultApp` from `cmd/server`). Use `SetServer` to inject a server for tests or embedding so the package can be imported without triggering config or infra.
 - **Cron:** Dreamer (daily), Janitor (weekly).
 
 ## 5. Engineering Patterns (see also `.cursorrules`)
 
-- **App / DI:** Prefer passing `*infra.App` (or env structs like `FOHEnv`) explicitly. Avoid hiding app in `context.Context` except at the outermost request boundary. Legacy use of `infra.GetApp(ctx)` is acceptable where refactoring would be large.
+- **App / DI:** Prefer passing `*infra.App` (or env structs like `FOHEnv`) explicitly. Avoid hiding app in `context.Context` except at the outermost request boundary. Passing the entire application container through context (`infra.GetApp(ctx)`) is a **leaky abstraction**: it breaks module boundaries by allowing deeply nested functions to reach into the context and extract arbitrary dependencies they have not explicitly declared, bypassing proper module encapsulation. Legacy use of `infra.GetApp(ctx)` remains in some packages (e.g. tools, pkg/memory, pkg/journal) where refactoring would be large; new code must pass app or narrow interfaces explicitly.
 - **Logging:** Use `LoggerFrom(ctx)` for all logs; no raw `slog` or `fmt.Print`. Debug logs must not truncate content.
 - **Tools:** Register via `tools.Register` in `init()`; keep implementations in domain-specific files (e.g. `journal_tools.go`, `web_tools.go`).
 - **Prompt safety:** Wrap user-origin strings in `<user_data>` via `WrapAsUserData()`. Parse LLM output as key/value lines (e.g. `pkg/utils.ParseKeyValueMap`); no JSON from LLM responses.

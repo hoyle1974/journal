@@ -4,8 +4,9 @@
 
 - **Rule:** Never initialize Firestore, Gemini, or Loggers directly.
 - **Requirement:** Prefer passing `*infra.App` (or specific clients) explicitly as a struct field, method receiver, or function parameter so signatures are honest about dependencies. Avoid hiding app in `context.Context` except at the outermost request boundary (e.g. router attaches app to ctx; handlers then obtain app and pass it down).
+- **Leaky abstraction:** Using `infra.GetApp(ctx)` passes the whole application container through context and breaks module boundaries: deeply nested code can reach into the context and pull out arbitrary dependencies it never declared, bypassing proper encapsulation. New code must not do this.
 - **Pattern:** At entry points (HTTP backend, cron, admin CLI), get app once (e.g. from `infra.GetApp(ctx)` or from a backend struct that holds it), then pass it explicitly: `env := service.NewServiceEnv(app)` and call `agent.RunQueryWithDebug(ctx, env, question, source, debug)`. Agent and service layers take `FOHEnv`/`PlannerEnv`/etc. or `*infra.App`; they do not call `GetApp(ctx)`.
-- **Legacy:** Code that still uses `infra.GetApp(ctx)` (e.g. some tools, pkg/memory, pkg/journal) is acceptable where refactoring would be large; new code should pass app explicitly.
+- **Legacy:** Code that still uses `infra.GetApp(ctx)` (e.g. some tools, pkg/memory, pkg/journal) is acceptable where refactoring would be large; new code must pass app explicitly.
 
 ## Structured Logging
 
@@ -115,10 +116,10 @@ All in-progress feature and task work is tracked as **briefs** in `briefs/active
 - **Requirement:** Tool implementations (`internal/tools/impl/*`) must NEVER execute raw database queries (e.g., `client.Collection(...)`) or mutate state directly. Tools exist exclusively to parse LLM arguments and delegate the actual work to domain packages (`pkg/memory`, `pkg/task`, `pkg/system`).
 
 - **Rule:** Infrastructure Purity (No Vendor Leakage).
-- **Requirement:** `pkg/infra` is strictly for generic, cross-cutting technical concerns (Firestore client instantiation, OpenTelemetry, structured logging, base LLM client). Do NOT place external vendor logic, structs, or API handlers (e.g., Twilio, GitHub, Slack) in `pkg/infra`. Use dedicated packages (e.g., `pkg/sms`) for third-party adapters.
+- **Requirement:** `internal/infra` is strictly for generic, cross-cutting technical concerns (Firestore client instantiation, OpenTelemetry, structured logging, base LLM client). Do NOT place external vendor logic, structs, or API handlers (e.g., Twilio, GitHub, Slack) in `internal/infra`. Use dedicated packages (e.g., `pkg/sms`) for third-party adapters.
 
 - **Rule:** Anti-Context Smuggling.
-- **Requirement:** Contexts (`ctx`) are for deadlines, cancellation, and request-scoped tracing. They are NOT dependency injection containers. Never use `infra.GetApp(ctx)` in new code to pull massive dependencies out of thin air. Pass narrow, explicit interfaces (e.g., `FirestoreProvider`, `ToolEnv`) into functions that need them.
+- **Requirement:** Contexts (`ctx`) are for deadlines, cancellation, and request-scoped tracing. They are NOT dependency injection containers. Using `infra.GetApp(ctx)` is a leaky abstraction that breaks module boundaries by letting nested code extract arbitrary dependencies from context without declaring them. Never use it in new code. Pass narrow, explicit interfaces (e.g., `FirestoreProvider`, `ToolEnv`) into functions that need them.
 
 ## Prompt Engineering & Templating
 
