@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackstrohm/jot/pkg/agent"
 	"github.com/jackstrohm/jot/pkg/infra"
+	"github.com/jackstrohm/jot/pkg/sms"
 	"github.com/jackstrohm/jot/pkg/system"
 )
 
@@ -123,8 +124,8 @@ type AgentService interface {
 // SMSService provides Twilio/SMS operations for HTTP handlers.
 type SMSService interface {
 	ValidateTwilioSignature(r *http.Request, webhookURL string) bool
-	ParseTwilioWebhook(r *http.Request) (*infra.TwilioWebhookRequest, error)
+	ParseTwilioWebhook(r *http.Request) (*sms.TwilioWebhookRequest, error)
 	IsAllowedPhoneNumber(phone string) bool
-	ProcessIncomingSMS(ctx context.Context, app *infra.App, msg *infra.TwilioWebhookRequest) string
+	ProcessIncomingSMS(ctx context.Context, app *infra.App, msg *sms.TwilioWebhookRequest) string
 	SendSMS(ctx context.Context, to, body string) error
 }

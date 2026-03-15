@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jackstrohm/jot/pkg/infra"
+	"github.com/jackstrohm/jot/pkg/sms"
 	"github.com/jackstrohm/jot/pkg/utils"
 )
 
@@ -89,7 +90,7 @@ func handleProcessSMSQuery(s *Server, w http.ResponseWriter, r *http.Request) {
 	if data.TaskID != "" || data.ParentTraceID != "" {
 		ctx = infra.WithCorrelation(ctx, data.TaskID, data.ParentTraceID)
 	}
-	msg := &infra.TwilioWebhookRequest{
+	msg := &sms.TwilioWebhookRequest{
 		MessageSid: data.MessageSid,
 		From:       data.From,
 		To:         "",

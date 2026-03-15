@@ -5,10 +5,11 @@ import (
 	"strings"
 
 	"github.com/jackstrohm/jot/pkg/infra"
+	"github.com/jackstrohm/jot/pkg/sms"
 )
 
 // ProcessIncomingSMS processes an incoming SMS and returns a response. app must be non-nil.
-func ProcessIncomingSMS(ctx context.Context, app *infra.App, msg *infra.TwilioWebhookRequest) string {
+func ProcessIncomingSMS(ctx context.Context, app *infra.App, msg *sms.TwilioWebhookRequest) string {
 	ctx, span := infra.StartSpan(ctx, "twilio.process_sms")
 	defer span.End()
 

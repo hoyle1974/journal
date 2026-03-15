@@ -1,4 +1,4 @@
-package infra
+package sms
 
 import (
 	"context"
@@ -17,6 +17,13 @@ import (
 	"github.com/jackstrohm/jot/internal/config"
 )
 
+// Logger is used for validation and send logging. Callers pass e.g. infra.LoggerFrom(ctx).
+type Logger interface {
+	Info(msg string, args ...any)
+	Warn(msg string, args ...any)
+	Error(msg string, args ...any)
+}
+
 // TwilioWebhookRequest represents an incoming SMS from Twilio.
 type TwilioWebhookRequest struct {
 	MessageSid string
@@ -26,29 +33,36 @@ type TwilioWebhookRequest struct {
 }
 
 // ValidateTwilioSignature validates that a request is from Twilio.
-func ValidateTwilioSignature(cfg *config.Config, r *http.Request, webhookURL string) bool {
-	ctx := r.Context()
+func ValidateTwilioSignature(ctx context.Context, cfg *config.Config, r *http.Request, webhookURL string, log Logger) bool {
 	if cfg == nil || cfg.TwilioAuthToken == "" {
-		LoggerFrom(ctx).Warn("no TWILIO_AUTH_TOKEN configured, skipping signature validation")
+		if log != nil {
+			log.Warn("no TWILIO_AUTH_TOKEN configured, skipping signature validation")
+		}
 		return true
 	}
 
 	signature := r.Header.Get("X-Twilio-Signature")
 	if signature == "" {
-		LoggerFrom(ctx).Warn("missing X-Twilio-Signature header")
+		if log != nil {
+			log.Warn("missing X-Twilio-Signature header")
+		}
 		return false
 	}
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		LoggerFrom(ctx).Error("failed to read request body", "error", err)
+		if log != nil {
+			log.Error("failed to read request body", "error", err)
+		}
 		return false
 	}
 	r.Body = io.NopCloser(strings.NewReader(string(body)))
 
 	values, err := url.ParseQuery(string(body))
 	if err != nil {
-		LoggerFrom(ctx).Error("failed to parse form values", "error", err)
+		if log != nil {
+			log.Error("failed to parse form values", "error", err)
+		}
 		return false
 	}
 
@@ -70,11 +84,13 @@ func ValidateTwilioSignature(cfg *config.Config, r *http.Request, webhookURL str
 	expectedSig := base64.StdEncoding.EncodeToString(mac.Sum(nil))
 
 	if !hmac.Equal([]byte(signature), []byte(expectedSig)) {
-		LoggerFrom(ctx).Warn("invalid Twilio signature",
-			"expected", expectedSig,
-			"received", signature,
-			"url", webhookURL,
-		)
+		if log != nil {
+			log.Warn("invalid Twilio signature",
+				"expected", expectedSig,
+				"received", signature,
+				"url", webhookURL,
+			)
+		}
 		return false
 	}
 
@@ -147,10 +163,7 @@ func truncateToMaxBytes(s string, maxBytes int) string {
 }
 
 // SendSMS sends an SMS via Twilio.
-func SendSMS(ctx context.Context, cfg *config.Config, to, body string) error {
-	ctx, span := StartSpan(ctx, "twilio.send_sms")
-	defer span.End()
-
+func SendSMS(ctx context.Context, cfg *config.Config, to, body string, log Logger) error {
 	if cfg == nil || cfg.TwilioAccountSID == "" || cfg.TwilioAuthToken == "" {
 		return fmt.Errorf("twilio credentials not configured")
 	}
@@ -189,6 +202,8 @@ func SendSMS(ctx context.Context, cfg *config.Config, to, body string) error {
 		return fmt.Errorf("twilio API error: status=%d body=%s", resp.StatusCode, string(respBody))
 	}
 
-	LoggerFrom(ctx).Info("SMS sent", "to", to, "length", len(body))
+	if log != nil {
+		log.Info("SMS sent", "to", to, "length", len(body))
+	}
 	return nil
 }
