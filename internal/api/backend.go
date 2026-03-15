@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/jackstrohm/jot/pkg/agent"
-	"github.com/jackstrohm/jot/pkg/infra"
+	"github.com/jackstrohm/jot/internal/agent"
+	"github.com/jackstrohm/jot/internal/infra"
 	"github.com/jackstrohm/jot/pkg/sms"
 	"github.com/jackstrohm/jot/pkg/system"
 )
@@ -53,7 +53,7 @@ type PendingQuestion struct {
 	CreatedAt      string   `json:"created_at"`
 }
 
-// QueryResult is the API response shape for a query (avoids api importing pkg/agent).
+// QueryResult is the API response shape for a query (avoids api importing internal/agent).
 type QueryResult struct {
 	Answer           string                   `json:"answer"`
 	Iterations       int                      `json:"iterations"`
@@ -63,7 +63,7 @@ type QueryResult struct {
 	DebugLogs        []string                 `json:"debug_logs,omitempty"`
 }
 
-// DreamerResult is the API response shape for a dream run (avoids api importing pkg/agent).
+// DreamerResult is the API response shape for a dream run (avoids api importing internal/agent).
 type DreamerResult struct {
 	EntriesProcessed    int `json:"entries_processed"`
 	FactsExtracted      int `json:"facts_extracted"`

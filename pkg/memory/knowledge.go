@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/firestore"
-	"github.com/jackstrohm/jot/pkg/infra"
+	"github.com/jackstrohm/jot/internal/infra"
 	"github.com/jackstrohm/jot/pkg/utils"
 	"google.golang.org/api/iterator"
 )

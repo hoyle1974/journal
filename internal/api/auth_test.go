@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/jackstrohm/jot/internal/config"
-	"github.com/jackstrohm/jot/pkg/infra"
+	"github.com/jackstrohm/jot/internal/infra"
 	"log/slog"
 )
 

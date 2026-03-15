@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/firestore"
-	"github.com/jackstrohm/jot/pkg/infra"
+	"github.com/jackstrohm/jot/internal/infra"
 )
 
 // QueriesCollection is the Firestore collection name for query logs.

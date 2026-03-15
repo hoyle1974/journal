@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/jackstrohm/jot/pkg/infra"
+	"github.com/jackstrohm/jot/internal/infra"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 

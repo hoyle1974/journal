@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"google.golang.org/genai"
-	"github.com/jackstrohm/jot/pkg/infra"
+	"github.com/jackstrohm/jot/internal/infra"
 	"github.com/jackstrohm/jot/tools"
 )
 

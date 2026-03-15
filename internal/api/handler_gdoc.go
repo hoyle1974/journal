@@ -14,7 +14,7 @@ import (
 
 	"cloud.google.com/go/compute/metadata"
 	"github.com/jackstrohm/jot/internal/config"
-	"github.com/jackstrohm/jot/pkg/infra"
+	"github.com/jackstrohm/jot/internal/infra"
 	"github.com/jackstrohm/jot/pkg/utils"
 	"google.golang.org/api/docs/v1"
 	"google.golang.org/api/option"

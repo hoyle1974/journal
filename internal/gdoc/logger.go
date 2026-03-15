@@ -8,7 +8,7 @@ import (
 	"unicode/utf16"
 
 	"github.com/jackstrohm/jot/internal/config"
-	"github.com/jackstrohm/jot/pkg/infra"
+	"github.com/jackstrohm/jot/internal/infra"
 	"google.golang.org/api/docs/v1"
 	"google.golang.org/api/option"
 )

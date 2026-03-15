@@ -14,7 +14,7 @@ import (
 	"google.golang.org/genai"
 	"github.com/jackstrohm/jot/internal/config"
 	"github.com/jackstrohm/jot/internal/prompts"
-	"github.com/jackstrohm/jot/pkg/infra"
+	"github.com/jackstrohm/jot/internal/infra"
 	"github.com/jackstrohm/jot/pkg/journal"
 	"github.com/jackstrohm/jot/pkg/utils"
 	"google.golang.org/api/iterator"

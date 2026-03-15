@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"cloud.google.com/go/firestore"
-	"github.com/jackstrohm/jot/pkg/infra"
+	"github.com/jackstrohm/jot/internal/infra"
 )
 
 // GetWeeklySummaryNodesInRange returns knowledge nodes of type weekly_summary whose timestamp falls in [startDate, endDate] (YYYY-MM-DD).

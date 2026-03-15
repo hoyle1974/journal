@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/jackstrohm/jot/pkg/infra"
+	"github.com/jackstrohm/jot/internal/infra"
 )
 
 // handleDreamLatest serves GET /dream/latest: returns the latest dream narrative and optionally marks it read.

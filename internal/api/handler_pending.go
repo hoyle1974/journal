@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/jackstrohm/jot/pkg/infra"
+	"github.com/jackstrohm/jot/internal/infra"
 )
 
 func handlePendingQuestions(s *Server, w http.ResponseWriter, r *http.Request) {

@@ -5,7 +5,7 @@ package tools
 import (
 	"context"
 
-	"github.com/jackstrohm/jot/pkg/infra"
+	"github.com/jackstrohm/jot/internal/infra"
 	"google.golang.org/genai"
 )
 

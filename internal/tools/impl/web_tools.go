@@ -15,7 +15,7 @@ import (
 
 	readability "github.com/go-shiori/go-readability"
 	"google.golang.org/genai"
-	"github.com/jackstrohm/jot/pkg/infra"
+	"github.com/jackstrohm/jot/internal/infra"
 	"github.com/jackstrohm/jot/pkg/utils"
 	"github.com/jackstrohm/jot/tools"
 )

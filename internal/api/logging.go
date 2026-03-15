@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/jackstrohm/jot/pkg/infra"
+	"github.com/jackstrohm/jot/internal/infra"
 )
 
 // LogHandlerRequest logs HTTP request details for a handler. Call at handler entry with method, path, and any request-specific attrs (e.g. query params, body fields). Avoid logging secrets or huge payloads.

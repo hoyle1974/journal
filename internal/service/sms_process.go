@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/jackstrohm/jot/pkg/infra"
+	"github.com/jackstrohm/jot/internal/infra"
 	"github.com/jackstrohm/jot/pkg/sms"
 )
 

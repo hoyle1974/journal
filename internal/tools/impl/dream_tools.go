@@ -3,7 +3,7 @@ package impl
 import (
 	"context"
 
-	"github.com/jackstrohm/jot/pkg/infra"
+	"github.com/jackstrohm/jot/internal/infra"
 	"github.com/jackstrohm/jot/pkg/system"
 	"github.com/jackstrohm/jot/tools"
 )

@@ -3,7 +3,7 @@ package service
 import (
 	"context"
 
-	"github.com/jackstrohm/jot/pkg/agent"
+	"github.com/jackstrohm/jot/internal/agent"
 )
 
 // RunWeeklyRollup synthesizes the last completed week's journal analyses into a weekly_summary knowledge node.

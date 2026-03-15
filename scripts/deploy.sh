@@ -90,7 +90,7 @@ case "$MODE" in
     COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "none")
     DEPLOY_REV="${COMMIT}-$(date -u +%s)"
     IMAGE_TAG="sha-${COMMIT}"
-    LDFLAGS="-s -w -X github.com/jackstrohm/jot/pkg/infra.Version=$VERSION -X github.com/jackstrohm/jot/pkg/infra.Commit=$COMMIT"
+    LDFLAGS="-s -w -X github.com/jackstrohm/jot/internal/infra.Version=$VERSION -X github.com/jackstrohm/jot/internal/infra.Commit=$COMMIT"
     CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="$LDFLAGS" -o server ./cmd/server
 
     echo -e "${YELLOW}Building and pushing container...${NC}"

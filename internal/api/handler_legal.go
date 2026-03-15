@@ -4,7 +4,7 @@ import (
 	"net/http"
 
 	"github.com/jackstrohm/jot/internal/static"
-	"github.com/jackstrohm/jot/pkg/infra"
+	"github.com/jackstrohm/jot/internal/infra"
 )
 
 func handlePrivacyPolicy(s *Server, w http.ResponseWriter, r *http.Request) {

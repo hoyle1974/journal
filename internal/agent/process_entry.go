@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/firestore"
-	"github.com/jackstrohm/jot/pkg/infra"
+	"github.com/jackstrohm/jot/internal/infra"
 	"github.com/jackstrohm/jot/pkg/journal"
 	"github.com/jackstrohm/jot/pkg/memory"
 	"github.com/jackstrohm/jot/pkg/task"

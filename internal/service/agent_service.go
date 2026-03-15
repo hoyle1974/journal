@@ -4,8 +4,8 @@ import (
 	"context"
 
 	"github.com/jackstrohm/jot/internal/api"
-	"github.com/jackstrohm/jot/pkg/agent"
-	"github.com/jackstrohm/jot/pkg/infra"
+	"github.com/jackstrohm/jot/internal/agent"
+	"github.com/jackstrohm/jot/internal/infra"
 	"github.com/jackstrohm/jot/pkg/utils"
 )
 

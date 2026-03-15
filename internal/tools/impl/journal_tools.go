@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/jackstrohm/jot/internal/prompts"
-	"github.com/jackstrohm/jot/pkg/infra"
+	"github.com/jackstrohm/jot/internal/infra"
 	"github.com/jackstrohm/jot/pkg/journal"
 	"github.com/jackstrohm/jot/pkg/utils"
 	"github.com/jackstrohm/jot/tools"

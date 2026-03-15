@@ -3,7 +3,7 @@ package agent
 import (
 	"context"
 
-	"github.com/jackstrohm/jot/pkg/infra"
+	"github.com/jackstrohm/jot/internal/infra"
 	"github.com/jackstrohm/jot/pkg/journal"
 	"github.com/jackstrohm/jot/pkg/memory"
 )

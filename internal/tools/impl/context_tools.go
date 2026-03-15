@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jackstrohm/jot/pkg/agent"
-	"github.com/jackstrohm/jot/pkg/infra"
+	"github.com/jackstrohm/jot/internal/agent"
+	"github.com/jackstrohm/jot/internal/infra"
 	"github.com/jackstrohm/jot/pkg/journal"
 	"github.com/jackstrohm/jot/pkg/memory"
 	"github.com/jackstrohm/jot/pkg/utils"

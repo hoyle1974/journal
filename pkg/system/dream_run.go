@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/firestore"
-	"github.com/jackstrohm/jot/pkg/infra"
+	"github.com/jackstrohm/jot/internal/infra"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
