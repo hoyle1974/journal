@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"net/http"
 	"strings"
 
@@ -40,11 +39,11 @@ func handlePendingQuestionResolve(s *Server, w http.ResponseWriter, r *http.Requ
 		return
 	}
 	var body struct {
-		Answer string `json:"answer"`
+		Answer string `json:"answer" validate:"required"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		LogHandlerResponse(ctx, r.Method, path, http.StatusBadRequest, "error", "Invalid JSON body")
-		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON body"})
+	if err := DecodeAndValidate(r, &body, s.Validator); err != nil {
+		LogHandlerResponse(ctx, r.Method, path, http.StatusBadRequest, "error", err.Error())
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 	if err := s.Memory.ResolvePendingQuestion(ctx, questionID, strings.TrimSpace(body.Answer)); err != nil {

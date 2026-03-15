@@ -59,26 +59,26 @@ func handleEntries(s *Server, w http.ResponseWriter, r *http.Request, path strin
 	case http.MethodPatch:
 		var data struct {
 			UUID    string `json:"uuid"`
-			Content string `json:"content"`
+			Content string `json:"content" validate:"required"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
-			LogHandlerResponse(ctx, r.Method, pathForLogVal, http.StatusBadRequest, "error", "Invalid JSON")
-			WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON"})
+		if err := DecodeAndValidate(r, &data, s.Validator); err != nil {
+			LogHandlerResponse(ctx, r.Method, pathForLogVal, http.StatusBadRequest, "error", err.Error())
+			WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
 		entryUUID := data.UUID
 		if match != nil {
 			entryUUID = match[1]
 		}
-		newContent := strings.TrimSpace(data.Content)
 		if entryUUID == "" {
-			LogHandlerResponse(ctx, r.Method, pathForLogVal, http.StatusBadRequest, "error", "uuid is required")
-			WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "uuid is required"})
+			LogHandlerResponse(ctx, r.Method, pathForLogVal, http.StatusBadRequest, "error", "uuid is required (in body or path)")
+			WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "uuid is required (in body or path)"})
 			return
 		}
+		newContent := strings.TrimSpace(data.Content)
 		if newContent == "" {
-			LogHandlerResponse(ctx, r.Method, pathForLogVal, http.StatusBadRequest, "error", "content is required")
-			WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "content is required"})
+			LogHandlerResponse(ctx, r.Method, pathForLogVal, http.StatusBadRequest, "error", "content cannot be only whitespace")
+			WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "content cannot be only whitespace"})
 			return
 		}
 		LogHandlerRequest(ctx, r.Method, pathForLogVal, "uuid", entryUUID, "content_length", len(newContent))

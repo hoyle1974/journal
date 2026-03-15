@@ -1,8 +1,6 @@
 package api
 
 import (
-	"encoding/json"
-	"fmt"
 	"net/http"
 	"strings"
 
@@ -20,25 +18,25 @@ func handleLog(s *Server, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var data struct {
-		Content   string  `json:"content"`
+		Content   string  `json:"content" validate:"required"`
 		Source    string  `json:"source"`
 		Timestamp *string `json:"timestamp"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
-		infra.LoggerFrom(ctx).Warn("log request decode error", "error", err)
-		LogHandlerResponse(ctx, r.Method, path, http.StatusBadRequest, "error", "Invalid JSON")
-		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("Invalid JSON: %v", err)})
+	if err := DecodeAndValidate(r, &data, s.Validator); err != nil {
+		infra.LoggerFrom(ctx).Warn("log request decode/validate error", "error", err)
+		LogHandlerResponse(ctx, r.Method, path, http.StatusBadRequest, "error", err.Error())
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 	content := strings.TrimSpace(data.Content)
+	if content == "" {
+		LogHandlerResponse(ctx, r.Method, path, http.StatusBadRequest, "error", "content cannot be only whitespace")
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "content cannot be only whitespace"})
+		return
+	}
 	source := data.Source
 	if source == "" {
 		source = "api"
-	}
-	if content == "" {
-		LogHandlerResponse(ctx, r.Method, path, http.StatusBadRequest, "error", "content is required")
-		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "content is required"})
-		return
 	}
 	LogHandlerRequest(ctx, r.Method, path, "source", source, "content_length", len(content))
 	infra.EntriesTotal.Inc()
@@ -66,23 +64,18 @@ func handleQuery(s *Server, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var data struct {
-		Question string `json:"question"`
+		Question string `json:"question" validate:"required"`
 		Source   string `json:"source"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
-		LogHandlerResponse(ctx, r.Method, path, http.StatusBadRequest, "error", "Invalid JSON")
-		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON"})
+	if err := DecodeAndValidate(r, &data, s.Validator); err != nil {
+		LogHandlerResponse(ctx, r.Method, path, http.StatusBadRequest, "error", err.Error())
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 	question := strings.TrimSpace(data.Question)
 	source := data.Source
 	if source == "" {
 		source = "api"
-	}
-	if question == "" {
-		LogHandlerResponse(ctx, r.Method, path, http.StatusBadRequest, "error", "question is required")
-		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "question is required"})
-		return
 	}
 	LogHandlerRequest(ctx, r.Method, path, "question_preview", utils.TruncateString(question, 80), "source", source)
 	result := s.Agent.RunQuery(ctx, question, source)
@@ -102,19 +95,14 @@ func handlePlan(s *Server, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var data struct {
-		Goal string `json:"goal"`
+		Goal string `json:"goal" validate:"required"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
-		LogHandlerResponse(ctx, r.Method, path, http.StatusBadRequest, "error", "Invalid JSON")
-		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON"})
+	if err := DecodeAndValidate(r, &data, s.Validator); err != nil {
+		LogHandlerResponse(ctx, r.Method, path, http.StatusBadRequest, "error", err.Error())
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 	goal := strings.TrimSpace(data.Goal)
-	if goal == "" {
-		LogHandlerResponse(ctx, r.Method, path, http.StatusBadRequest, "error", "goal is required")
-		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "goal is required"})
-		return
-	}
 	LogHandlerRequest(ctx, r.Method, path, "goal_preview", utils.TruncateString(goal, 80))
 	result, err := s.Agent.CreateAndSavePlan(ctx, goal)
 	if err != nil {

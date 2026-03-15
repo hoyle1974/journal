@@ -2,8 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -23,21 +21,16 @@ func handleProcessEntry(s *Server, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var data struct {
-		UUID          string `json:"uuid"`
-		Content       string `json:"content"`
+		UUID          string `json:"uuid" validate:"required"`
+		Content       string `json:"content" validate:"required"`
 		Timestamp     string `json:"timestamp"`
-		Source        string `json:"source"`
+		Source        string `json:"source" validate:"required"`
 		TaskID        string `json:"task_id"`
 		ParentTraceID string `json:"parent_trace_id"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
-		LogHandlerResponse(ctx, r.Method, path, http.StatusBadRequest, "error", "Invalid JSON")
-		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("Invalid JSON: %v", err)})
-		return
-	}
-	if data.UUID == "" || data.Content == "" || data.Source == "" {
-		LogHandlerResponse(ctx, r.Method, path, http.StatusBadRequest, "error", "uuid, content, and source are required")
-		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "uuid, content, and source are required"})
+	if err := DecodeAndValidate(r, &data, s.Validator); err != nil {
+		LogHandlerResponse(ctx, r.Method, path, http.StatusBadRequest, "error", err.Error())
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 	if data.TaskID != "" || data.ParentTraceID != "" {
@@ -71,20 +64,15 @@ func handleProcessSMSQuery(s *Server, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var data struct {
-		From          string `json:"from"`
-		Body          string `json:"body"`
+		From          string `json:"from" validate:"required"`
+		Body          string `json:"body" validate:"required"`
 		MessageSid    string `json:"message_sid"`
 		TaskID        string `json:"task_id"`
 		ParentTraceID string `json:"parent_trace_id"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
-		LogHandlerResponse(ctx, r.Method, path, http.StatusBadRequest, "error", "Invalid JSON")
-		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("Invalid JSON: %v", err)})
-		return
-	}
-	if data.From == "" || data.Body == "" {
-		LogHandlerResponse(ctx, r.Method, path, http.StatusBadRequest, "error", "from and body are required")
-		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "from and body are required"})
+	if err := DecodeAndValidate(r, &data, s.Validator); err != nil {
+		LogHandlerResponse(ctx, r.Method, path, http.StatusBadRequest, "error", err.Error())
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 	if data.TaskID != "" || data.ParentTraceID != "" {
@@ -124,21 +112,16 @@ func handleSaveQuery(s *Server, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var data struct {
-		Question       string `json:"question"`
-		Answer         string `json:"answer"`
-		Source         string `json:"source"`
-		IsGap          bool   `json:"is_gap"`
-		TaskID         string `json:"task_id"`
-		ParentTraceID  string `json:"parent_trace_id"`
+		Question      string `json:"question" validate:"required"`
+		Answer        string `json:"answer"`
+		Source        string `json:"source" validate:"required"`
+		IsGap         bool   `json:"is_gap"`
+		TaskID        string `json:"task_id"`
+		ParentTraceID string `json:"parent_trace_id"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
-		LogHandlerResponse(ctx, r.Method, path, http.StatusBadRequest, "error", "Invalid JSON")
-		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("Invalid JSON: %v", err)})
-		return
-	}
-	if data.Question == "" || data.Source == "" {
-		LogHandlerResponse(ctx, r.Method, path, http.StatusBadRequest, "error", "question and source are required")
-		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "question and source are required"})
+	if err := DecodeAndValidate(r, &data, s.Validator); err != nil {
+		LogHandlerResponse(ctx, r.Method, path, http.StatusBadRequest, "error", err.Error())
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 	if data.TaskID != "" || data.ParentTraceID != "" {

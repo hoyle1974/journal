@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"time"
 
@@ -132,11 +131,11 @@ func handleDreamRun(s *Server, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		DreamRunID string `json:"dream_run_id"`
+		DreamRunID string `json:"dream_run_id" validate:"required"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.DreamRunID == "" {
+	if err := DecodeAndValidate(r, &body, s.Validator); err != nil {
 		infra.LoggerFrom(ctx).Warn("dream-run invalid body", "error", err)
-		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "missing dream_run_id"})
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 	runID := body.DreamRunID
