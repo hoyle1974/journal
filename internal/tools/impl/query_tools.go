@@ -3,6 +3,7 @@ package impl
 import (
 	"context"
 
+	"github.com/jackstrohm/jot/pkg/infra"
 	"github.com/jackstrohm/jot/pkg/journal"
 	"github.com/jackstrohm/jot/tools"
 )
@@ -17,7 +18,7 @@ func registerQueryTools() {
 		Description: "Get recent queries/questions and their answers from the query history.",
 		Category:    "query",
 		Params:      []tools.Param{tools.CountParam()},
-		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
+		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
 			count := args.IntBounded("count", 10, 1, 50)
 			queries, err := journal.GetRecentQueries(ctx, count)
 			if err != nil {
@@ -39,7 +40,7 @@ func registerQueryTools() {
 			tools.RequiredStringParam("query", "Search term to find in questions or answers"),
 			tools.LimitParam(10, 50),
 		},
-		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
+		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
 			query, ok := args.RequiredString("query")
 			if !ok {
 				return tools.MissingParam("query")
@@ -66,7 +67,7 @@ func registerQueryTools() {
 			tools.RequiredStringParam("end_date", "End date (YYYY-MM-DD or natural: today, yesterday)"),
 			tools.LimitParam(20, 50),
 		},
-		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
+		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
 			startDate, ok := args.RequiredString("start_date")
 			if !ok {
 				return tools.MissingParam("start_date")

@@ -146,7 +146,7 @@ func TestParamHelpers(t *testing.T) {
 }
 
 func TestRegistryExecuteUnknownTool(t *testing.T) {
-	result := Execute(context.Background(), "nonexistent_tool", nil)
+	result := Execute(context.Background(), nil, "nonexistent_tool", nil)
 	if result.Success {
 		t.Error("Execute for unknown tool should return failure")
 	}

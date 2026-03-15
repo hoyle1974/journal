@@ -21,6 +21,14 @@ const (
 	ToolRepeatBackOffAt = 3
 )
 
+// FOHEnv is the interface the FOH (query agent) needs: ToolEnv plus context attachment and tool pool.
+// Implemented by *infra.App. Pass explicitly so the agent does not depend on the concrete type.
+type FOHEnv interface {
+	infra.ToolEnv
+	WithContext(ctx context.Context) context.Context
+	SubmitToToolPool(task func()) error
+}
+
 type entryUUIDKey struct{}
 
 // WithCurrentEntryUUID returns a context that carries the current journal entry UUID (e.g. the query that triggered FOH).
@@ -51,13 +59,13 @@ type QueryResult struct {
 }
 
 // RunQuery runs a query against the journal using the agentic loop.
-func RunQuery(ctx context.Context, app *infra.App, question, source string) *QueryResult {
+func RunQuery(ctx context.Context, app FOHEnv, question, source string) *QueryResult {
 	return RunQueryWithDebug(ctx, app, question, source, true)
 }
 
 // RunQueryWithDebug runs a query with optional debug logging.
-func RunQueryWithDebug(ctx context.Context, app *infra.App, question, source string, debug bool) *QueryResult {
-	ctx = infra.WithApp(ctx, app)
+func RunQueryWithDebug(ctx context.Context, app FOHEnv, question, source string, debug bool) *QueryResult {
+	ctx = app.WithContext(ctx)
 	var debugLogs []string
 	logDebug := func(msg string, args ...interface{}) {
 		if debug {
@@ -187,7 +195,7 @@ func RunQueryWithDebug(ctx context.Context, app *infra.App, question, source str
 				logDebug("[iter %d] LLM response: discovered tool_call=%s", iteration, discoveredToolName)
 				infra.LoggerFrom(ctx).Debug("FOH: discovered tool call (K/V)", "query_run_id", queryRunID, "phase", "tool_execution", "iter", iteration, "tool", discoveredToolName)
 				infra.ToolCallsTotal.Inc()
-				toolResult := tools.Execute(ctx, discoveredToolName, discoveredToolArgs)
+				toolResult := tools.Execute(ctx, app, discoveredToolName, discoveredToolArgs)
 				toolCalls = append(toolCalls, map[string]interface{}{
 					"tool":           discoveredToolName,
 					"arguments":      discoveredToolArgs,
@@ -249,7 +257,7 @@ func RunQueryWithDebug(ctx context.Context, app *infra.App, question, source str
 				if pass, reason, err := runReflectionCheck(ctx, app, answer, question); err == nil && !pass {
 					infra.LoggerFrom(ctx).Debug("FOH: reflection check failed", "query_run_id", queryRunID, "phase", "reflection", "reason", reason, "action", "revising answer against semantic memory")
 					logDebug("[reflect] failed: %s", reason)
-					revised := runReflectionRevision(ctx, session, question, answer, reason)
+					revised := runReflectionRevision(ctx, app, session, question, answer, reason)
 					if revised != "" {
 						answer = revised
 						logDebug("[reflect] revised answer (%d chars)", len(answer))
@@ -410,7 +418,7 @@ func RunQueryWithDebug(ctx context.Context, app *infra.App, question, source str
 			execFunc := func() {
 				defer wg.Done()
 				infra.ToolCallsTotal.Inc()
-				toolResult := tools.Execute(ctx, fcName, args)
+				toolResult := tools.Execute(ctx, app, fcName, args)
 				mu.Lock()
 				results[idx] = toolExecResult{index: idx, fcName: fcName, args: args, result: toolResult}
 				mu.Unlock()
@@ -579,7 +587,7 @@ func RunQueryWithDebug(ctx context.Context, app *infra.App, question, source str
 
 const memoryQueryTemplate = "Permanent facts about: {{.Input}}"
 
-func runReflectionCheck(ctx context.Context, app *infra.App, answer, question string) (pass bool, reason string, err error) {
+func runReflectionCheck(ctx context.Context, app FOHEnv, answer, question string) (pass bool, reason string, err error) {
 	// Use question (user intent) for the memory query, not the answer. Otherwise for
 	// short answers like "Logged." we search for "Permanent facts about: Logged."
 	// and pull irrelevant entries instead of facts relevant to what the user said.
@@ -589,7 +597,7 @@ func runReflectionCheck(ctx context.Context, app *infra.App, answer, question st
 	} else {
 		memoryQuery += question
 	}
-	searchResult := tools.Execute(ctx, "semantic_search", map[string]interface{}{
+	searchResult := tools.Execute(ctx, app, "semantic_search", map[string]interface{}{
 		"query":       memoryQuery,
 		"limit":       5,
 		"source_text": question,
@@ -631,7 +639,7 @@ func runReflectionCheck(ctx context.Context, app *infra.App, answer, question st
 const synthesisPassRetrievedMaxBytes = 6000
 
 // runSynthesisPass refines a candidate answer when multiple search results were merged, to reduce repetition and "dumping."
-func runSynthesisPass(ctx context.Context, app *infra.App, question, candidateAnswer, retrievedContent string) (string, error) {
+func runSynthesisPass(ctx context.Context, app FOHEnv, question, candidateAnswer, retrievedContent string) (string, error) {
 	if app == nil || app.Config() == nil {
 		return candidateAnswer, fmt.Errorf("no app or config")
 	}
@@ -653,8 +661,8 @@ func runSynthesisPass(ctx context.Context, app *infra.App, question, candidateAn
 	return strings.TrimSpace(refined), nil
 }
 
-func runReflectionRevision(ctx context.Context, session *infra.ChatSession, question, previousAnswer, reason string) string {
-	searchResult := tools.Execute(ctx, "semantic_search", map[string]interface{}{
+func runReflectionRevision(ctx context.Context, app FOHEnv, session *infra.ChatSession, question, previousAnswer, reason string) string {
+	searchResult := tools.Execute(ctx, app, "semantic_search", map[string]interface{}{
 		"query": question,
 		"limit": 10,
 	})

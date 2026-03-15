@@ -108,3 +108,20 @@ All in-progress feature and task work is tracked as **briefs** in `briefs/active
 - At the end of every session, append a short summary to the brief's Session Log section
 - When a feature is done and committed: complete closeout so all changes are back in the original branch and directory. From the main repo directory: `git checkout main && git merge feature/<name>`, then `git worktree remove ../<project>-<name>`. Move the brief from `briefs/active/` to `briefs/done/` when marking the brief done (before or as part of the merge). The agent should perform the merge and worktree removal, not leave it to the user.
 - When a feature is abandoned (not merged), run `git worktree remove ../<project>-<name>` and move the brief from `briefs/active/` to `briefs/done/`.
+
+## Strict Architectural Boundaries
+
+- **Rule:** Tools are Glue, Not Databases.
+- **Requirement:** Tool implementations (`internal/tools/impl/*`) must NEVER execute raw database queries (e.g., `client.Collection(...)`) or mutate state directly. Tools exist exclusively to parse LLM arguments and delegate the actual work to domain packages (`pkg/memory`, `pkg/task`, `pkg/system`).
+
+- **Rule:** Infrastructure Purity (No Vendor Leakage).
+- **Requirement:** `pkg/infra` is strictly for generic, cross-cutting technical concerns (Firestore client instantiation, OpenTelemetry, structured logging, base LLM client). Do NOT place external vendor logic, structs, or API handlers (e.g., Twilio, GitHub, Slack) in `pkg/infra`. Use dedicated packages (e.g., `pkg/sms`) for third-party adapters.
+
+- **Rule:** Anti-Context Smuggling.
+- **Requirement:** Contexts (`ctx`) are for deadlines, cancellation, and request-scoped tracing. They are NOT dependency injection containers. Never use `infra.GetApp(ctx)` in new code to pull massive dependencies out of thin air. Pass narrow, explicit interfaces (e.g., `FirestoreProvider`, `ToolEnv`) into functions that need them.
+
+## Prompt Engineering & Templating
+
+- **Rule:** No "Stringly-Typed" Prompts.
+- **Requirement:** Never use `fmt.Sprintf` with positional `%s` placeholders for multi-variable prompt assembly. All parameterized prompts must use the `text/template` package, backed by a strictly typed `...Data` struct (e.g., `SystemPromptData`).
+- **Requirement:** Parse all templates exactly once at `init()` using `template.Must` to fail fast on syntax errors.

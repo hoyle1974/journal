@@ -28,7 +28,7 @@ func registerContextTools() {
 		Params: []tools.Param{
 			tools.LimitParam(10, 20),
 		},
-		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
+		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
 			limit := args.IntBounded("limit", 10, 1, 20)
 			contexts, metas, err := memory.GetActiveContexts(ctx, limit)
 			if err != nil {
@@ -51,7 +51,7 @@ func registerContextTools() {
 			tools.RequiredStringParam("description", "Description of what this context is about"),
 			tools.EnumParam("context_type", "Type of context: 'permanent' (never decays) or 'auto' (decays over time)", false, []string{"permanent", "auto"}),
 		},
-		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
+		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
 			name, ok := args.RequiredString("name")
 			if !ok {
 				return tools.MissingParam("name")
@@ -87,7 +87,7 @@ func registerContextTools() {
 			tools.RequiredStringParam("name", "Name of the context to touch"),
 			tools.NumberParam("boost", "Relevance boost amount (0.0-0.5, default 0.1)", false),
 		},
-		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
+		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
 			name, ok := args.RequiredString("name")
 			if !ok {
 				return tools.MissingParam("name")
@@ -128,7 +128,7 @@ func registerContextTools() {
 		Params: []tools.Param{
 			tools.RequiredStringParam("context_id", "The UUID of the context to delete"),
 		},
-		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
+		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
 			contextID, ok := args.RequiredString("context_id")
 			if !ok {
 				return tools.MissingParam("context_id")
@@ -149,7 +149,7 @@ func registerSystemEvolutionTools() {
 		Description: "Get the latest system evolution audit: recommended tool changes, knowledge gaps, and architectural suggestions from the Cognitive Engineer (nightly). Use when the user asks what to change, what's wrong with the system, or for improvement suggestions.",
 		Category:    "context",
 		Params:      nil,
-		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
+		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
 			node, _, err := memory.FindContextByName(ctx, "system_evolution")
 			if err != nil {
 				return tools.Fail("Error finding system_evolution context: %v", err)
@@ -178,16 +178,15 @@ func registerProjectStatusTools() {
 		Params: []tools.Param{
 			tools.RequiredStringParam("project_name", "Name of the project or goal (e.g. 'jot app', 'party planning')"),
 		},
-		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
+		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
 			projectName, ok := args.RequiredString("project_name")
 			if !ok {
 				return tools.MissingParam("project_name")
 			}
-			app := infra.GetApp(ctx)
-			if app == nil || app.Config() == nil {
+			if env == nil || env.Config() == nil {
 				return tools.Fail("Error: no app in context")
 			}
-			vec, err := infra.GenerateEmbedding(ctx, app.Config().GoogleCloudProject, "Project: "+projectName)
+			vec, err := infra.GenerateEmbedding(ctx, env.Config().GoogleCloudProject, "Project: "+projectName)
 			if err != nil {
 				return tools.Fail("Error finding project: %v", err)
 			}
@@ -275,7 +274,7 @@ func registerProjectStatusTools() {
 			tools.RequiredStringParam("project_name", "Name of the project/goal to update"),
 			tools.EnumParam("status", "New status for the project", true, []string{"active", "blocked", "completed", "archived"}),
 		},
-		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
+		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
 			projectName, ok := args.RequiredString("project_name")
 			if !ok {
 				return tools.MissingParam("project_name")

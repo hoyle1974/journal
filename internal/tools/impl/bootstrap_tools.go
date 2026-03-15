@@ -3,6 +3,7 @@ package impl
 import (
 	"context"
 
+	"github.com/jackstrohm/jot/pkg/infra"
 	"github.com/jackstrohm/jot/tools"
 )
 
@@ -18,7 +19,7 @@ func registerBootstrapTools() {
 		Params: []tools.Param{
 			tools.RequiredStringParam("intent", "Your reasoning or goal in natural language (e.g. 'scheduling a commitment', 'store a fact', 'create task', 'search journal')"),
 		},
-		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
+		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
 			intent, ok := args.RequiredString("intent")
 			if !ok {
 				return tools.MissingParam("intent")

@@ -23,7 +23,7 @@ func registerJournalTools() {
 		Description: "Get the most recent journal entries (newest first). First result is the latest in time; last result is the oldest in the returned set. Use for 'recent' or 'latest' — NOT for 'oldest' or 'earliest'.",
 		Category:    "journal",
 		Params:      []tools.Param{tools.CountParam()},
-		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
+		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
 			count := args.IntBounded("count", 10, 1, 50)
 			entries, err := journal.GetEntries(ctx, count)
 			if err != nil {
@@ -39,7 +39,7 @@ func registerJournalTools() {
 		Description: "Get the chronologically oldest journal entries (earliest by timestamp). First result is the OLDEST entry; use this when the user asks for 'oldest', 'earliest', or 'first ever' entry or memory.",
 		Category:    "journal",
 		Params:      []tools.Param{tools.CountParam()},
-		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
+		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
 			count := args.IntBounded("count", 10, 1, 50)
 			entries, err := journal.GetEntriesAsc(ctx, count)
 			if err != nil {
@@ -59,7 +59,7 @@ func registerJournalTools() {
 			tools.RequiredStringParam("end_date", "End date (YYYY-MM-DD or natural: today, yesterday, last week)"),
 			tools.LimitParam(50, 200),
 		},
-		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
+		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
 			startDate, ok := args.RequiredString("start_date")
 			if !ok {
 				return tools.MissingParam("start_date")
@@ -94,7 +94,7 @@ func registerJournalTools() {
 			tools.OptionalStringParam("category", "Filter by category: work, personal, health, finance, logistics (requires entries to have been analyzed)"),
 			tools.LimitParam(20, 50),
 		},
-		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
+		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
 			query, ok := args.RequiredString("query")
 			if !ok {
 				return tools.MissingParam("query")
@@ -147,7 +147,7 @@ func registerJournalTools() {
 			tools.OptionalStringParam("start_date", "Start date (YYYY-MM-DD, optional)"),
 			tools.OptionalStringParam("end_date", "End date (YYYY-MM-DD, optional)"),
 		},
-		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
+		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
 			startDateStr := args.String("start_date", "")
 			endDateStr := args.String("end_date", "")
 			var startDate, endDate *string
@@ -181,7 +181,7 @@ func registerJournalTools() {
 		Description: "List all unique sources (cli, sms, web, etc.) that have created journal entries.",
 		Category:    "journal",
 		Params:      []tools.Param{},
-		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
+		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
 			entries, err := journal.GetEntries(ctx, 100)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
@@ -211,7 +211,7 @@ func registerJournalTools() {
 			tools.RequiredStringParam("source", "The source to filter by (e.g., 'cli', 'sms', 'web')"),
 			tools.CountParam(),
 		},
-		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
+		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
 			source, ok := args.RequiredString("source")
 			if !ok {
 				return tools.MissingParam("source")
@@ -237,7 +237,7 @@ func registerJournalTools() {
 			tools.RequiredStringParam("topic", "The topic or keyword to summarize (e.g. 'migraines', 'work stress', 'jot app')"),
 			tools.OptionalStringParam("timeframe", "Optional timeframe: 'last 6 months', 'last 30 days', 'this year', or leave empty for all matching entries (up to 100)"),
 		},
-		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
+		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
 			topic, ok := args.RequiredString("topic")
 			if !ok {
 				return tools.MissingParam("topic")
@@ -273,8 +273,7 @@ func registerJournalTools() {
 				return entries[i].Timestamp < entries[j].Timestamp
 			})
 			entriesText := journal.FormatEntriesForContext(entries, 12000)
-			app := infra.GetApp(ctx)
-			if app == nil || app.Config() == nil {
+			if env == nil || env.Config() == nil {
 				return tools.Fail("App not available for summarization")
 			}
 			userPrompt, err := prompts.BuildActivityHistory(prompts.ActivityHistoryData{
@@ -286,7 +285,7 @@ func registerJournalTools() {
 				return tools.Fail("Failed to build activity history prompt: %v", err)
 			}
 			systemPrompt := prompts.DataSafety()
-			summary, err := infra.GenerateContentSimple(ctx, systemPrompt, userPrompt, app.Config(), &infra.GenConfig{MaxOutputTokens: 1024})
+			summary, err := infra.GenerateContentSimple(ctx, systemPrompt, userPrompt, env.Config(), &infra.GenConfig{MaxOutputTokens: 1024})
 			if err != nil {
 				return tools.Fail("Summarization failed: %v", err)
 			}
@@ -312,7 +311,7 @@ func registerJournalTools() {
 			tools.OptionalStringParam("category", "Filter by entry category: work, personal, health, finance, logistics"),
 			tools.LimitParam(50, 200),
 		},
-		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
+		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
 			startDate := args.String("start_date", "30 days ago")
 			endDate := args.String("end_date", "today")
 			startStr, endStr, err := resolveToolDateRange(startDate, endDate)
@@ -372,7 +371,7 @@ func registerJournalTools() {
 		Params: []tools.Param{
 			tools.RequiredStringParam("date", "Date to summarize: YYYY-MM-DD or natural language (e.g. yesterday, today, last Monday)"),
 		},
-		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
+		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
 			dateArg, ok := args.RequiredString("date")
 			if !ok {
 				return tools.MissingParam("date")

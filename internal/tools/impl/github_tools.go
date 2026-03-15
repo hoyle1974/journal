@@ -48,7 +48,7 @@ func registerGitHubTools() {
 
 func intPtr(n int) *int { return &n }
 
-func executeGitHubRead(ctx context.Context, args *tools.Args) tools.Result {
+func executeGitHubRead(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
 	ctx, span := infra.StartSpan(ctx, "tool.github_read")
 	defer span.End()
 

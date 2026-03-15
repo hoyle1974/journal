@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/jackstrohm/jot/pkg/infra"
 	"google.golang.org/genai"
 )
 
@@ -52,8 +53,8 @@ func GetDefinitionsByCategory(category string) []*genai.FunctionDeclaration {
 	return definitions
 }
 
-// Execute runs a tool by name with the given arguments.
-func Execute(ctx context.Context, name string, arguments map[string]interface{}) Result {
+// Execute runs a tool by name with the given arguments. env is passed explicitly so tools do not pull app from context; may be nil for tools that do not need it.
+func Execute(ctx context.Context, env infra.ToolEnv, name string, arguments map[string]interface{}) Result {
 	registryLock.RLock()
 	tool, exists := registry[name]
 	registryLock.RUnlock()
@@ -63,7 +64,7 @@ func Execute(ctx context.Context, name string, arguments map[string]interface{})
 	}
 
 	args := NewArgs(arguments)
-	return tool.Execute(ctx, args)
+	return tool.Execute(ctx, env, args)
 }
 
 // GetTool returns a tool by name (for testing).

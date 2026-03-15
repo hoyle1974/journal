@@ -11,8 +11,8 @@ import (
 	"github.com/jackstrohm/jot/pkg/memory"
 )
 
-// HandleCountdown manages countdown events (uses knowledge/embedding).
-func HandleCountdown(ctx context.Context, action, name, dateStr string) (string, error) {
+// HandleCountdown manages countdown events (uses knowledge/embedding). env is used for embedding; pass from tool Execute.
+func HandleCountdown(ctx context.Context, env infra.ToolEnv, action, name, dateStr string) (string, error) {
 	switch strings.ToLower(action) {
 	case "create":
 		if name == "" || dateStr == "" {
@@ -34,7 +34,7 @@ func HandleCountdown(ctx context.Context, action, name, dateStr string) (string,
 		if name == "" {
 			return "", fmt.Errorf("name required for check")
 		}
-		queryVec, err := embeddingForContext(ctx, fmt.Sprintf("Countdown: %s", name))
+		queryVec, err := embeddingForContext(ctx, env, fmt.Sprintf("Countdown: %s", name))
 		if err != nil {
 			return "", err
 		}
@@ -60,7 +60,7 @@ func HandleCountdown(ctx context.Context, action, name, dateStr string) (string,
 		return fmt.Sprintf("Countdown '%s' not found", name), nil
 
 	case "list":
-		queryVec, err := embeddingForContext(ctx, "Countdown event")
+		queryVec, err := embeddingForContext(ctx, env, "Countdown event")
 		if err != nil {
 			return "", err
 		}
@@ -99,8 +99,8 @@ func HandleCountdown(ctx context.Context, action, name, dateStr string) (string,
 	}
 }
 
-// HandleBookmark manages bookmarks.
-func HandleBookmark(ctx context.Context, action, bookmarkURL, title, tags, query string) (string, error) {
+// HandleBookmark manages bookmarks. env is used for embedding; pass from tool Execute.
+func HandleBookmark(ctx context.Context, env infra.ToolEnv, action, bookmarkURL, title, tags, query string) (string, error) {
 	switch strings.ToLower(action) {
 	case "save":
 		if bookmarkURL == "" {
@@ -128,7 +128,7 @@ func HandleBookmark(ctx context.Context, action, bookmarkURL, title, tags, query
 		if searchQuery == "" {
 			return "", fmt.Errorf("query or tags required for search")
 		}
-		queryVec, err := embeddingForContext(ctx, fmt.Sprintf("Bookmark %s", searchQuery))
+		queryVec, err := embeddingForContext(ctx, env, fmt.Sprintf("Bookmark %s", searchQuery))
 		if err != nil {
 			return "", err
 		}
@@ -153,7 +153,7 @@ func HandleBookmark(ctx context.Context, action, bookmarkURL, title, tags, query
 		return fmt.Sprintf("Bookmarks matching '%s':\n%s", searchQuery, strings.Join(bookmarks, "\n")), nil
 
 	case "list":
-		queryVec, err := embeddingForContext(ctx, "Bookmark")
+		queryVec, err := embeddingForContext(ctx, env, "Bookmark")
 		if err != nil {
 			return "", err
 		}
@@ -185,10 +185,9 @@ func HandleBookmark(ctx context.Context, action, bookmarkURL, title, tags, query
 	}
 }
 
-func embeddingForContext(ctx context.Context, text string) ([]float32, error) {
-	app := infra.GetApp(ctx)
-	if app == nil || app.Config() == nil {
+func embeddingForContext(ctx context.Context, env infra.ToolEnv, text string) ([]float32, error) {
+	if env == nil || env.Config() == nil {
 		return nil, fmt.Errorf("no app in context for embedding")
 	}
-	return infra.GenerateEmbedding(ctx, app.Config().GoogleCloudProject, text)
+	return infra.GenerateEmbedding(ctx, env.Config().GoogleCloudProject, text)
 }

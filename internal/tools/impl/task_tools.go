@@ -37,7 +37,7 @@ func registerTaskTools() {
 			tools.OptionalStringParam("due_date", "Due date (YYYY-MM-DD)"),
 			tools.OptionalStringParam("system_prompt", "Instructions for the LLM when working on this task"),
 		},
-		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
+		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
 			content, ok := args.RequiredString("content")
 			if !ok {
 				return tools.MissingParam("content")
@@ -75,7 +75,7 @@ func registerTaskTools() {
 		Params: []tools.Param{
 			tools.RequiredStringParam("task_id", "Task UUID"),
 		},
-		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
+		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
 			taskID, ok := args.RequiredString("task_id")
 			if !ok {
 				return tools.MissingParam("task_id")
@@ -115,7 +115,7 @@ func registerTaskTools() {
 			tools.OptionalStringParam("add_memory_node_ids", "Comma-separated knowledge node UUIDs to link to this task"),
 			tools.OptionalStringParam("remove_memory_node_ids", "Comma-separated knowledge node UUIDs to unlink from this task"),
 		},
-		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
+		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
 			taskID, ok := args.RequiredString("task_id")
 			if !ok {
 				return tools.MissingParam("task_id")
@@ -161,7 +161,7 @@ func registerTaskTools() {
 			tools.EnumParam("status", "New status", true, []string{"pending", "active", "completed", "abandoned"}),
 			tools.OptionalStringParam("reasoning", "Reason for the status change (required when completing or abandoning)"),
 		},
-		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
+		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
 			taskID, ok := args.RequiredString("task_id")
 			if !ok {
 				return tools.MissingParam("task_id")
@@ -193,7 +193,7 @@ func registerTaskTools() {
 			tools.LimitParam(10, 20),
 			tools.OptionalStringParam("status", "Filter by status (pending, active, completed, abandoned)"),
 		},
-		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
+		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
 			query := args.String("query", "")
 			query = strings.TrimSpace(query)
 			limit := args.IntBounded("limit", 10, 1, 20)
@@ -208,11 +208,10 @@ func registerTaskTools() {
 					return tools.Fail("Error listing tasks: %v", err)
 				}
 			} else {
-				app := infra.GetApp(ctx)
-				if app == nil || app.Config() == nil {
+				if env == nil || env.Config() == nil {
 					return tools.Fail("Error: no app in context")
 				}
-				vec, err := infra.GenerateEmbedding(ctx, app.Config().GoogleCloudProject, query, infra.EmbedTaskRetrievalDocument)
+				vec, err := infra.GenerateEmbedding(ctx, env.Config().GoogleCloudProject, query, infra.EmbedTaskRetrievalDocument)
 				if err != nil {
 					return tools.Fail("Error generating embedding: %v", err)
 				}

@@ -5,6 +5,7 @@ package tools
 import (
 	"context"
 
+	"github.com/jackstrohm/jot/pkg/infra"
 	"google.golang.org/genai"
 )
 
@@ -16,7 +17,8 @@ type Result struct {
 }
 
 // ExecuteFunc is the function signature for tool execution.
-type ExecuteFunc func(ctx context.Context, args *Args) Result
+// env is the tool environment (config, LLM dispatch); may be nil when running tools that do not need it (e.g. in tests).
+type ExecuteFunc func(ctx context.Context, env infra.ToolEnv, args *Args) Result
 
 // Tool defines a tool that can be called by the LLM agent.
 // DocURL is optional; when set, it is included in the tool description sent to the LLM so it can refer to library docs.

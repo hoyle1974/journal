@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/jackstrohm/jot/pkg/agent"
+	"github.com/jackstrohm/jot/pkg/infra"
 	"github.com/jackstrohm/jot/pkg/journal"
 	"github.com/jackstrohm/jot/tools"
 )
@@ -33,7 +34,7 @@ func registerSpecialistTools() {
 			Params: []tools.Param{
 				tools.RequiredStringParam("query", "The question or topic to ask this specialist about"),
 			},
-			Execute: func(ctx context.Context, args *tools.Args) tools.Result {
+			Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
 				query, ok := args.RequiredString("query")
 				if !ok {
 					return tools.MissingParam("query")

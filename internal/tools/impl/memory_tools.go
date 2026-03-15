@@ -30,7 +30,7 @@ func registerKnowledgeTools() {
 			tools.RequiredStringParam("node_type", "Type of knowledge node"),
 			tools.OptionalStringParam("metadata", "Optional JSON metadata. For project/goal use status one of: active, blocked, done, planning, pending, completed (e.g. {\"status\": \"active\"}). For person: relationship, occupation, etc."),
 		},
-		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
+		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
 			content, ok := args.RequiredString("content")
 			if !ok {
 				return tools.MissingParam("content")
@@ -62,7 +62,7 @@ func registerKnowledgeTools() {
 			tools.OptionalStringParam("source_text", "For debugging: the raw input used to build the query (set by code, not by assistant)"),
 			tools.OptionalStringParam("template", "For debugging: the template used to build the query (e.g. 'Permanent facts about: {{.Input}}')"),
 		},
-		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
+		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
 			query, ok := args.RequiredString("query")
 			if !ok {
 				return tools.MissingParam("query")
@@ -78,11 +78,10 @@ func registerKnowledgeTools() {
 				logArgs = append(logArgs, "template", template)
 			}
 			infra.LoggerFrom(ctx).Debug("semantic_search: starting", logArgs...)
-			app := infra.GetApp(ctx)
-			if app == nil || app.Config() == nil {
+			if env == nil || env.Config() == nil {
 				return tools.Fail("Error: no app in context")
 			}
-			queryVec, err := infra.GenerateEmbedding(ctx, app.Config().GoogleCloudProject, query)
+			queryVec, err := infra.GenerateEmbedding(ctx, env.Config().GoogleCloudProject, query)
 			if err != nil {
 				return tools.Fail("Error generating embedding: %v", err)
 			}
@@ -166,18 +165,17 @@ func registerKnowledgeTools() {
 			tools.OptionalStringParam("node_type", "Filter by node type (leave empty for all types)"),
 			tools.LimitParam(20, 50),
 		},
-		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
+		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
 			nodeType := args.String("node_type", "")
 			limit := args.IntBounded("limit", 20, 1, 50)
 			queryStr := "knowledge information facts"
 			if nodeType != "" {
 				queryStr = nodeType + " information"
 			}
-			app := infra.GetApp(ctx)
-			if app == nil || app.Config() == nil {
+			if env == nil || env.Config() == nil {
 				return tools.Fail("Error: no app in context")
 			}
-			queryVec, err := infra.GenerateEmbedding(ctx, app.Config().GoogleCloudProject, queryStr)
+			queryVec, err := infra.GenerateEmbedding(ctx, env.Config().GoogleCloudProject, queryStr)
 			if err != nil {
 				return tools.Fail("Error generating embedding: %v", err)
 			}
@@ -215,7 +213,7 @@ func registerKnowledgeTools() {
 		Params: []tools.Param{
 			tools.RequiredStringParam("entity_name", "Name or role of the person (e.g. 'wife', 'Gloria', 'Sarah')"),
 		},
-		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
+		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
 			entityName, ok := args.RequiredString("entity_name")
 			if !ok {
 				return tools.MissingParam("entity_name")
@@ -224,8 +222,7 @@ func registerKnowledgeTools() {
 			if entityName == "" {
 				return tools.Fail("entity_name cannot be empty")
 			}
-			app := infra.GetApp(ctx)
-			if app == nil || app.Config() == nil {
+			if env == nil || env.Config() == nil {
 				return tools.Fail("Error: no app in context")
 			}
 			node, err := memory.FindEntityNodeByName(ctx, entityName)
@@ -302,7 +299,7 @@ func registerKnowledgeTools() {
 
 			const synthesisPrompt = "Consolidate the following entity data into a concise profile. Remove redundant facts and merge overlapping information. Use bullets. Output only the profile, no preamble."
 			userPrompt := utils.WrapAsUserData(allInfo)
-			summary, err := infra.GenerateContentSimple(ctx, synthesisPrompt, userPrompt, app.Config(), &infra.GenConfig{MaxOutputTokens: 512})
+			summary, err := infra.GenerateContentSimple(ctx, synthesisPrompt, userPrompt, env.Config(), &infra.GenConfig{MaxOutputTokens: 512})
 			if err != nil {
 				infra.LoggerFrom(ctx).Debug("get_entity_network synthesis failed, returning raw data", "error", err)
 				return tools.OK("Entity: %s\n\n%s", entityName, allInfo)
@@ -318,16 +315,15 @@ func registerKnowledgeTools() {
 		Params: []tools.Param{
 			tools.RequiredStringParam("goal", "The goal to plan for"),
 		},
-		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
+		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
 			goal, ok := args.RequiredString("goal")
 			if !ok {
 				return tools.MissingParam("goal")
 			}
-			app := infra.GetApp(ctx)
-			if app == nil {
+			if env == nil {
 				return tools.Fail("No app in context")
 			}
-			result, err := service.CreateAndSavePlan(ctx, app, goal)
+			result, err := service.CreateAndSavePlan(ctx, env, goal)
 			if err != nil {
 				return tools.Fail("Error generating plan: %v", err)
 			}
@@ -342,7 +338,7 @@ func registerSignalTools() {
 		Description: "Check for background signals regarding stale goals, relationship health, or recurring user patterns. Use this if the user asks 'what should I focus on' or 'what am I forgetting'.",
 		Category:    "knowledge",
 		Params:      []tools.Param{tools.LimitParam(5, 10)},
-		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
+		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
 			limit := args.IntBounded("limit", 5, 1, 10)
 			signals, err := memory.GetActiveSignals(ctx, limit)
 			if err != nil {

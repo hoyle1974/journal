@@ -355,7 +355,7 @@ func runDreamerTaskPhase(ctx context.Context, dreamerRunID string, journalContex
 				break
 			}
 			infra.ToolCallsTotal.Inc()
-			toolResult := tools.Execute(ctx, toolName, toolArgs)
+			toolResult := tools.Execute(ctx, app, toolName, toolArgs)
 			infra.LoggerFrom(ctx).Debug("dreamer task phase tool", "dreamer_run_id", dreamerRunID, "phase", "task_phase", "tool", toolName, "success", toolResult.Success)
 			resultMsg := "Tool result (" + toolName + "): " + toolResult.Result
 			resp, err = session.SendMessage(ctx, &genai.Part{Text: utils.SanitizePrompt(resultMsg)})
@@ -377,7 +377,7 @@ func runDreamerTaskPhase(ctx context.Context, dreamerRunID string, journalContex
 			for k, v := range fc.Args {
 				args[k] = v
 			}
-			toolResult := tools.Execute(ctx, fc.Name, args)
+			toolResult := tools.Execute(ctx, app, fc.Name, args)
 			infra.LoggerFrom(ctx).Debug("dreamer task phase tool", "dreamer_run_id", dreamerRunID, "phase", "task_phase", "tool", fc.Name, "success", toolResult.Success)
 			parts = append(parts, &genai.Part{
 				FunctionResponse: &genai.FunctionResponse{

@@ -26,22 +26,21 @@ type GeneratedPlan struct {
 }
 
 // CreateAndSavePlan forces Gemini to decompose a goal into key/value output, then saves it to the Knowledge Graph.
-func CreateAndSavePlan(ctx context.Context, goal string) (string, error) {
+func CreateAndSavePlan(ctx context.Context, env infra.ToolEnv, goal string) (string, error) {
 	ctx, span := infra.StartSpan(ctx, "plan.create_and_save")
 	defer span.End()
 
-	app := infra.GetApp(ctx)
-	if app == nil {
+	if env == nil || env.Config() == nil {
 		return "", fmt.Errorf("no app in context")
 	}
 	prompt := fmt.Sprintf("Create a detailed, sequential plan to achieve this goal:\n%s\nBreak it down into clear phases with titles, descriptions, and any dependencies between phases.", utils.WrapAsUserData(utils.SanitizePrompt(goal)))
 	req := &infra.LLMRequest{
 		SystemPrompt: prompts.PlanSystem(),
 		Parts:        []*genai.Part{{Text: prompt}},
-		Model:        app.Config().GeminiModel,
+		Model:        env.Config().GeminiModel,
 		GenConfig:    &infra.GenConfig{MaxOutputTokens: 2048},
 	}
-	resp, err := app.Dispatch(ctx, req)
+	resp, err := env.Dispatch(ctx, req)
 	if err != nil {
 		span.RecordError(err)
 		return "", fmt.Errorf("failed to generate plan: %w", err)

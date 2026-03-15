@@ -44,6 +44,13 @@ func GetApp(ctx context.Context) *App {
 	return nil
 }
 
+// ToolEnv is the minimal interface tools need: config (for embedding, project) and single-shot LLM dispatch.
+// Implemented by *App. Passed explicitly to tool execution so tools do not pull app from context.
+type ToolEnv interface {
+	Config() *config.Config
+	Dispatch(ctx context.Context, req *LLMRequest) (*genai.GenerateContentResponse, error)
+}
+
 // App holds runtime dependencies (Firestore, Gemini, Logger, worker pools).
 type App struct {
 	Logger *slog.Logger

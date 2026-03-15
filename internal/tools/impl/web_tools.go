@@ -15,6 +15,7 @@ import (
 
 	readability "github.com/go-shiori/go-readability"
 	"google.golang.org/genai"
+	"github.com/jackstrohm/jot/pkg/infra"
 	"github.com/jackstrohm/jot/pkg/utils"
 	"github.com/jackstrohm/jot/tools"
 )
@@ -33,7 +34,7 @@ func registerWebTools() {
 			tools.RequiredStringParam("url", "The URL to fetch"),
 			tools.IntParam("max_length", "Maximum characters to return (default 5000)", false, 5000),
 		},
-		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
+		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
 			urlStr, ok := args.RequiredString("url")
 			if !ok {
 				return tools.MissingParam("url")
@@ -54,7 +55,7 @@ func registerWebTools() {
 		Params: []tools.Param{
 			tools.RequiredStringParam("word", "The word to define"),
 		},
-		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
+		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
 			word, ok := args.RequiredString("word")
 			if !ok {
 				return tools.MissingParam("word")
@@ -74,7 +75,7 @@ func registerWebTools() {
 		Params: []tools.Param{
 			tools.RequiredStringParam("query", "The topic to search for on Wikipedia"),
 		},
-		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
+		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
 			query, ok := args.RequiredString("query")
 			if !ok {
 				return tools.MissingParam("query")
@@ -101,7 +102,7 @@ func registerWebTools() {
 				Default:     5,
 			},
 		},
-		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
+		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
 			query, ok := args.RequiredString("query")
 			if !ok {
 				return tools.MissingParam("query")
@@ -126,7 +127,7 @@ func registerWebTools() {
 			tools.OptionalStringParam("tags", "Comma-separated tags (for save/search)"),
 			tools.OptionalStringParam("query", "Search query for finding bookmarks (for search action)"),
 		},
-		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
+		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
 			action, ok := args.RequiredString("action")
 			if !ok {
 				return tools.MissingParam("action")
@@ -135,7 +136,7 @@ func registerWebTools() {
 			title := args.String("title", "")
 			tags := args.String("tags", "")
 			query := args.String("query", "")
-			result, err := HandleBookmark(ctx, action, bookmarkURL, title, tags, query)
+			result, err := HandleBookmark(ctx, env, action, bookmarkURL, title, tags, query)
 			if err != nil {
 				return tools.Fail("Bookmark error: %v", err)
 			}
@@ -152,14 +153,14 @@ func registerWebTools() {
 			tools.OptionalStringParam("name", "Name of the countdown event (for create/check/delete)"),
 			tools.OptionalStringParam("date", "Target date for the event (YYYY-MM-DD, for create action)"),
 		},
-		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
+		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
 			action, ok := args.RequiredString("action")
 			if !ok {
 				return tools.MissingParam("action")
 			}
 			name := args.String("name", "")
 			dateStr := args.String("date", "")
-			result, err := HandleCountdown(ctx, action, name, dateStr)
+			result, err := HandleCountdown(ctx, env, action, name, dateStr)
 			if err != nil {
 				return tools.Fail("Countdown error: %v", err)
 			}

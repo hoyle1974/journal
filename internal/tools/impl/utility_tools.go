@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/jackstrohm/jot/pkg/infra"
 	"github.com/jackstrohm/jot/pkg/utils"
 	"github.com/jackstrohm/jot/tools"
 	"github.com/martinlindhe/unit"
@@ -23,7 +24,7 @@ func registerUtilityTools() {
 		Params: []tools.Param{
 			tools.RequiredStringParam("expression", "The math expression to evaluate (e.g., '2+2', '15% of 200', 'sqrt(144)', '2^10')"),
 		},
-		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
+		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
 			expression, ok := args.RequiredString("expression")
 			if !ok {
 				return tools.MissingParam("expression")
@@ -47,7 +48,7 @@ func registerUtilityTools() {
 			tools.OptionalStringParam("date2", "Second date for days_between (YYYY-MM-DD format)"),
 			tools.IntParam("days", "Number of days for add_days/subtract_days operations", false, 0),
 		},
-		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
+		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
 			operation, ok := args.RequiredString("operation")
 			if !ok {
 				return tools.MissingParam("operation")
@@ -73,7 +74,7 @@ func registerUtilityTools() {
 		Params: []tools.Param{
 			tools.RequiredStringParam("text", "The text to analyze"),
 		},
-		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
+		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
 			text, ok := args.RequiredString("text")
 			if !ok {
 				return tools.MissingParam("text")
@@ -93,7 +94,7 @@ func registerUtilityTools() {
 			tools.RequiredStringParam("from_unit", "Source unit (e.g., 'C', 'kg', 'm', 'GB')"),
 			tools.RequiredStringParam("to_unit", "Target unit (e.g., 'F', 'lb', 'ft', 'MB')"),
 		},
-		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
+		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
 			value := args.Float("value", 0)
 			fromUnit, ok := args.RequiredString("from_unit")
 			if !ok {
@@ -121,7 +122,7 @@ func registerUtilityTools() {
 			tools.IntParam("max", "Maximum value for 'number' type (default 100)", false, 100),
 			tools.OptionalStringParam("choices", "Comma-separated list of choices for 'pick' type"),
 		},
-		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
+		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
 			randType, ok := args.RequiredString("type")
 			if !ok {
 				return tools.MissingParam("type")
@@ -143,7 +144,7 @@ func registerUtilityTools() {
 			tools.RequiredStringParam("from_tz", "Source timezone (e.g., 'PST', 'America/New_York', 'EST', 'UTC', 'JST', 'London', 'Tokyo')"),
 			tools.RequiredStringParam("to_tz", "Target timezone (e.g., 'JST', 'Europe/London', 'PT', 'UTC')"),
 		},
-		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
+		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
 			timeStr, ok := args.RequiredString("time")
 			if !ok {
 				return tools.MissingParam("time")
@@ -173,7 +174,7 @@ func registerUtilityTools() {
 			tools.EnumParam("operation", "Operation: 'base64_encode', 'base64_decode', 'url_encode', 'url_decode', 'json_format', 'json_minify'", true, []string{"base64_encode", "base64_decode", "url_encode", "url_decode", "json_format", "json_minify"}),
 			tools.RequiredStringParam("text", "The text to process"),
 		},
-		Execute: func(ctx context.Context, args *tools.Args) tools.Result {
+		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
 			operation, ok := args.RequiredString("operation")
 			if !ok {
 				return tools.MissingParam("operation")
