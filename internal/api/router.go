@@ -1,143 +1,198 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/jackstrohm/jot/pkg/infra"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
 )
 
-// PublicRoutes are paths that don't require API key auth.
-var PublicRoutes = map[string]bool{
-	"": true, "/health": true, "/metrics": true, "/webhook": true, "/sms": true,
-	"/privacy-policy": true, "/terms-and-conditions": true,
-}
+// NewRouter builds a chi.Mux with global middleware and route groups (public and protected).
+func NewRouter(s *Server) *chi.Mux {
+	r := chi.NewRouter()
 
-// Router is the full request handler: prelude (trace, app, span, auth, rate limit) then path dispatch.
-func Router(s *Server, w http.ResponseWriter, r *http.Request) {
-	startTime := time.Now()
-	ctx := r.Context()
-	ctx = otel.GetTextMapPropagator().Extract(ctx, propagation.HeaderCarrier(r.Header))
-	ctx = s.App.WithContext(ctx)
-	defer s.App.WaitForBackgroundTasks()
-	if r.Header.Get("X-Want-Trace-Id") == "true" {
-		ctx = infra.WithForceTrace(ctx)
-	}
-	ctx, span := infra.StartSpan(ctx, "http.request")
-	defer span.End()
-	path := strings.TrimSuffix(r.URL.Path, "/")
-	method := r.Method
-	span.SetAttributes(map[string]string{"http.method": method, "http.path": path})
-	infra.LoggerFrom(ctx).Debug("request started", "event", "request_start", "method", method, "path", path, "trace_id", span.TraceID())
-	if !PublicRoutes[path] {
-		if code, msg := CheckAuth(s, r); code != 0 {
-			infra.LogRequest(ctx, method, path, code, time.Since(startTime))
-			WriteJSON(w, code, map[string]string{"error": msg})
-			return
-		}
-	}
-	if !CheckRateLimit(r, path) {
-		s.Logger.Warn("rate limit exceeded", "path", path, "ip", GetClientIP(r))
-		infra.LogRequest(ctx, method, path, http.StatusTooManyRequests, time.Since(startTime))
-		WriteJSON(w, http.StatusTooManyRequests, map[string]string{"error": "Rate limit exceeded. Please try again later."})
-		return
-	}
-	rw := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
-	rw.Header().Set("X-Trace-Id", span.TraceID())
-	rw.Header().Set("X-Cloud-Project", s.Config.GoogleCloudProject)
-	reqWithCtx := r.WithContext(ctx)
-	switch {
-	case path == "" || path == "/health":
-		handleHealth(s, rw, reqWithCtx)
-	case path == "/metrics":
-		handleMetrics(s, rw, reqWithCtx)
-	case path == "/privacy-policy":
-		handlePrivacyPolicy(s, rw, reqWithCtx)
-	case path == "/terms-and-conditions":
-		handleTermsAndConditions(s, rw, reqWithCtx)
-	case path == "/log":
-		handleLog(s, rw, reqWithCtx)
-	case path == "/query":
-		handleQuery(s, rw, reqWithCtx)
-	case path == "/entries" || strings.HasPrefix(path, "/entries/"):
-		handleEntries(s, rw, reqWithCtx, path)
-	case path == "/sync":
-		handleSync(s, rw, reqWithCtx)
-	case path == "/dream/latest":
-		handleDreamLatest(s, rw, reqWithCtx)
-	case path == "/dream/status":
-		handleDreamStatus(s, rw, reqWithCtx)
-	case path == "/dream":
-		handleDream(s, rw, reqWithCtx)
-	case path == "/janitor":
-		handleJanitor(s, rw, reqWithCtx)
-	case path == "/rollup":
-		handleRollup(s, rw, reqWithCtx)
-	case path == "/pending-questions":
-		handlePendingQuestions(s, rw, reqWithCtx)
-	case strings.HasPrefix(path, "/pending-questions/"):
-		if id, suffix, ok := parsePendingQuestionPath(path); ok && suffix == "resolve" {
-			handlePendingQuestionResolve(s, rw, reqWithCtx, id)
-		} else {
-			WriteJSON(rw, http.StatusNotFound, map[string]string{"error": "Not found"})
-		}
-	case path == "/webhook":
-		handleWebhook(s, rw, reqWithCtx)
-	case path == "/sms":
-		handleSMS(s, rw, reqWithCtx)
-	case path == "/plan":
-		handlePlan(s, rw, reqWithCtx)
-	case path == "/decay-contexts":
-		handleDecayContexts(s, rw, reqWithCtx)
-	case path == "/backfill-embeddings":
-		handleBackfillEmbeddings(s, rw, reqWithCtx)
-	case path == "/internal/process-entry":
-		handleProcessEntry(s, rw, reqWithCtx)
-	case path == "/internal/process-sms-query":
-		handleProcessSMSQuery(s, rw, reqWithCtx)
-	case path == "/internal/save-query":
-		handleSaveQuery(s, rw, reqWithCtx)
-	case path == "/internal/dream-run":
-		handleDreamRun(s, rw, reqWithCtx)
-	default:
+	r.Use(serverCtxMiddleware(s))
+	r.Use(traceMiddleware)
+	r.Use(responseWriterMiddleware)
+	r.Use(logRequestMiddleware)
+
+	// Public routes (no auth)
+	r.Group(func(r chi.Router) {
+		r.Get("/", wrap(handleHealth))
+		r.Get("/health", wrap(handleHealth))
+		r.Get("/metrics", wrap(handleMetrics))
+		r.Get("/privacy-policy", wrap(handlePrivacyPolicy))
+		r.Get("/terms-and-conditions", wrap(handleTermsAndConditions))
+		r.Post("/webhook", wrap(handleWebhook))
+		r.Post("/sms", wrap(handleSMS))
+	})
+
+	// Protected routes (auth + per-route rate limits)
+	r.Group(func(r chi.Router) {
+		r.Use(authMiddleware(s))
+		r.With(RateLimitMiddleware(60)).Post("/log", wrap(handleLog))
+		r.With(RateLimitMiddleware(30)).Post("/query", wrap(handleQuery))
+		r.With(RateLimitMiddleware(10)).Post("/plan", wrap(handlePlan))
+		r.With(RateLimitMiddleware(60)).Get("/entries", wrapWithPath(handleEntries))
+		r.With(RateLimitMiddleware(60)).Get("/entries/{uuid}", wrapWithPath(handleEntries))
+		r.With(RateLimitMiddleware(60)).Patch("/entries", wrapWithPath(handleEntries))
+		r.With(RateLimitMiddleware(60)).Patch("/entries/{uuid}", wrapWithPath(handleEntries))
+		r.With(RateLimitMiddleware(60)).Delete("/entries", wrapWithPath(handleEntries))
+		r.With(RateLimitMiddleware(60)).Delete("/entries/{uuid}", wrapWithPath(handleEntries))
+		r.With(RateLimitMiddleware(5)).Post("/sync", wrap(handleSync))
+		r.With(RateLimitMiddleware(60)).Get("/dream/latest", wrap(handleDreamLatest))
+		r.With(RateLimitMiddleware(60)).Get("/dream/status", wrap(handleDreamStatus))
+		r.With(RateLimitMiddleware(2)).Post("/dream", wrap(handleDream))
+		r.With(RateLimitMiddleware(1)).Post("/janitor", wrap(handleJanitor))
+		r.With(RateLimitMiddleware(2)).Post("/rollup", wrap(handleRollup))
+		r.With(RateLimitMiddleware(60)).Get("/pending-questions", wrap(handlePendingQuestions))
+		r.With(RateLimitMiddleware(60)).Post("/pending-questions/{id}/resolve", wrap(handlePendingQuestionResolve))
+		r.With(RateLimitMiddleware(5)).Post("/decay-contexts", wrap(handleDecayContexts))
+		r.With(RateLimitMiddleware(2)).Post("/backfill-embeddings", wrap(handleBackfillEmbeddings))
+		r.With(RateLimitMiddleware(120)).Post("/internal/process-entry", wrap(handleProcessEntry))
+		r.With(RateLimitMiddleware(120)).Post("/internal/process-sms-query", wrap(handleProcessSMSQuery))
+		r.With(RateLimitMiddleware(120)).Post("/internal/save-query", wrap(handleSaveQuery))
+		r.With(RateLimitMiddleware(120)).Post("/internal/dream-run", wrap(handleDreamRun))
+	})
+
+	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		path := pathForLog(r.URL.Path)
+		method := r.Method
 		infra.LoggerFrom(ctx).Info("handler response", "event", "http_response", "method", method, "path", path, "status", http.StatusNotFound, "error", "Not found")
-		WriteJSON(rw, http.StatusNotFound, map[string]interface{}{
+		WriteJSON(w, http.StatusNotFound, map[string]interface{}{
 			"error": "Not found", "path": path,
 			"available_routes": []string{
 				"GET  /health", "GET  /metrics", "GET  /privacy-policy", "GET  /terms-and-conditions",
 				"POST /log", "POST /query", "POST /plan", "GET  /entries", "POST /sync", "GET  /dream/latest", "GET  /dream/status", "POST /dream",
-				"POST /janitor", "POST /rollup", "POST /webhook", "POST /sms", 				"POST /decay-contexts",
+				"POST /janitor", "POST /rollup", "POST /webhook", "POST /sms", "POST /decay-contexts",
 				"POST /backfill-embeddings", "GET  /pending-questions", "POST /pending-questions/:id/resolve",
 			},
 		})
-	}
-	if rw.latencyBreakdown != nil {
-		ctx = infra.WithLatencyBreakdown(ctx, rw.latencyBreakdown)
-	}
-	infra.LogRequest(ctx, method, path, rw.statusCode, time.Since(startTime))
-	span.SetAttributes(map[string]string{"http.status_code": fmt.Sprintf("%d", rw.statusCode)})
+	})
+
+	return r
 }
 
-func parsePendingQuestionPath(path string) (id, suffix string, ok bool) {
-	const prefix = "/pending-questions/"
-	if !strings.HasPrefix(path, prefix) {
-		return "", "", false
+// wrap converts a handler that takes (s *Server, w, r) into an http.HandlerFunc by reading Server from context.
+func wrap(f func(*Server, http.ResponseWriter, *http.Request)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		s := ServerFromContext(r.Context())
+		if s == nil {
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+		f(s, w, r)
 	}
-	rest := strings.TrimPrefix(path, prefix)
-	parts := strings.SplitN(rest, "/", 2)
-	if len(parts) < 1 || parts[0] == "" {
-		return "", "", false
+}
+
+// wrapWithPath converts a handler that takes (s *Server, w, r, path) into an http.HandlerFunc, passing r.URL.Path.
+func wrapWithPath(f func(*Server, http.ResponseWriter, *http.Request, string)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		s := ServerFromContext(r.Context())
+		if s == nil {
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+		f(s, w, r, r.URL.Path)
 	}
-	id = parts[0]
-	if len(parts) == 2 {
-		suffix = strings.TrimSuffix(parts[1], "/")
+}
+
+func serverCtxMiddleware(s *Server) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := r.Context()
+			ctx = otel.GetTextMapPropagator().Extract(ctx, propagation.HeaderCarrier(r.Header))
+			ctx = s.App.WithContext(ctx)
+			ctx = contextWithServer(ctx, s)
+			defer s.App.WaitForBackgroundTasks()
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
 	}
-	return id, suffix, true
+}
+
+func contextWithServer(ctx context.Context, s *Server) context.Context {
+	return context.WithValue(ctx, serverContextKey{}, s)
+}
+
+func traceMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		if r.Header.Get("X-Want-Trace-Id") == "true" {
+			ctx = infra.WithForceTrace(ctx)
+		}
+		ctx, span := infra.StartSpan(ctx, "http.request")
+		defer span.End()
+		path := pathForLog(r.URL.Path)
+		method := r.Method
+		span.SetAttributes(map[string]string{"http.method": method, "http.path": path})
+		infra.LoggerFrom(ctx).Debug("request started", "event", "request_start", "method", method, "path", path, "trace_id", span.TraceID())
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func responseWriterMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rw := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
+		ctx := r.Context()
+		if span := trace.SpanFromContext(ctx); span.SpanContext().IsValid() {
+			rw.Header().Set("X-Trace-Id", span.SpanContext().TraceID().String())
+		}
+		if s := ServerFromContext(ctx); s != nil {
+			rw.Header().Set("X-Cloud-Project", s.Config.GoogleCloudProject)
+		}
+		next.ServeHTTP(rw, r)
+	})
+}
+
+func logRequestMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		rw := w.(*responseWriter)
+		next.ServeHTTP(w, r)
+		ctx := r.Context()
+		if rw.latencyBreakdown != nil {
+			ctx = infra.WithLatencyBreakdown(ctx, rw.latencyBreakdown)
+		}
+		path := pathForLog(r.URL.Path)
+		infra.LogRequest(ctx, r.Method, path, rw.statusCode, time.Since(start))
+		if span := trace.SpanFromContext(ctx); span.SpanContext().IsValid() {
+			span.SetAttributes(attribute.String("http.status_code", fmt.Sprintf("%d", rw.statusCode)))
+		}
+	})
+}
+
+func authMiddleware(s *Server) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if s.Config.JotAPIKey == "" {
+				s.Logger.Warn("no JOT_API_KEY configured, allowing unauthenticated access")
+				next.ServeHTTP(w, r)
+				return
+			}
+			apiKey := r.Header.Get("X-API-Key")
+			if apiKey == "" {
+				WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "Missing X-API-Key header"})
+				return
+			}
+			if apiKey != s.Config.JotAPIKey {
+				s.Logger.Warn("invalid API key attempted",
+					"path", r.URL.Path, "method", r.Method, "ip", GetClientIP(r),
+					"user_agent", r.UserAgent(), "key_length", len(apiKey))
+				WriteJSON(w, http.StatusForbidden, map[string]string{"error": "Invalid API key"})
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 type responseWriter struct {
@@ -161,23 +216,4 @@ func WriteJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(data)
-}
-
-// CheckAuth returns (0, "") if authorized, or (statusCode, message) if not.
-func CheckAuth(s *Server, r *http.Request) (int, string) {
-	if s.Config.JotAPIKey == "" {
-		s.Logger.Warn("no JOT_API_KEY configured, allowing unauthenticated access")
-		return 0, ""
-	}
-	apiKey := r.Header.Get("X-API-Key")
-	if apiKey == "" {
-		return http.StatusUnauthorized, "Missing X-API-Key header"
-	}
-	if apiKey != s.Config.JotAPIKey {
-		s.Logger.Warn("invalid API key attempted",
-			"path", r.URL.Path, "method", r.Method, "ip", GetClientIP(r),
-			"user_agent", r.UserAgent(), "key_length", len(apiKey))
-		return http.StatusForbidden, "Invalid API key"
-	}
-	return 0, ""
 }

@@ -48,7 +48,6 @@ func SetTestConfig(cfg *config.Config) (restore func()) {
 
 func init() {
 	functions.HTTP("JotAPI", JotAPI)
-	api.StartRateLimitCleanup()
 	if err := InitDefaultApp(context.Background()); err != nil {
 		log.Printf("init default app failed: %v", err)
 		return
@@ -64,7 +63,7 @@ func init() {
 	agentSvc := service.NewAgentService(app)
 	smsSvc := service.NewSMSService(getConfig)
 	systemSvc := service.NewSystemService(app)
-	defaultServer = api.NewServer(app, defaultConfig, infra.Logger, journalSvc, memorySvc, agentSvc, smsSvc, systemSvc, api.Router)
+	defaultServer = api.NewServer(app, defaultConfig, infra.Logger, journalSvc, memorySvc, agentSvc, smsSvc, systemSvc)
 }
 
 // JotAPI is the HTTP handler for the Cloud Function.

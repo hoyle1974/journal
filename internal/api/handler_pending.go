@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/jackstrohm/jot/pkg/infra"
 )
 
@@ -28,7 +29,8 @@ func handlePendingQuestions(s *Server, w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, map[string]interface{}{"questions": questions, "count": len(questions)})
 }
 
-func handlePendingQuestionResolve(s *Server, w http.ResponseWriter, r *http.Request, questionID string) {
+func handlePendingQuestionResolve(s *Server, w http.ResponseWriter, r *http.Request) {
+	questionID := chi.URLParam(r, "id")
 	ctx := r.Context()
 	path := pathForLog(r.URL.Path)
 	LogHandlerRequest(ctx, r.Method, path, "question_id", questionID)

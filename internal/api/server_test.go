@@ -47,7 +47,7 @@ func TestWriteJSON_ErrorStatus(t *testing.T) {
 }
 
 func TestRouter_NotFound(t *testing.T) {
-	srv := NewServer(testAppForAPI(), &config.Config{}, slog.Default(), nil, nil, nil, nil, nil, Router)
+	srv := NewServer(testAppForAPI(), &config.Config{}, slog.Default(), nil, nil, nil, nil, nil)
 	rec := httptest.NewRecorder()
 	r, _ := http.NewRequest("GET", "/unknown-path", nil)
 	srv.ServeHTTP(rec, r)

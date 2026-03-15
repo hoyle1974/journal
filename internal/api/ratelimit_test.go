@@ -2,9 +2,10 @@ package api
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
-	"github.com/google/uuid"
+	"github.com/go-chi/chi/v5"
 )
 
 func TestGetClientIP(t *testing.T) {
@@ -80,29 +81,39 @@ func TestRateLimitPath(t *testing.T) {
 	}
 }
 
-func TestCheckRateLimit_AllowsWithinLimit(t *testing.T) {
-	r, _ := http.NewRequest("GET", "/query", nil)
-	r.Header.Set("X-Forwarded-For", "192.168.1.1")
-
-	if !CheckRateLimit(r, "/query") {
-		t.Error("first request should be allowed")
+func TestRateLimitMiddleware_AllowsWithinLimit(t *testing.T) {
+	r := chi.NewRouter()
+	r.With(RateLimitMiddleware(5)).Get("/test", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.RemoteAddr = "192.168.1.1"
+	r.ServeHTTP(rec, req)
+	if rec.Code == http.StatusTooManyRequests {
+		t.Error("first request should not be rate limited")
 	}
 }
 
-func TestCheckRateLimit_ExceedsLimit(t *testing.T) {
-	testIP := uuid.New().String()
-
-	for i := 0; i < 30; i++ {
-		r, _ := http.NewRequest("GET", "/query", nil)
-		r.Header.Set("X-Forwarded-For", testIP)
-		if !CheckRateLimit(r, "/query") {
-			t.Errorf("request %d should be allowed (within limit)", i+1)
+func TestRateLimitMiddleware_ExceedsLimit(t *testing.T) {
+	r := chi.NewRouter()
+	r.With(RateLimitMiddleware(2)).Get("/test", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	const testIP = "10.0.0.99"
+	for i := 0; i < 3; i++ {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest("GET", "/test", nil)
+		req.RemoteAddr = testIP
+		r.ServeHTTP(rec, req)
+		if i < 2 {
+			if rec.Code == http.StatusTooManyRequests {
+				t.Errorf("request %d should be allowed (within limit of 2/min), got 429", i+1)
+			}
+		} else {
+			if rec.Code != http.StatusTooManyRequests {
+				t.Errorf("3rd request should be rate limited, got %d", rec.Code)
+			}
 		}
-	}
-
-	r, _ := http.NewRequest("GET", "/query", nil)
-	r.Header.Set("X-Forwarded-For", testIP)
-	if CheckRateLimit(r, "/query") {
-		t.Error("31st request should be rate limited")
 	}
 }
