@@ -96,8 +96,9 @@ func ensureServer() error {
 		memorySvc := service.NewMemoryService(app)
 		agentSvc := service.NewAgentService(app)
 		smsSvc := service.NewSMSService(getConfig)
+		telegramSvc := service.NewTelegramService(getConfig)
 		systemSvc := service.NewSystemService(app)
-		defaultServer = api.NewServer(app, defaultConfig, infra.Logger, journalSvc, memorySvc, agentSvc, smsSvc, systemSvc)
+		defaultServer = api.NewServer(app, defaultConfig, infra.Logger, journalSvc, memorySvc, agentSvc, smsSvc, telegramSvc, systemSvc)
 	})
 	return serverInitErr
 }

@@ -48,24 +48,26 @@ type Server struct {
 	Memory    MemoryService
 	Agent     AgentService
 	SMS       SMSService
+	Telegram  TelegramService
 	System    SystemService
 	Validator *validator.Validate
 	Mux       *chi.Mux
 }
 
-// NewServer builds a Server with validator and chi router. Domain services (Journal, Memory, Agent, SMS, System)
+// NewServer builds a Server with validator and chi router. Domain services (Journal, Memory, Agent, SMS, Telegram, System)
 // must be non-nil for handlers that use them.
-func NewServer(app AppLike, cfg *config.Config, logger *slog.Logger, journal JournalService, memory MemoryService, agent AgentService, sms SMSService, system SystemService) *Server {
+func NewServer(app AppLike, cfg *config.Config, logger *slog.Logger, journal JournalService, memory MemoryService, agent AgentService, sms SMSService, telegram TelegramService, system SystemService) *Server {
 	validate := validator.New()
 	s := &Server{
-		App:       app,
-		Config:    cfg,
-		Logger:    logger,
-		Journal:   journal,
-		Memory:    memory,
-		Agent:     agent,
-		SMS:       sms,
-		System:    system,
+		App:      app,
+		Config:   cfg,
+		Logger:   logger,
+		Journal:  journal,
+		Memory:   memory,
+		Agent:    agent,
+		SMS:      sms,
+		Telegram: telegram,
+		System:   system,
 		Validator: validate,
 	}
 	s.Mux = NewRouter(s)

@@ -18,7 +18,7 @@ func testServerForAPI(cfg *config.Config) *Server {
 	if cfg == nil {
 		cfg = &config.Config{}
 	}
-	return NewServer(testAppForAPI(), cfg, slog.Default(), nil, nil, nil, nil, nil)
+	return NewServer(testAppForAPI(), cfg, slog.Default(), nil, nil, nil, nil, nil, nil)
 }
 
 func TestAuth_NoKeyConfigured(t *testing.T) {

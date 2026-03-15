@@ -104,6 +104,15 @@ case "$MODE" in
     if [ -n "$EXISTING_URL" ]; then
       ENV_VARS="$ENV_VARS,JOT_API_URL=${EXISTING_URL},SYNC_GDOC_URL=${EXISTING_URL}/sync"
     fi
+    if [ -n "${TELEGRAM_BOT_TOKEN:-}" ]; then
+      ENV_VARS="$ENV_VARS,TELEGRAM_BOT_TOKEN=$TELEGRAM_BOT_TOKEN"
+    fi
+    if [ -n "${TELEGRAM_SECRET_TOKEN:-}" ]; then
+      ENV_VARS="$ENV_VARS,TELEGRAM_SECRET_TOKEN=$TELEGRAM_SECRET_TOKEN"
+    fi
+    if [ -n "${ALLOWED_TELEGRAM_USER_ID:-}" ]; then
+      ENV_VARS="$ENV_VARS,ALLOWED_TELEGRAM_USER_ID=$ALLOWED_TELEGRAM_USER_ID"
+    fi
 
     # Build env block for YAML (Prometheus sidecar deploy)
     ENV_BLOCK_FILE="$REPO_ROOT/scripts/.env-block.yaml"
@@ -139,12 +148,24 @@ case "$MODE" in
     rm -f "$ENV_BLOCK_FILE"
 
     echo -e "${YELLOW}Deploying to Cloud Run (with Prometheus sidecar for /metrics)...${NC}"
-    gcloud run services replace "$RUN_YAML" --region="$REGION" --project="$PROJECT" --verbosity=debug
+    DEPLOY_OUT="$REPO_ROOT/scripts/.deploy-out.txt"
+    set +e
+    gcloud run services replace "$RUN_YAML" --region="$REGION" --project="$PROJECT" --verbosity=debug 2>&1 | tee "$DEPLOY_OUT"
+    REPLACE_RC=$?
+    set -e
+    [ $REPLACE_RC -ne 0 ] && exit $REPLACE_RC
 
     # Allow unauthenticated invocations (replace does not set IAM)
     gcloud run services add-iam-policy-binding "$FUNCTION_NAME" --region="$REGION" --member="allUsers" --role="roles/run.invoker" 2>/dev/null || true
 
-    DEPLOYED_BASE_URL=$(gcloud run services describe "$FUNCTION_NAME" --region="$REGION" --format='value(status.url)' --project="$PROJECT")
+    # Use the URL printed by deploy (e.g. https://SERVICE-NUM.REGION.run.app); describe can return a different host (e.g. uc.a.run.app) that may 404 for Telegram.
+    # Prefer the last run.app URL in replace output (the "URL: https://..." line); fall back to describe.
+    DEPLOYED_BASE_URL=$(grep -oE 'https://[a-zA-Z0-9.-]+\.run\.app' "$DEPLOY_OUT" 2>/dev/null | tail -1)
+    if [ -z "$DEPLOYED_BASE_URL" ]; then
+      DEPLOYED_BASE_URL=$(gcloud run services describe "$FUNCTION_NAME" --region="$REGION" --format='value(status.url)' --project="$PROJECT")
+      echo -e "${YELLOW}Deploy: using URL from describe (could not parse from replace output).${NC}"
+    fi
+    rm -f "$DEPLOY_OUT"
     ;;
   *)
     echo "Unsupported mode: $MODE (use container)"
@@ -153,3 +174,44 @@ case "$MODE" in
 esac
 
 echo -e "${GREEN}Deployment to $ENV_TARGET successful!${NC}"
+echo ""
+
+# Set Telegram webhook if bot token is available (from env file)
+if [ -n "${TELEGRAM_BOT_TOKEN:-}" ] && [ -n "${DEPLOYED_BASE_URL:-}" ]; then
+  TELEGRAM_WEBHOOK_URL="${DEPLOYED_BASE_URL%/}/telegram"
+  echo -e "${YELLOW}Telegram webhook:${NC} DEPLOYED_BASE_URL=$DEPLOYED_BASE_URL"
+  echo -e "${YELLOW}Telegram webhook:${NC} URL=$TELEGRAM_WEBHOOK_URL"
+
+  # Verify bot token with getMe (Telegram returns 404 for invalid token)
+  GETME=$(curl -s -w "\n%{http_code}" "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getMe")
+  GETME_CODE=$(echo "$GETME" | tail -n1)
+  GETME_BODY=$(echo "$GETME" | sed '$d')
+  if [ "$GETME_CODE" != "200" ] || ! echo "$GETME_BODY" | grep -q '"ok":true'; then
+    echo -e "${RED}Telegram bot token invalid (getMe returned HTTP $GETME_CODE). Fix TELEGRAM_BOT_TOKEN in $ENV_FILE — use the token from @BotFather, not the secret_token.${NC}"
+    echo -e "${YELLOW}Telegram webhook:${NC} getMe response=$GETME_BODY"
+  else
+    if [ -n "${TELEGRAM_SECRET_TOKEN:-}" ]; then
+      echo -e "${YELLOW}Telegram webhook:${NC} secret_token is set (will be sent in payload)"
+      PAYLOAD=$(printf '{"url":"%s","secret_token":"%s"}' "$TELEGRAM_WEBHOOK_URL" "$TELEGRAM_SECRET_TOKEN")
+    else
+      echo -e "${YELLOW}Telegram webhook:${NC} no secret_token (optional)"
+      PAYLOAD=$(printf '{"url":"%s"}' "$TELEGRAM_WEBHOOK_URL")
+    fi
+    echo -e "${YELLOW}Telegram webhook:${NC} calling setWebhook ..."
+    RESP=$(curl -s -w "\n%{http_code}" -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook" \
+      -H "Content-Type: application/json" \
+      -d "$PAYLOAD")
+    HTTP_CODE=$(echo "$RESP" | tail -n1)
+    BODY=$(echo "$RESP" | sed '$d')
+    echo -e "${YELLOW}Telegram webhook:${NC} HTTP status=$HTTP_CODE response=$BODY"
+    if echo "$BODY" | grep -q '"ok":true'; then
+      echo -e "${GREEN}Telegram webhook set successfully.${NC}"
+    else
+      echo -e "${RED}Telegram setWebhook failed (HTTP $HTTP_CODE). Full response: $BODY${NC}"
+    fi
+  fi
+  echo ""
+elif [ -n "${DEPLOYED_BASE_URL:-}" ]; then
+  echo -e "${YELLOW}Tip: Add TELEGRAM_BOT_TOKEN to $ENV_FILE and re-deploy to auto-set the Telegram webhook, or run setWebhook manually (see docs/telegram-setup.md).${NC}"
+  echo ""
+fi

@@ -4,7 +4,7 @@ Jot is a personal journaling and memory system. It ingests journal entries, extr
 
 ## Entry points
 - **CLI**: log, query, sync (Google Doc), dream, janitor, plan, recall (dream narrative), edit, entries.
-- **API**: POST /query, /log, /dream, /rollup, /janitor, /plan, /sync, /decay-contexts, /backfill-embeddings, /webhook, /sms; GET /dream/latest, /dream/status, /metrics, /entries, /pending-questions; POST /pending-questions/:id/resolve. POST /dream returns 202 and runs the dream async (single run at a time; poll GET /dream/status for progress). Cloud Tasks for async work (e.g. process-sms-query, dream-run).
+- **API**: POST /query, /log, /dream, /rollup, /janitor, /plan, /sync, /decay-contexts, /backfill-embeddings, /webhook, /sms, /telegram; GET /dream/latest, /dream/status, /metrics, /entries, /pending-questions; POST /pending-questions/:id/resolve. POST /dream returns 202 and runs the dream async (single run at a time; poll GET /dream/status for progress). Cloud Tasks for async work (e.g. process-sms-query, process-telegram-query, dream-run).
 - **Cron**: Dreamer (daily) consolidates last 24h journal into semantic memory; Janitor (weekly) evicts low-significance, rarely recalled nodes.
 - **First-run onboarding**: On cold start, if _system/onboarding is absent, the system seeds pending_questions with onboarding prompts (name, family, work, role); answers are stored as user_identity nodes.
 
@@ -20,7 +20,7 @@ Jot is a personal journaling and memory system. It ingests journal entries, extr
 - **Reserved names**: user_profile (identity), system_evolution (audit/friction), latest_dream (narrative). Janitor must not delete identity_anchor / user_identity.
 
 ## Journal
-- **Entries**: Timestamped, optional source (cli, sms, web, etc.). Stored in Firestore; can be analyzed (categories, entities). When processed, entries that mention person entities are linked to those person nodes (journal_entry_ids) so get_entity_network can surface them. Google Doc sync processes new entries and in-doc questions.
+- **Entries**: Timestamped, optional source (cli, sms, telegram, web, etc.). Stored in Firestore; can be analyzed (categories, entities). When processed, entries that mention person entities are linked to those person nodes (journal_entry_ids) so get_entity_network can surface them. Google Doc sync processes new entries and in-doc questions.
 - **Queries**: Saved with question, answer, source, is_gap. Gap queries surface in knowledge-gap block for FOH.
 - **Pending questions**: Gaps/contradictions from Dreamer gap detection; user can clarify later.
 

@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Jot secrets setup (Secret Manager, API keys, Twilio, IAM).
+# Jot secrets setup (Secret Manager, API keys, Twilio, Telegram, IAM).
 # Usage: ./scripts/setup-secrets.sh <dev|prod>
 # Environment must be explicit (no default). Script will confirm before continuing.
 #
@@ -119,6 +119,18 @@ if [ -n "$TWILIO_ACCOUNT_SID" ] && [ -n "$TWILIO_AUTH_TOKEN" ]; then
     echo ""
 fi
 
+# Telegram secrets (optional - skip if not using Telegram)
+if [ -z "$TELEGRAM_BOT_TOKEN" ]; then
+    echo -e "${YELLOW}Telegram (optional): Enter TELEGRAM_BOT_TOKEN (from @BotFather) or press Enter to skip:${NC}"
+    read -r TELEGRAM_BOT_TOKEN
+fi
+if [ -n "$TELEGRAM_BOT_TOKEN" ]; then
+    create_secret "TELEGRAM_BOT_TOKEN" "$TELEGRAM_BOT_TOKEN"
+    [ -n "${TELEGRAM_SECRET_TOKEN:-}" ] && create_secret "TELEGRAM_SECRET_TOKEN" "$TELEGRAM_SECRET_TOKEN"
+    [ -n "${ALLOWED_TELEGRAM_USER_ID:-}" ] && create_secret "ALLOWED_TELEGRAM_USER_ID" "$ALLOWED_TELEGRAM_USER_ID"
+    echo ""
+fi
+
 # Grant Cloud Run service account access to secrets
 echo -e "${CYAN}Granting Cloud Run access to secrets...${NC}"
 # Default Compute Engine service account for the project (derive from project number or set CLOUD_RUN_SERVICE_ACCOUNT)
@@ -135,7 +147,7 @@ gcloud secrets add-iam-policy-binding JOT_API_KEY \
     --role="roles/secretmanager.secretAccessor" \
     --quiet 2>/dev/null || true
 
-for secret in TWILIO_ACCOUNT_SID TWILIO_AUTH_TOKEN TWILIO_PHONE_NUMBER ALLOWED_PHONE_NUMBER; do
+for secret in TWILIO_ACCOUNT_SID TWILIO_AUTH_TOKEN TWILIO_PHONE_NUMBER ALLOWED_PHONE_NUMBER TELEGRAM_BOT_TOKEN TELEGRAM_SECRET_TOKEN ALLOWED_TELEGRAM_USER_ID; do
     if gcloud secrets describe $secret 2>/dev/null; then
         gcloud secrets add-iam-policy-binding $secret \
             --member="serviceAccount:$SERVICE_ACCOUNT" \
@@ -158,6 +170,7 @@ echo ""
 echo -e "${YELLOW}Next steps:${NC}"
 echo "1. Add JOT_API_KEY to your .env file"
 echo "2. For Twilio SMS: add TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER, ALLOWED_PHONE_NUMBER to .env and re-run this script"
-echo "3. Redeploy: ./scripts/deploy.sh <dev|prod>"
-echo "4. Test: curl -H 'X-API-Key: \$JOT_API_KEY' https://...cloudrun.app/..."
+echo "3. For Telegram: add TELEGRAM_BOT_TOKEN (and optionally TELEGRAM_SECRET_TOKEN, ALLOWED_TELEGRAM_USER_ID) to .env, re-run this script, then set the bot webhook (see docs/telegram-setup.md)"
+echo "4. Redeploy: ./scripts/deploy.sh <dev|prod>"
+echo "5. Test: curl -H 'X-API-Key: \$JOT_API_KEY' https://...cloudrun.app/..."
 echo ""

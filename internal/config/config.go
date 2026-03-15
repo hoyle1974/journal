@@ -34,6 +34,11 @@ type Config struct {
 	TwilioPhoneNumber  string
 	AllowedPhoneNumber string
 
+	// Telegram
+	TelegramBotToken      string
+	TelegramSecretToken   string
+	AllowedTelegramUserID string
+
 	// Env is the deployment environment (e.g. production, staging, development). Set via JOT_ENV or GO_ENV; defaults to "production" when K_SERVICE is set, else "development".
 	Env string
 
@@ -65,6 +70,11 @@ func Load() (*Config, error) {
 		cfg.TwilioAuthToken = loadSecretOptional(cfg.GoogleCloudProject, "TWILIO_AUTH_TOKEN")
 		cfg.TwilioPhoneNumber = loadSecretOptionalWithDefault(cfg.GoogleCloudProject, "TWILIO_PHONE_NUMBER", "")
 		cfg.AllowedPhoneNumber = loadSecretOptionalWithDefault(cfg.GoogleCloudProject, "ALLOWED_PHONE_NUMBER", "")
+	}
+	if telegramWanted() {
+		cfg.TelegramBotToken = loadSecretOptional(cfg.GoogleCloudProject, "TELEGRAM_BOT_TOKEN")
+		cfg.TelegramSecretToken = loadSecretOptionalWithDefault(cfg.GoogleCloudProject, "TELEGRAM_SECRET_TOKEN", "")
+		cfg.AllowedTelegramUserID = loadSecretOptionalWithDefault(cfg.GoogleCloudProject, "ALLOWED_TELEGRAM_USER_ID", "")
 	}
 
 	cfg.Env = loadEnv("JOT_ENV", loadEnv("GO_ENV", ""))
@@ -100,6 +110,13 @@ func twilioWanted() bool {
 		os.Getenv("TWILIO_AUTH_TOKEN") != "" ||
 		os.Getenv("TWILIO_PHONE_NUMBER") != "" ||
 		os.Getenv("ALLOWED_PHONE_NUMBER") != ""
+}
+
+// telegramWanted returns true if any Telegram-related env var is set (caller intends to use Telegram).
+func telegramWanted() bool {
+	return os.Getenv("TELEGRAM_BOT_TOKEN") != "" ||
+		os.Getenv("TELEGRAM_SECRET_TOKEN") != "" ||
+		os.Getenv("ALLOWED_TELEGRAM_USER_ID") != ""
 }
 
 func normalizeToFlash(model string) string {

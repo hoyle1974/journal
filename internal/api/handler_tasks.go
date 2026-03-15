@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackstrohm/jot/internal/infra"
 	"github.com/jackstrohm/jot/pkg/sms"
+	"github.com/jackstrohm/jot/pkg/telegram"
 	"github.com/jackstrohm/jot/pkg/utils"
 )
 
@@ -99,6 +100,58 @@ func handleProcessSMSQuery(s *Server, w http.ResponseWriter, r *http.Request) {
 	}
 	infra.LoggerFrom(ctx).Info("process-sms-query: reply sent", "to", data.From, "preview", utils.TruncateString(response, 60))
 	LogHandlerResponse(ctx, r.Method, path, http.StatusOK, "status", "ok", "to", data.From)
+	WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// handleProcessTelegramQuery runs the query for an incoming Telegram message (FOH) and sends the reply via Telegram.
+func handleProcessTelegramQuery(s *Server, w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	path := pathForLog(r.URL.Path)
+	LogHandlerRequest(ctx, r.Method, path)
+	if r.Method != http.MethodPost {
+		LogHandlerResponse(ctx, r.Method, path, http.StatusMethodNotAllowed, "error", "Method not allowed")
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
+		return
+	}
+	var data struct {
+		ChatID         int64  `json:"chat_id" validate:"required"`
+		UserID         int64  `json:"user_id"`
+		Body           string `json:"body" validate:"required"`
+		UpdateID       int64  `json:"update_id"`
+		MessageID      int64  `json:"message_id"`
+		TaskID         string `json:"task_id"`
+		ParentTraceID  string `json:"parent_trace_id"`
+	}
+	if err := DecodeAndValidate(r, &data, s.Validator); err != nil {
+		LogHandlerResponse(ctx, r.Method, path, http.StatusBadRequest, "error", err.Error())
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if data.TaskID != "" || data.ParentTraceID != "" {
+		ctx = infra.WithCorrelation(ctx, data.TaskID, data.ParentTraceID)
+	}
+	msg := &telegram.IncomingMessage{
+		UpdateID:  data.UpdateID,
+		MessageID: data.MessageID,
+		ChatID:    data.ChatID,
+		UserID:    data.UserID,
+		Text:      data.Body,
+	}
+	LogHandlerRequest(ctx, r.Method, path, "chat_id", data.ChatID, "update_id", data.UpdateID, "body_length", len(data.Body), "task_id", data.TaskID, "parent_trace_id", data.ParentTraceID)
+	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
+	defer cancel()
+	response := s.Telegram.ProcessIncomingTelegram(ctx, s.App.(*infra.App), msg)
+	if response == "" {
+		response = "I couldn't process that. Please try again."
+	}
+	if err := s.Telegram.SendMessage(ctx, data.ChatID, response); err != nil {
+		infra.LoggerFrom(ctx).Error("process-telegram-query: send reply failed", "chat_id", data.ChatID, "error", err)
+		LogHandlerResponse(ctx, r.Method, path, http.StatusInternalServerError, "error", err.Error())
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to send Telegram reply"})
+		return
+	}
+	infra.LoggerFrom(ctx).Info("process-telegram-query: reply sent", "chat_id", data.ChatID, "preview", utils.TruncateString(response, 60))
+	LogHandlerResponse(ctx, r.Method, path, http.StatusOK, "status", "ok", "chat_id", data.ChatID)
 	WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 

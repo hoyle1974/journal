@@ -33,6 +33,7 @@ func NewRouter(s *Server) *chi.Mux {
 		r.Get("/terms-and-conditions", wrap(handleTermsAndConditions))
 		r.Post("/webhook", wrap(handleWebhook))
 		r.Post("/sms", wrap(handleSMS))
+		r.Post("/telegram", wrap(handleTelegram))
 	})
 
 	// Protected routes (auth + per-route rate limits)
@@ -59,6 +60,7 @@ func NewRouter(s *Server) *chi.Mux {
 		r.With(RateLimitMiddleware(2)).Post("/backfill-embeddings", wrap(handleBackfillEmbeddings))
 		r.With(RateLimitMiddleware(120)).Post("/internal/process-entry", wrap(handleProcessEntry))
 		r.With(RateLimitMiddleware(120)).Post("/internal/process-sms-query", wrap(handleProcessSMSQuery))
+		r.With(RateLimitMiddleware(120)).Post("/internal/process-telegram-query", wrap(handleProcessTelegramQuery))
 		r.With(RateLimitMiddleware(120)).Post("/internal/save-query", wrap(handleSaveQuery))
 		r.With(RateLimitMiddleware(120)).Post("/internal/dream-run", wrap(handleDreamRun))
 	})
@@ -73,7 +75,7 @@ func NewRouter(s *Server) *chi.Mux {
 			"available_routes": []string{
 				"GET  /health", "GET  /metrics", "GET  /privacy-policy", "GET  /terms-and-conditions",
 				"POST /log", "POST /query", "POST /plan", "GET  /entries", "POST /sync", "GET  /dream/latest", "GET  /dream/status", "POST /dream",
-				"POST /janitor", "POST /rollup", "POST /webhook", "POST /sms", "POST /decay-contexts",
+				"POST /janitor", "POST /rollup", "POST /webhook", "POST /sms", "POST /telegram", "POST /decay-contexts",
 				"POST /backfill-embeddings", "GET  /pending-questions", "POST /pending-questions/:id/resolve",
 			},
 		})

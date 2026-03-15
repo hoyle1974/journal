@@ -9,6 +9,7 @@ import (
 	"github.com/jackstrohm/jot/internal/infra"
 	"github.com/jackstrohm/jot/pkg/sms"
 	"github.com/jackstrohm/jot/pkg/system"
+	"github.com/jackstrohm/jot/pkg/telegram"
 )
 
 // SystemService provides _system collection operations (locks, dream state, debounce, onboarding) for HTTP handlers.
@@ -128,4 +129,13 @@ type SMSService interface {
 	IsAllowedPhoneNumber(phone string) bool
 	ProcessIncomingSMS(ctx context.Context, app *infra.App, msg *sms.TwilioWebhookRequest) string
 	SendSMS(ctx context.Context, to, body string) error
+}
+
+// TelegramService provides Telegram Bot API operations for HTTP handlers.
+type TelegramService interface {
+	ValidateSecretToken(r *http.Request) bool
+	ParseWebhook(r *http.Request) (*telegram.WebhookUpdate, *telegram.IncomingMessage, error)
+	IsAllowedUser(userID int64) bool
+	ProcessIncomingTelegram(ctx context.Context, app *infra.App, msg *telegram.IncomingMessage) string
+	SendMessage(ctx context.Context, chatID int64, body string) error
 }
