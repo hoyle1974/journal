@@ -38,8 +38,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("NewApp: %v", err)
 	}
-	ctx = infra.WithApp(ctx, app)
-
 	switch subcommand {
 	case "backfill-links":
 		runBackfillLinks(ctx, app, args)

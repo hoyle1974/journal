@@ -6,12 +6,13 @@ import (
 	"strings"
 	"time"
 
-	"google.golang.org/genai"
-	"github.com/jackstrohm/jot/internal/prompts"
+	"cloud.google.com/go/firestore"
 	"github.com/jackstrohm/jot/internal/infra"
+	"github.com/jackstrohm/jot/internal/prompts"
 	"github.com/jackstrohm/jot/pkg/journal"
 	"github.com/jackstrohm/jot/pkg/memory"
 	"github.com/jackstrohm/jot/pkg/utils"
+	"google.golang.org/genai"
 )
 
 const (
@@ -92,8 +93,8 @@ func runRollUpLLM(ctx context.Context, app *infra.App, periodLabel, analysesText
 	return content, out, nil
 }
 
-func getEntriesWithAnalysisForRollup(ctx context.Context, start, end string, limit int) (analysesText string, sourceIDs []string, err error) {
-	withAnalyses, err := journal.GetEntriesWithAnalysisByDateRange(ctx, start, end, limit)
+func getEntriesWithAnalysisForRollup(ctx context.Context, client *firestore.Client, start, end string, limit int) (analysesText string, sourceIDs []string, err error) {
+	withAnalyses, err := journal.GetEntriesWithAnalysisByDateRange(ctx, client, start, end, limit)
 	if err != nil {
 		return "", nil, err
 	}
@@ -115,8 +116,8 @@ func getEntriesWithAnalysisForRollup(ctx context.Context, start, end string, lim
 	return strings.Join(lines, "\n"), ids, nil
 }
 
-func getWeeklySummariesForRollup(ctx context.Context, startDate, endDate string, limit int) (contentText string, sourceIDs []string, err error) {
-	nodes, err := memory.GetWeeklySummaryNodesInRange(ctx, startDate, endDate, limit)
+func getWeeklySummariesForRollup(ctx context.Context, app *infra.App, startDate, endDate string, limit int) (contentText string, sourceIDs []string, err error) {
+	nodes, err := memory.GetWeeklySummaryNodesInRange(ctx, app, startDate, endDate, limit)
 	if err != nil {
 		return "", nil, err
 	}
@@ -136,15 +137,21 @@ func getWeeklySummariesForRollup(ctx context.Context, startDate, endDate string,
 }
 
 // RunWeeklyRollup synthesizes the last completed week's journal analyses into a weekly_summary knowledge node.
-func RunWeeklyRollup(ctx context.Context) (int, error) {
+func RunWeeklyRollup(ctx context.Context, app *infra.App) (int, error) {
 	ctx, span := infra.StartSpan(ctx, "cron.weekly_rollup")
 	defer span.End()
 
-	app := infra.GetApp(ctx)
+	if app == nil {
+		return 0, fmt.Errorf("app required")
+	}
+	client, err := app.Firestore(ctx)
+	if err != nil {
+		return 0, err
+	}
 	start, end := lastCompletedWeekStartEnd(time.Now())
 	periodLabel := fmt.Sprintf("Week of %s", start)
 
-	analysesText, sourceIDs, err := getEntriesWithAnalysisForRollup(ctx, start, end, 500)
+	analysesText, sourceIDs, err := getEntriesWithAnalysisForRollup(ctx, client, start, end, 500)
 	if err != nil {
 		return 0, fmt.Errorf("weekly rollup get entries: %w", err)
 	}
@@ -161,7 +168,7 @@ func RunWeeklyRollup(ctx context.Context) (int, error) {
 		return 0, err
 	}
 
-	_, err = memory.UpsertSemanticMemory(ctx, content, NodeTypeWeeklySummary, "thought", RollUpSignificance, nil, sourceIDs)
+	_, err = memory.UpsertSemanticMemory(ctx, app, content, NodeTypeWeeklySummary, "thought", RollUpSignificance, nil, sourceIDs)
 	if err != nil {
 		return 0, fmt.Errorf("weekly rollup upsert: %w", err)
 	}
@@ -171,11 +178,13 @@ func RunWeeklyRollup(ctx context.Context) (int, error) {
 }
 
 // RunMonthlyRollup synthesizes the last completed month's weekly summaries into a monthly_summary knowledge node.
-func RunMonthlyRollup(ctx context.Context) (int, error) {
+func RunMonthlyRollup(ctx context.Context, app *infra.App) (int, error) {
 	ctx, span := infra.StartSpan(ctx, "cron.monthly_rollup")
 	defer span.End()
 
-	app := infra.GetApp(ctx)
+	if app == nil {
+		return 0, fmt.Errorf("app required")
+	}
 	now := time.Now()
 	year, month := lastCompletedMonth(now)
 	startDate := fmt.Sprintf("%04d-%02d-01", year, month)
@@ -183,7 +192,7 @@ func RunMonthlyRollup(ctx context.Context) (int, error) {
 	endDate := fmt.Sprintf("%04d-%02d-%02d", year, month, lastDay)
 	periodLabel := fmt.Sprintf("%04d-%02d", year, month)
 
-	contentText, allSourceIDs, err := getWeeklySummariesForRollup(ctx, startDate, endDate, 10)
+	contentText, allSourceIDs, err := getWeeklySummariesForRollup(ctx, app, startDate, endDate, 10)
 	if err != nil {
 		return 0, fmt.Errorf("monthly rollup get weekly nodes: %w", err)
 	}
@@ -200,7 +209,7 @@ func RunMonthlyRollup(ctx context.Context) (int, error) {
 		return 0, err
 	}
 
-	_, err = memory.UpsertSemanticMemory(ctx, content, NodeTypeMonthlySummary, "thought", RollUpSignificance, nil, allSourceIDs)
+	_, err = memory.UpsertSemanticMemory(ctx, app, content, NodeTypeMonthlySummary, "thought", RollUpSignificance, nil, allSourceIDs)
 	if err != nil {
 		return 0, fmt.Errorf("monthly rollup upsert: %w", err)
 	}

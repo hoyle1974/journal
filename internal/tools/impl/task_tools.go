@@ -57,7 +57,7 @@ func registerTaskTools() {
 				t.JournalEntryIDs = []string{cur}
 			}
 
-			uuid, err := task.CreateTask(ctx, t)
+			uuid, err := task.CreateTask(ctx, env, t)
 			if err != nil {
 				return tools.Fail("Error creating task: %v", err)
 			}
@@ -80,7 +80,7 @@ func registerTaskTools() {
 			if !ok {
 				return tools.MissingParam("task_id")
 			}
-			t, err := task.GetTask(ctx, taskID)
+			t, err := task.GetTask(ctx, env, taskID)
 			if err != nil {
 				return tools.Fail("Error fetching task: %v", err)
 			}
@@ -144,7 +144,7 @@ func registerTaskTools() {
 			if !hasEdit {
 				return tools.Fail("provide at least one field to update: content, parent_id, due_date, system_prompt, or add/remove journal/memory IDs")
 			}
-			err := task.UpdateTask(ctx, taskID, opts)
+			err := task.UpdateTask(ctx, env, taskID, opts)
 			if err != nil {
 				return tools.Fail("Error updating task: %v", err)
 			}
@@ -176,7 +176,7 @@ func registerTaskTools() {
 				return tools.Fail("reasoning is required when marking a task as completed or abandoned")
 			}
 
-			err := task.UpdateTaskStatus(ctx, taskID, status, reasoning)
+			err := task.UpdateTaskStatus(ctx, env, taskID, status, reasoning)
 			if err != nil {
 				return tools.Fail("Error updating task: %v", err)
 			}
@@ -203,7 +203,7 @@ func registerTaskTools() {
 			var err error
 			if query == "" {
 				// List open root-level tasks (same as OPEN TODO LIST ROOTS in prompt).
-				tasks, err = task.GetOpenRootTasks(ctx, limit*2)
+				tasks, err = task.GetOpenRootTasks(ctx, env, limit*2)
 				if err != nil {
 					return tools.Fail("Error listing tasks: %v", err)
 				}
@@ -215,7 +215,7 @@ func registerTaskTools() {
 				if err != nil {
 					return tools.Fail("Error generating embedding: %v", err)
 				}
-				tasks, err = task.QuerySimilarTasks(ctx, vec, limit*2)
+				tasks, err = task.QuerySimilarTasks(ctx, env, vec, limit*2)
 				if err != nil {
 					return tools.Fail("Error searching tasks: %v", err)
 				}

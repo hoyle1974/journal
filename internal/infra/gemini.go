@@ -171,18 +171,16 @@ func newGeminiClientForApp(ctx context.Context, cfg *config.Config, log *slog.Lo
 	return client, effGen, effDream, nil
 }
 
-// GetGeminiClient returns the Gemini client from the App in context.
-func GetGeminiClient(ctx context.Context) (*genai.Client, error) {
-	app := GetApp(ctx)
+// GetGeminiClient returns the Gemini client from the given App.
+func GetGeminiClient(ctx context.Context, app *App) (*genai.Client, error) {
 	if app == nil {
-		return nil, fmt.Errorf("no app in context")
+		return nil, fmt.Errorf("app required")
 	}
 	return app.Gemini(ctx)
 }
 
 // GetEffectiveModel returns the resolved model name for API calls.
-func GetEffectiveModel(ctx context.Context, configured string) string {
-	app := GetApp(ctx)
+func GetEffectiveModel(app *App, configured string) string {
 	if app != nil {
 		return app.EffectiveModel(configured)
 	}
@@ -204,14 +202,13 @@ type GenConfig struct {
 }
 
 // GenerateContentSimple generates content without tools.
-// All calls go through the central dispatcher (App.Dispatch) for standardized DEBUG logging of request/response.
-func GenerateContentSimple(ctx context.Context, systemPrompt, userPrompt string, cfg *config.Config, genConfig *GenConfig) (string, error) {
+// env supplies Dispatch; pass from the caller (e.g. ToolEnv).
+func GenerateContentSimple(ctx context.Context, env ToolEnv, systemPrompt, userPrompt string, cfg *config.Config, genConfig *GenConfig) (string, error) {
 	ctx, span := StartSpan(ctx, "gemini.generate_simple")
 	defer span.End()
 
-	app := GetApp(ctx)
-	if app == nil || cfg == nil {
-		return "", fmt.Errorf("no app or config in context")
+	if env == nil || cfg == nil {
+		return "", fmt.Errorf("env and config required")
 	}
 	req := &LLMRequest{
 		SystemPrompt: systemPrompt,
@@ -219,7 +216,7 @@ func GenerateContentSimple(ctx context.Context, systemPrompt, userPrompt string,
 		Model:        cfg.GeminiModel,
 		GenConfig:    genConfig,
 	}
-	resp, err := app.Dispatch(ctx, req)
+	resp, err := env.Dispatch(ctx, req)
 	if err != nil {
 		span.RecordError(err)
 		LoggerFrom(ctx).Error("gemini generation failed", "error", err)
@@ -233,14 +230,14 @@ func GenerateContentSimple(ctx context.Context, systemPrompt, userPrompt string,
 const factCollisionSystemPrompt = `You are a logic engine. Compare New Fact to Existing Fact. If they mean the exact same thing or New Fact is a direct update to Existing Fact, return 'update'. If they contradict each other or refer to different specific details, return 'insert'. If Existing Fact is empty, return 'update'. Reply with ONLY 'update' or 'insert'.`
 
 // EvaluateFactCollision decides whether the new fact should overwrite the existing one (update) or be stored as a new node (insert).
-func EvaluateFactCollision(ctx context.Context, cfg *config.Config, newFact, existingFact string) (action string, err error) {
+func EvaluateFactCollision(ctx context.Context, env ToolEnv, cfg *config.Config, newFact, existingFact string) (action string, err error) {
 	ctx, span := StartSpan(ctx, "gemini.evaluate_fact_collision")
 	defer span.End()
 
 	userPrompt := fmt.Sprintf("New Fact:\n%s\n\nExisting Fact:\n%s",
 		utils.WrapAsUserData(newFact), utils.WrapAsUserData(existingFact))
 
-	text, err := GenerateContentSimple(ctx, factCollisionSystemPrompt, userPrompt, cfg, &GenConfig{
+	text, err := GenerateContentSimple(ctx, env, factCollisionSystemPrompt, userPrompt, cfg, &GenConfig{
 		MaxOutputTokens: 16,
 		ModelOverride:   cfg.GeminiModel,
 	})

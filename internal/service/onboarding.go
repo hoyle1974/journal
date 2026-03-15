@@ -28,7 +28,6 @@ const onboardingContext = "Initial setup — your answers will be stored as long
 // is the first time the system has started. Safe to call on every cold start.
 // Writes _system/onboarding only after all questions are committed (write-last for idempotency).
 func RunFirstRunOnboarding(ctx context.Context, app *infra.App) error {
-	ctx = infra.WithApp(ctx, app)
 	exists, err := system.OnboardingDocExists(ctx, app)
 	if err != nil {
 		return err
@@ -49,7 +48,7 @@ func RunFirstRunOnboarding(ctx context.Context, app *infra.App) error {
 			CreatedAt: now,
 		})
 	}
-	if err := memory.InsertPendingQuestions(ctx, questions); err != nil {
+	if err := memory.InsertPendingQuestions(ctx, app, questions); err != nil {
 		return fmt.Errorf("onboarding seed questions: %w", err)
 	}
 	infra.LoggerFrom(ctx).Info("first-run onboarding seeded", "count", len(questions))

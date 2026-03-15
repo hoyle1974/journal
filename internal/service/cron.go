@@ -36,11 +36,11 @@ func RunDreamer(ctx context.Context, app *infra.App) (*agent.DreamerResult, erro
 }
 
 // RunJanitor performs garbage collection on semantic memory via pkg/memory.
-func RunJanitor(ctx context.Context) (int, error) {
+func RunJanitor(ctx context.Context, app *infra.App) (int, error) {
 	ctx, span := infra.StartSpan(ctx, "cron.janitor")
 	defer span.End()
 
-	deleted, err := memory.EvictStaleNodes(ctx, JanitorWeightThreshold, JanitorStaleDays)
+	deleted, err := memory.EvictStaleNodes(ctx, app, JanitorWeightThreshold, JanitorStaleDays)
 	if err != nil {
 		span.RecordError(err)
 		return 0, err
@@ -51,11 +51,11 @@ func RunJanitor(ctx context.Context) (int, error) {
 }
 
 // RunPulseAudit identifies high-value nodes that have not been recalled in PulseStaleDays and creates a proactive signal for each via pkg/memory.
-func RunPulseAudit(ctx context.Context) (*PulseResult, error) {
+func RunPulseAudit(ctx context.Context, app *infra.App) (*PulseResult, error) {
 	ctx, span := infra.StartSpan(ctx, "cron.pulse_audit")
 	defer span.End()
 
-	r, err := memory.CreatePulseAuditSignals(ctx, PulseImportanceThreshold, PulseStaleDays)
+	r, err := memory.CreatePulseAuditSignals(ctx, app, PulseImportanceThreshold, PulseStaleDays)
 	if err != nil {
 		span.RecordError(err)
 		return nil, err

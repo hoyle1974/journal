@@ -6,8 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackstrohm/jot/internal/prompts"
+	"cloud.google.com/go/firestore"
 	"github.com/jackstrohm/jot/internal/infra"
+	"github.com/jackstrohm/jot/internal/prompts"
 	"github.com/jackstrohm/jot/pkg/journal"
 	"github.com/jackstrohm/jot/pkg/memory"
 	"github.com/jackstrohm/jot/pkg/task"
@@ -22,8 +23,9 @@ type ActiveContextItem struct {
 }
 
 // BuildSystemPrompt creates the system prompt with current date context and recent history.
+// env supplies Firestore for journal queries; pass from the caller (e.g. FOHEnv).
 // For which parts are static vs dynamic (context caching), see docs/context-caching-analysis.md.
-func BuildSystemPrompt(ctx context.Context) (string, error) {
+func BuildSystemPrompt(ctx context.Context, env infra.ToolEnv) (string, error) {
 	now := time.Now()
 	today := now.Format("2006-01-02")
 	currentTime := now.Format("15:04 MST")
@@ -36,7 +38,7 @@ func BuildSystemPrompt(ctx context.Context) (string, error) {
 
 	// 0. Root Identity (always inject user_profile so the model knows who it is serving)
 	identityBlock := ""
-	if node, _, err := memory.FindContextByName(ctx, "user_profile"); err == nil && node != nil && node.Content != "" {
+	if node, _, err := memory.FindContextByName(ctx, env, "user_profile"); err == nil && node != nil && node.Content != "" {
 		identityBlock = "\n---\n## ROOT IDENTITY (who you are serving)\n# Primary user and context. Use this as the authority for preferences and priorities.\n\n" + strings.TrimSpace(node.Content)
 	}
 	identityWrapped := identityBlock
@@ -45,7 +47,7 @@ func BuildSystemPrompt(ctx context.Context) (string, error) {
 	}
 
 	// 1. Active Contexts
-	nodes, metas, _ := memory.GetActiveContexts(ctx, 5)
+	nodes, metas, _ := memory.GetActiveContexts(ctx, env, 5)
 	activeContextItems := make([]ActiveContextItem, 0, len(nodes))
 	for i := range nodes {
 		if i >= len(metas) {
@@ -64,7 +66,14 @@ func BuildSystemPrompt(ctx context.Context) (string, error) {
 	}
 
 	// 2. Recent Conversation
-	queries, _ := journal.GetRecentQueries(ctx, 5)
+	var client *firestore.Client
+	if env != nil {
+		client, _ = env.Firestore(ctx)
+	}
+	var queries []journal.QueryLog
+	if client != nil {
+		queries, _ = journal.GetRecentQueries(ctx, client, 5)
+	}
 	recentConversation := formatConversationSection(queries)
 	recentConversationWrapped := recentConversation
 	if recentConversation != "" {
@@ -74,7 +83,7 @@ func BuildSystemPrompt(ctx context.Context) (string, error) {
 	// 3. Proactive Alerts
 	proactiveSignals := ""
 	proactiveSignalsWrapped := ""
-	if signals, err := memory.GetActiveSignals(ctx, 3); err == nil && signals != "" {
+	if signals, err := memory.GetActiveSignals(ctx, env, 3); err == nil && signals != "" {
 		proactiveSignals = formatAlertsSection(signals)
 		proactiveSignalsWrapped = utils.WrapAsUserData(proactiveSignals)
 	}
@@ -82,7 +91,10 @@ func BuildSystemPrompt(ctx context.Context) (string, error) {
 	sourceCodeBlock := prompts.SourceCodeBlock()
 
 	// 4. Knowledge Gaps
-	gapQueries, _ := journal.GetRecentGapQueries(ctx, 3)
+	var gapQueries []journal.QueryLog
+	if client != nil {
+		gapQueries, _ = journal.GetRecentGapQueries(ctx, client, 3)
+	}
 	knowledgeGapBlock := formatKnowledgeGapSection(gapQueries)
 	knowledgeGapBlockWrapped := knowledgeGapBlock
 	if knowledgeGapBlock != "" {
@@ -90,7 +102,7 @@ func BuildSystemPrompt(ctx context.Context) (string, error) {
 	}
 
 	// 5. Open Tasks (root)
-	roots, _ := task.GetOpenRootTasks(ctx, 15)
+	roots, _ := task.GetOpenRootTasks(ctx, env, 15)
 	openTodoBlock := formatTodoSection(roots)
 	openTodoBlockWrapped := openTodoBlock
 	if openTodoBlock != "" {
@@ -128,7 +140,7 @@ func BuildSystemPrompt(ctx context.Context) (string, error) {
 	}
 
 	// Map vs Manual: compressed manifest + 3 core tools (semantic_search, upsert_knowledge, discovery_search). Everything else via discovery_search(intent) → JIT schema injection.
-	if app := infra.GetApp(ctx); app != nil && app.Config() != nil && app.Config().UseCompactTools {
+	if env != nil && env.Config() != nil && env.Config().UseCompactTools {
 		prompt += "\n\n---\n## TOOLS (Map)\nWhen you lack information to answer (e.g. current time, calculation, definition), you MUST call discovery_search first — never respond \"I do not have access\" without calling it. You have: semantic_search, upsert_knowledge, discovery_search. For any other action or missing info, call discovery_search(intent=\"your_reasoning\") to get tool schemas; then invoke that tool with key/value lines only: TOOL: tool_name then ARGS: then one line per argument as param_name | value. No JSON, no markdown, no code fences. Do not output any other text when making a tool call."
 		infra.LoggerFrom(ctx).Debug("system prompt: Map vs Manual (core tools + discovery)", "reason", "JOT_USE_COMPACT_TOOLS=true")
 	}

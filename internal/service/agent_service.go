@@ -48,8 +48,7 @@ func NewAgentService(app *infra.App) *AgentService {
 // AddEntry adds an entry and enqueues processing.
 func (a *AgentService) AddEntry(ctx context.Context, content, source string, timestamp *string) (string, error) {
 	infra.LoggerFrom(ctx).Info("function call", "fn", "AddEntry", "source", source, "content_length", len(content))
-	ctx = infra.WithApp(ctx, a.app)
-	entryUUID, err := agent.AddEntryAndEnqueue(ctx, content, source, timestamp)
+	entryUUID, err := agent.AddEntryAndEnqueue(ctx, a.app, content, source, timestamp)
 	if err != nil {
 		infra.LoggerFrom(ctx).Error("function result", "fn", "AddEntry", "error", err.Error())
 		return "", err
@@ -90,7 +89,6 @@ func (a *AgentService) ProcessEntry(ctx context.Context, entryUUID, content, tim
 		}
 	}
 	infra.LoggerFrom(ctx).Info("function call", attrs...)
-	ctx = infra.WithApp(ctx, a.app)
 	breakdown, err := agent.ProcessEntry(ctx, a.app, entryUUID, content, timestamp, source)
 	if err != nil {
 		infra.LoggerFrom(ctx).Error("function result", "fn", "ProcessEntry", "uuid", entryUUID, "error", err.Error())
@@ -127,7 +125,7 @@ func (a *AgentService) RunDreamerWithProgress(ctx context.Context, runID string,
 // RunPulseAudit runs the pulse audit and returns the API-shaped result.
 func (a *AgentService) RunPulseAudit(ctx context.Context) (*api.PulseResult, error) {
 	infra.LoggerFrom(ctx).Info("function call", "fn", "RunPulseAudit")
-	r, err := RunPulseAudit(ctx)
+	r, err := RunPulseAudit(ctx, a.app)
 	if err != nil || r == nil {
 		if err != nil {
 			infra.LoggerFrom(ctx).Warn("function result", "fn", "RunPulseAudit", "error", err.Error())
@@ -143,7 +141,7 @@ func (a *AgentService) RunPulseAudit(ctx context.Context) (*api.PulseResult, err
 // RunJanitor runs the janitor (garbage collection).
 func (a *AgentService) RunJanitor(ctx context.Context) (int, error) {
 	infra.LoggerFrom(ctx).Info("function call", "fn", "RunJanitor")
-	deleted, err := RunJanitor(ctx)
+	deleted, err := RunJanitor(ctx, a.app)
 	if err != nil {
 		infra.LoggerFrom(ctx).Error("function result", "fn", "RunJanitor", "error", err.Error())
 		return 0, err
@@ -155,8 +153,7 @@ func (a *AgentService) RunJanitor(ctx context.Context) (int, error) {
 // RunWeeklyRollup runs the weekly rollup.
 func (a *AgentService) RunWeeklyRollup(ctx context.Context) (int, error) {
 	infra.LoggerFrom(ctx).Info("function call", "fn", "RunWeeklyRollup")
-	ctx = infra.WithApp(ctx, a.app)
-	n, err := RunWeeklyRollup(ctx)
+	n, err := RunWeeklyRollup(ctx, a.app)
 	if err != nil {
 		infra.LoggerFrom(ctx).Error("function result", "fn", "RunWeeklyRollup", "error", err.Error())
 		return 0, err
@@ -168,8 +165,7 @@ func (a *AgentService) RunWeeklyRollup(ctx context.Context) (int, error) {
 // RunMonthlyRollup runs the monthly rollup.
 func (a *AgentService) RunMonthlyRollup(ctx context.Context) (int, error) {
 	infra.LoggerFrom(ctx).Info("function call", "fn", "RunMonthlyRollup")
-	ctx = infra.WithApp(ctx, a.app)
-	n, err := RunMonthlyRollup(ctx)
+	n, err := RunMonthlyRollup(ctx, a.app)
 	if err != nil {
 		infra.LoggerFrom(ctx).Error("function result", "fn", "RunMonthlyRollup", "error", err.Error())
 		return 0, err

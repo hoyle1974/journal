@@ -19,12 +19,21 @@ const (
 )
 
 // PromoteIncubatingClusters looks at recent journal entries over the last N days, counts distinct days per theme (tags and category), and creates or touches a context for each theme that appears on at least MinDistinctDays. Call from the Dreamer after consolidation.
-func PromoteIncubatingClusters(ctx context.Context) (promoted int, err error) {
+// env supplies Firestore and Config; pass from the caller (e.g. ToolEnv).
+func PromoteIncubatingClusters(ctx context.Context, env infra.ToolEnv) (promoted int, err error) {
 	ctx, span := infra.StartSpan(ctx, "context.promote_incubating")
 	defer span.End()
 
+	if env == nil {
+		return 0, fmt.Errorf("env required")
+	}
 	startDate, endDate := journalDateRange(IncubationLastNDays)
-	entries, err := journal.GetEntriesWithAnalysisByDateRange(ctx, startDate, endDate, 200)
+	client, err := env.Firestore(ctx)
+	if err != nil {
+		span.RecordError(err)
+		return 0, err
+	}
+	entries, err := journal.GetEntriesWithAnalysisByDateRange(ctx, client, startDate, endDate, 200)
 	if err != nil {
 		span.RecordError(err)
 		return 0, fmt.Errorf("get entries for incubation: %w", err)
@@ -54,14 +63,14 @@ func PromoteIncubatingClusters(ctx context.Context) (promoted int, err error) {
 		if len(days) < IncubationMinDistinctDays {
 			continue
 		}
-		existing, _, err := FindContextByName(ctx, themeName)
+		existing, _, err := FindContextByName(ctx, env, themeName)
 		if err != nil {
 			infra.LoggerFrom(ctx).Warn("incubation find context failed", "theme", themeName, "error", err)
 			continue
 		}
 		if existing != nil {
 			// Touch to boost relevance so it stays in active contexts.
-			if touchErr := TouchContext(ctx, existing.UUID, nil, 0.05); touchErr != nil {
+			if touchErr := TouchContext(ctx, env, existing.UUID, nil, 0.05); touchErr != nil {
 				infra.LoggerFrom(ctx).Debug("incubation touch failed", "theme", themeName, "error", touchErr)
 			} else {
 				promoted++
@@ -71,7 +80,7 @@ func PromoteIncubatingClusters(ctx context.Context) (promoted int, err error) {
 		}
 		// Create new context with a short placeholder; it will be refined as more entries link.
 		content := fmt.Sprintf("Recurring theme from journal (appeared %d days in the last %d days): %s.", len(days), IncubationLastNDays, themeName)
-		if _, createErr := CreateContext(ctx, themeName, content, "auto", nil, nil); createErr != nil {
+		if _, createErr := CreateContext(ctx, env, themeName, content, "auto", nil, nil); createErr != nil {
 			infra.LoggerFrom(ctx).Warn("incubation create context failed", "theme", themeName, "error", createErr)
 			continue
 		}

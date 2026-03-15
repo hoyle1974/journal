@@ -2,14 +2,18 @@ package memory
 
 import (
 	"context"
+	"fmt"
 
 	"cloud.google.com/go/firestore"
 	"github.com/jackstrohm/jot/internal/infra"
 )
 
 // GetWeeklySummaryNodesInRange returns knowledge nodes of type weekly_summary whose timestamp falls in [startDate, endDate] (YYYY-MM-DD).
-func GetWeeklySummaryNodesInRange(ctx context.Context, startDate, endDate string, limit int) ([]KnowledgeNode, error) {
-	client, err := infra.GetFirestoreClient(ctx)
+func GetWeeklySummaryNodesInRange(ctx context.Context, env infra.ToolEnv, startDate, endDate string, limit int) ([]KnowledgeNode, error) {
+	if env == nil {
+		return nil, fmt.Errorf("env required")
+	}
+	client, err := env.Firestore(ctx)
 	if err != nil {
 		return nil, err
 	}

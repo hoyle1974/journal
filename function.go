@@ -92,8 +92,8 @@ func ensureServer() error {
 		if err := service.RunFirstRunOnboarding(context.Background(), app); err != nil {
 			log.Printf("first-run onboarding skipped: %v", err)
 		}
-		journalSvc := service.NewJournalService()
-		memorySvc := service.NewMemoryService()
+		journalSvc := service.NewJournalService(app, defaultConfig)
+		memorySvc := service.NewMemoryService(app)
 		agentSvc := service.NewAgentService(app)
 		smsSvc := service.NewSMSService(getConfig)
 		systemSvc := service.NewSystemService(app)

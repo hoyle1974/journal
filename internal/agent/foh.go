@@ -21,12 +21,13 @@ const (
 	ToolRepeatBackOffAt = 3
 )
 
-// FOHEnv is the interface the FOH (query agent) needs: ToolEnv plus context attachment and tool pool.
+// FOHEnv is the interface the FOH (query agent) needs: ToolEnv plus context attachment, tool pool, and access to *App for entry/save-query.
 // Implemented by *infra.App. Pass explicitly so the agent does not depend on the concrete type.
 type FOHEnv interface {
 	infra.ToolEnv
 	WithContext(ctx context.Context) context.Context
 	SubmitToToolPool(task func()) error
+	App() *infra.App
 }
 
 type entryUUIDKey struct{}
@@ -98,7 +99,7 @@ func RunQueryWithDebug(ctx context.Context, app FOHEnv, question, source string,
 	}
 
 	infra.EntriesTotal.Inc()
-	entryUUID, err := AddEntryAndEnqueue(ctx, question, source, nil)
+	entryUUID, err := AddEntryAndEnqueue(ctx, app.App(), question, source, nil)
 	if err != nil {
 		infra.LoggerFrom(ctx).Error("failed to log user input", "error", err)
 		infra.ErrorsTotal.Inc()
@@ -115,7 +116,7 @@ func RunQueryWithDebug(ctx context.Context, app FOHEnv, question, source string,
 
 	logDebug("[start] Question: %s", question)
 
-	systemPrompt, err := BuildSystemPrompt(ctx)
+	systemPrompt, err := BuildSystemPrompt(ctx, app)
 	if err != nil {
 		infra.ErrorsTotal.Inc()
 		span.RecordError(err)
@@ -136,7 +137,7 @@ func RunQueryWithDebug(ctx context.Context, app FOHEnv, question, source string,
 	} else {
 		toolDefs = tools.GetDefinitions()
 	}
-	session, err := infra.NewChatSession(ctx, systemPrompt, toolDefs)
+	session, err := infra.NewChatSession(ctx, app.App(), systemPrompt, toolDefs)
 	if err != nil {
 		infra.ErrorsTotal.Inc()
 		span.RecordError(err)
@@ -289,7 +290,7 @@ func RunQueryWithDebug(ctx context.Context, app FOHEnv, question, source string,
 				}
 
 				if !strings.HasPrefix(answer, "Error:") {
-					if err := EnqueueSaveQuery(ctx, question, answer, source, knowledgeGapDetected); err != nil {
+					if err := EnqueueSaveQuery(ctx, app.App(), question, answer, source, knowledgeGapDetected); err != nil {
 						infra.LoggerFrom(ctx).Warn("failed to enqueue save-query task", "error", err)
 					}
 				}
@@ -549,7 +550,7 @@ func RunQueryWithDebug(ctx context.Context, app FOHEnv, question, source string,
 			}
 		}
 		if !strings.HasPrefix(answer, "Error:") {
-			_ = EnqueueSaveQuery(ctx, question, answer, source, knowledgeGapDetected)
+			_ = EnqueueSaveQuery(ctx, app.App(), question, answer, source, knowledgeGapDetected)
 		}
 		forcedToolNames := make([]string, 0, len(toolCalls))
 		for _, tc := range toolCalls {
@@ -651,7 +652,7 @@ func runSynthesisPass(ctx context.Context, app FOHEnv, question, candidateAnswer
 		utils.WrapAsUserData(utils.SanitizePrompt(question)),
 		utils.WrapAsUserData(utils.SanitizePrompt(candidateAnswer)),
 		utils.WrapAsUserData(utils.SanitizePrompt(truncated)))
-	refined, err := infra.GenerateContentSimple(ctx, prompts.SynthesisPass()+prompts.DataSafety(), userPrompt, app.Config(), &infra.GenConfig{
+	refined, err := infra.GenerateContentSimple(ctx, app, prompts.SynthesisPass()+prompts.DataSafety(), userPrompt, app.Config(), &infra.GenConfig{
 		MaxOutputTokens: 1024,
 		ModelOverride:   app.Config().GeminiModel,
 	})

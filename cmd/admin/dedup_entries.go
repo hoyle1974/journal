@@ -98,7 +98,7 @@ func runDedupEntries(ctx context.Context, app *infra.App, args []string) {
 			end = len(toDelete)
 		}
 		batch := toDelete[i:end]
-		if err := journal.DeleteEntries(ctx, batch); err != nil {
+		if err := journal.DeleteEntries(ctx, client, batch); err != nil {
 			log.Fatalf("DeleteEntries: %v", err)
 		}
 		log.Printf("Deleted %d entries (batch %d)", len(batch), i/batchLimit+1)

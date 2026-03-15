@@ -54,7 +54,7 @@ func CreateAndSavePlan(ctx context.Context, env infra.ToolEnv, goal string) (str
 		return "", err
 	}
 
-	parentID, err := memory.UpsertKnowledge(ctx, goal, "goal", `{"status": "planning"}`, nil)
+	parentID, err := memory.UpsertKnowledge(ctx, env, goal, "goal", `{"status": "planning"}`, nil)
 	if err != nil {
 		span.RecordError(err)
 		return "", err
@@ -71,7 +71,7 @@ func CreateAndSavePlan(ctx context.Context, env infra.ToolEnv, goal string) (str
 			"status":       "pending",
 		}
 		metaBytes, _ := json.Marshal(metadataMeta)
-		phaseID, _ := memory.UpsertKnowledge(ctx, fmt.Sprintf("%s: %s", phase.Title, phase.Description), "task", string(metaBytes), nil)
+		phaseID, _ := memory.UpsertKnowledge(ctx, env, fmt.Sprintf("%s: %s", phase.Title, phase.Description), "task", string(metaBytes), nil)
 		resultLines = append(resultLines, fmt.Sprintf("%d. %s (Task ID: %s)", i+1, phase.Title, phaseID))
 	}
 

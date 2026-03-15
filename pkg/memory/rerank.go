@@ -13,7 +13,8 @@ import (
 const rerankSystemPrompt = "You are a re-ranker. Given a query and a numbered list of text items, output the 1-based item numbers that best answer the query, ordered by relevance. Only include relevant items. Output structured key/value lines only. No JSON, no markdown.\n\nindices:\n<number>\n(one index per line, e.g. 3 then 1 then 5)"
 
 // RerankNodes uses the LLM to re-rank knowledge nodes by relevance to the query.
-func RerankNodes(ctx context.Context, query string, nodes []KnowledgeNode, topN int) ([]KnowledgeNode, error) {
+// env supplies Config and Dispatch; pass from the caller (e.g. ToolEnv).
+func RerankNodes(ctx context.Context, env infra.ToolEnv, query string, nodes []KnowledgeNode, topN int) ([]KnowledgeNode, error) {
 	if len(nodes) == 0 {
 		return nil, nil
 	}
@@ -31,12 +32,12 @@ func RerankNodes(ctx context.Context, query string, nodes []KnowledgeNode, topN 
 	}
 	userPrompt := fmt.Sprintf("Query: %s\n\nNumbered items:\n%s\nOutput the 1-based indices that best answer the query, one per line under 'indices:'.", query, sb.String())
 
-	cfg := getConfigFromCtx(ctx)
-	if cfg == nil {
-		infra.LoggerFrom(ctx).Warn("rerank: no app config, using first topN")
+	if env == nil || env.Config() == nil {
+		infra.LoggerFrom(ctx).Warn("rerank: no env config, using first topN")
 		return firstN(nodes, topN), nil
 	}
-	text, err := infra.GenerateContentSimple(ctx, rerankSystemPrompt, userPrompt, cfg, &infra.GenConfig{
+	cfg := env.Config()
+	text, err := infra.GenerateContentSimple(ctx, env, rerankSystemPrompt, userPrompt, cfg, &infra.GenConfig{
 		MaxOutputTokens: 512,
 	})
 	if err != nil {

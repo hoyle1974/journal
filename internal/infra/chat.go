@@ -63,14 +63,13 @@ type ChatSession struct {
 	lastLLMCorrelationID  string // set after each SendMessage for flow tracing
 }
 
-// NewChatSession creates a new chat session with tools enabled.
-func NewChatSession(ctx context.Context, systemPrompt string, tools []*genai.FunctionDeclaration) (*ChatSession, error) {
+// NewChatSession creates a new chat session with tools enabled. app is passed explicitly by the caller.
+func NewChatSession(ctx context.Context, app *App, systemPrompt string, tools []*genai.FunctionDeclaration) (*ChatSession, error) {
 	ctx, span := StartSpan(ctx, "gemini.new_chat_session")
 	defer span.End()
 
-	app := GetApp(ctx)
 	if app == nil {
-		return nil, fmt.Errorf("no app in context")
+		return nil, fmt.Errorf("app required")
 	}
 	client, err := app.Gemini(ctx)
 	if err != nil {

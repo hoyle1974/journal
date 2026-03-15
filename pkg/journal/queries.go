@@ -24,10 +24,9 @@ type QueryLog struct {
 }
 
 // SaveQuery saves a query and its response. If isGap is true, the query is recorded as a knowledge gap.
-func SaveQuery(ctx context.Context, question, answer, source string, isGap bool) (string, error) {
-	client, err := infra.GetFirestoreClient(ctx)
-	if err != nil {
-		return "", err
+func SaveQuery(ctx context.Context, client *firestore.Client, question, answer, source string, isGap bool) (string, error) {
+	if client == nil {
+		return "", fmt.Errorf("firestore client is required")
 	}
 	queryUUID := infra.GenerateUUID()
 	timestamp := time.Now().Format(time.RFC3339)
@@ -41,7 +40,7 @@ func SaveQuery(ctx context.Context, question, answer, source string, isGap bool)
 	if isGap && !strings.Contains(strings.ToLower(answer), "looked for this but found nothing") {
 		doc["answer"] = answer + "\n\n(I looked for this but found nothing.)"
 	}
-	_, err = client.Collection(QueriesCollection).Doc(queryUUID).Set(ctx, doc)
+	_, err := client.Collection(QueriesCollection).Doc(queryUUID).Set(ctx, doc)
 	if err != nil {
 		return "", err
 	}
@@ -49,10 +48,9 @@ func SaveQuery(ctx context.Context, question, answer, source string, isGap bool)
 }
 
 // GetRecentQueries returns the most recent queries.
-func GetRecentQueries(ctx context.Context, limit int) ([]QueryLog, error) {
-	client, err := infra.GetFirestoreClient(ctx)
-	if err != nil {
-		return nil, err
+func GetRecentQueries(ctx context.Context, client *firestore.Client, limit int) ([]QueryLog, error) {
+	if client == nil {
+		return nil, fmt.Errorf("firestore client is required")
 	}
 	query := client.Collection(QueriesCollection).
 		OrderBy("timestamp", firestore.Desc).
@@ -68,10 +66,9 @@ func GetRecentQueries(ctx context.Context, limit int) ([]QueryLog, error) {
 }
 
 // SearchQueries searches past queries by keywords.
-func SearchQueries(ctx context.Context, keywords string, limit int) ([]QueryLog, error) {
-	client, err := infra.GetFirestoreClient(ctx)
-	if err != nil {
-		return nil, err
+func SearchQueries(ctx context.Context, client *firestore.Client, keywords string, limit int) ([]QueryLog, error) {
+	if client == nil {
+		return nil, fmt.Errorf("firestore client is required")
 	}
 	keywordsLower := strings.Fields(strings.ToLower(keywords))
 	query := client.Collection(QueriesCollection).
@@ -101,10 +98,9 @@ func SearchQueries(ctx context.Context, keywords string, limit int) ([]QueryLog,
 }
 
 // GetRecentGapQueries returns the most recent queries marked as knowledge gaps.
-func GetRecentGapQueries(ctx context.Context, limit int) ([]QueryLog, error) {
-	client, err := infra.GetFirestoreClient(ctx)
-	if err != nil {
-		return nil, err
+func GetRecentGapQueries(ctx context.Context, client *firestore.Client, limit int) ([]QueryLog, error) {
+	if client == nil {
+		return nil, fmt.Errorf("firestore client is required")
 	}
 	query := client.Collection(QueriesCollection).
 		Where("is_gap", "==", true).
@@ -125,10 +121,9 @@ func GetRecentGapQueries(ctx context.Context, limit int) ([]QueryLog, error) {
 }
 
 // GetQueriesByDateRange returns queries within a date range.
-func GetQueriesByDateRange(ctx context.Context, startDate, endDate string, limit int) ([]QueryLog, error) {
-	client, err := infra.GetFirestoreClient(ctx)
-	if err != nil {
-		return nil, err
+func GetQueriesByDateRange(ctx context.Context, client *firestore.Client, startDate, endDate string, limit int) ([]QueryLog, error) {
+	if client == nil {
+		return nil, fmt.Errorf("firestore client is required")
 	}
 	if len(startDate) == 10 {
 		startDate = startDate + "T00:00:00"

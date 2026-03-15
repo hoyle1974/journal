@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"cloud.google.com/go/firestore"
 	"github.com/jackstrohm/jot/pkg/journal"
 	"github.com/jackstrohm/jot/pkg/memory"
 	"github.com/jackstrohm/jot/pkg/utils"
@@ -20,7 +21,8 @@ const maxSourceDatesPerNode = 5
 const maxEntryIDsToResolve = 25
 
 // formatKnowledgeNodes formats knowledge nodes for LLM context, appending source dates when JournalEntryIDs are present.
-func formatKnowledgeNodes(ctx context.Context, nodes []memory.KnowledgeNode) string {
+// client is used for journal.GetEntryDates; pass from env.Firestore(ctx) at the call site.
+func formatKnowledgeNodes(ctx context.Context, client *firestore.Client, nodes []memory.KnowledgeNode) string {
 	// Collect unique entry IDs for batch date resolution
 	seenIDs := make(map[string]bool)
 	var allIDs []string
@@ -38,7 +40,10 @@ func formatKnowledgeNodes(ctx context.Context, nodes []memory.KnowledgeNode) str
 			break
 		}
 	}
-	dateMap, _ := journal.GetEntryDates(ctx, allIDs)
+	var dateMap map[string]string
+	if client != nil {
+		dateMap, _ = journal.GetEntryDates(ctx, client, allIDs)
+	}
 
 	var lines []string
 	for i, n := range nodes {

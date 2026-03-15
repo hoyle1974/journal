@@ -80,9 +80,8 @@ func findRecentDuplicateTask(ctx context.Context, client *firestore.Client, entr
 }
 
 // CreateTask creates a task in Firestore, generates an embedding for Content+SystemPrompt, and returns the task UUID.
-// When the task is linked to a single journal entry, checks for a recently created task with the same content
-// for that entry (idempotency window) and returns the existing UUID to avoid duplicates from concurrent agency + LLM creation.
-func CreateTask(ctx context.Context, t *Task) (string, error) {
+// env supplies Firestore and Config; pass from the caller (e.g. ToolEnv).
+func CreateTask(ctx context.Context, env infra.ToolEnv, t *Task) (string, error) {
 	ctx, span := infra.StartSpan(ctx, "task.create")
 	defer span.End()
 
@@ -90,15 +89,13 @@ func CreateTask(ctx context.Context, t *Task) (string, error) {
 		return "", fmt.Errorf("task content is required")
 	}
 
-	client, err := infra.GetFirestoreClient(ctx)
+	if env == nil || env.Config() == nil {
+		return "", fmt.Errorf("env and config required")
+	}
+	client, err := env.Firestore(ctx)
 	if err != nil {
 		span.RecordError(err)
 		return "", err
-	}
-
-	app := infra.GetApp(ctx)
-	if app == nil || app.Config() == nil {
-		return "", fmt.Errorf("no app in context")
 	}
 
 	// Idempotency: if this task is linked to exactly one entry, avoid creating a duplicate when agency and LLM both create for the same content.
@@ -115,7 +112,7 @@ func CreateTask(ctx context.Context, t *Task) (string, error) {
 		}
 	}
 
-	projectID := app.Config().GoogleCloudProject
+	projectID := env.Config().GoogleCloudProject
 
 	textToEmbed := t.Content
 	if t.SystemPrompt != "" {
@@ -162,12 +159,15 @@ func CreateTask(ctx context.Context, t *Task) (string, error) {
 	return uuid, nil
 }
 
-// GetTask fetches a task by UUID.
-func GetTask(ctx context.Context, uuid string) (*Task, error) {
+// GetTask fetches a task by UUID. env supplies Firestore; pass from the caller (e.g. ToolEnv).
+func GetTask(ctx context.Context, env infra.ToolEnv, uuid string) (*Task, error) {
 	ctx, span := infra.StartSpan(ctx, "task.get")
 	defer span.End()
 
-	client, err := infra.GetFirestoreClient(ctx)
+	if env == nil {
+		return nil, fmt.Errorf("env required")
+	}
+	client, err := env.Firestore(ctx)
 	if err != nil {
 		span.RecordError(err)
 		return nil, err
@@ -190,37 +190,42 @@ func GetTask(ctx context.Context, uuid string) (*Task, error) {
 
 // UpdateTaskStatus updates the task's status. When status is completed or abandoned, it requires reflectionReason,
 // calls Gemini to generate a 1-2 sentence summary, appends a journal entry with that summary, and appends the entry UUID to the task's journal_entry_ids.
-func UpdateTaskStatus(ctx context.Context, uuid, newStatus, reflectionReason string) error {
+// env supplies Firestore, Config, and Dispatch; pass from the caller (e.g. ToolEnv).
+func UpdateTaskStatus(ctx context.Context, env infra.ToolEnv, uuid, newStatus, reflectionReason string) error {
 	ctx, span := infra.StartSpan(ctx, "task.update_status")
 	defer span.End()
 
 	newStatus = normalizeStatus(newStatus)
 	if newStatus != StatusCompleted && newStatus != StatusAbandoned {
 		// No reflection required; just update status.
-		return updateTaskStatusOnly(ctx, uuid, newStatus)
+		return updateTaskStatusOnly(ctx, env, uuid, newStatus)
 	}
 
 	if reflectionReason == "" {
 		return fmt.Errorf("reasoning is required when completing or abandoning a task")
 	}
 
-	existing, err := GetTask(ctx, uuid)
+	existing, err := GetTask(ctx, env, uuid)
 	if err != nil {
 		span.RecordError(err)
 		return err
 	}
 
-	app := infra.GetApp(ctx)
-	if app == nil || app.Config() == nil {
-		return fmt.Errorf("no app in context")
+	if env == nil || env.Config() == nil {
+		return fmt.Errorf("env and config required")
 	}
-	cfg := app.Config()
+	cfg := env.Config()
+	client, err := env.Firestore(ctx)
+	if err != nil {
+		span.RecordError(err)
+		return err
+	}
 
 	userPrompt := fmt.Sprintf("Task: %s\n\nReason: %s",
 		utils.WrapAsUserData(utils.SanitizePrompt(existing.Content)),
 		utils.WrapAsUserData(utils.SanitizePrompt(reflectionReason)))
 
-	summary, err := infra.GenerateContentSimple(ctx, reflectionSystemPrompt, userPrompt, cfg, &infra.GenConfig{
+	summary, err := infra.GenerateContentSimple(ctx, env, reflectionSystemPrompt, userPrompt, cfg, &infra.GenConfig{
 		MaxOutputTokens: 128,
 	})
 	if err != nil {
@@ -234,7 +239,7 @@ func UpdateTaskStatus(ctx context.Context, uuid, newStatus, reflectionReason str
 		summary = reflectionReason
 	}
 
-	entryUUID, err := journal.AddEntry(ctx, summary, "system:task_engine", nil)
+	entryUUID, err := journal.AddEntry(ctx, client, summary, "system:task_engine", nil)
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("add reflection entry: %w", err)
@@ -242,12 +247,6 @@ func UpdateTaskStatus(ctx context.Context, uuid, newStatus, reflectionReason str
 
 	journalIDs := append([]string{}, existing.JournalEntryIDs...)
 	journalIDs = append(journalIDs, entryUUID)
-
-	client, err := infra.GetFirestoreClient(ctx)
-	if err != nil {
-		span.RecordError(err)
-		return err
-	}
 
 	_, err = client.Collection(TasksCollection).Doc(uuid).Update(ctx, []firestore.Update{
 		{Path: "status", Value: newStatus},
@@ -286,8 +285,11 @@ func applyAddRemove(current, addIDs, removeIDs []string) []string {
 	return out
 }
 
-func updateTaskStatusOnly(ctx context.Context, uuid, newStatus string) error {
-	client, err := infra.GetFirestoreClient(ctx)
+func updateTaskStatusOnly(ctx context.Context, env infra.ToolEnv, uuid, newStatus string) error {
+	if env == nil {
+		return fmt.Errorf("env required")
+	}
+	client, err := env.Firestore(ctx)
 	if err != nil {
 		return err
 	}
@@ -312,7 +314,8 @@ type UpdateTaskOpts struct {
 }
 
 // UpdateTask updates the given task with any non-nil opts. Recomputes embedding if Content or SystemPrompt changed.
-func UpdateTask(ctx context.Context, uuid string, opts *UpdateTaskOpts) error {
+// env supplies Firestore and Config; pass from the caller (e.g. ToolEnv).
+func UpdateTask(ctx context.Context, env infra.ToolEnv, uuid string, opts *UpdateTaskOpts) error {
 	ctx, span := infra.StartSpan(ctx, "task.update")
 	defer span.End()
 
@@ -320,7 +323,10 @@ func UpdateTask(ctx context.Context, uuid string, opts *UpdateTaskOpts) error {
 		return nil
 	}
 
-	existing, err := GetTask(ctx, uuid)
+	if env == nil {
+		return fmt.Errorf("env required")
+	}
+	existing, err := GetTask(ctx, env, uuid)
 	if err != nil {
 		span.RecordError(err)
 		return err
@@ -362,15 +368,15 @@ func UpdateTask(ctx context.Context, uuid string, opts *UpdateTaskOpts) error {
 
 	// Recompute embedding if content or system_prompt changed (for semantic search).
 	if opts.Content != nil || opts.SystemPrompt != nil {
-		app := infra.GetApp(ctx)
-		if app == nil || app.Config() == nil {
-			return fmt.Errorf("no app in context")
+		cfg := env.Config()
+		if cfg == nil {
+			return fmt.Errorf("env config required")
 		}
 		textToEmbed := content
 		if systemPrompt != "" {
 			textToEmbed = content + " " + systemPrompt
 		}
-		embedding, err := infra.GenerateEmbedding(ctx, app.Config().GoogleCloudProject, textToEmbed, infra.EmbedTaskRetrievalDocument)
+		embedding, err := infra.GenerateEmbedding(ctx, cfg.GoogleCloudProject, textToEmbed, infra.EmbedTaskRetrievalDocument)
 		if err != nil {
 			span.RecordError(err)
 			return fmt.Errorf("generate embedding: %w", err)
@@ -378,7 +384,7 @@ func UpdateTask(ctx context.Context, uuid string, opts *UpdateTaskOpts) error {
 		updates = append(updates, firestore.Update{Path: "embedding", Value: firestore.Vector32(embedding)})
 	}
 
-	client, err := infra.GetFirestoreClient(ctx)
+	client, err := env.Firestore(ctx)
 	if err != nil {
 		span.RecordError(err)
 		return err
@@ -394,7 +400,8 @@ func UpdateTask(ctx context.Context, uuid string, opts *UpdateTaskOpts) error {
 }
 
 // GetOpenRootTasks returns root-level tasks (no parent) that are pending or active, newest first.
-func GetOpenRootTasks(ctx context.Context, limit int) ([]Task, error) {
+// env supplies Firestore; pass from the caller (e.g. ToolEnv).
+func GetOpenRootTasks(ctx context.Context, env infra.ToolEnv, limit int) ([]Task, error) {
 	ctx, span := infra.StartSpan(ctx, "task.get_open_roots")
 	defer span.End()
 
@@ -402,7 +409,10 @@ func GetOpenRootTasks(ctx context.Context, limit int) ([]Task, error) {
 		limit = 25
 	}
 
-	client, err := infra.GetFirestoreClient(ctx)
+	if env == nil {
+		return nil, fmt.Errorf("env required")
+	}
+	client, err := env.Firestore(ctx)
 	if err != nil {
 		span.RecordError(err)
 		return nil, err
@@ -446,11 +456,15 @@ func GetOpenRootTasks(ctx context.Context, limit int) ([]Task, error) {
 }
 
 // QuerySimilarTasks performs a KNN vector search on the tasks collection.
-func QuerySimilarTasks(ctx context.Context, queryVector []float32, limit int) ([]Task, error) {
+// env supplies Firestore; pass from the caller (e.g. ToolEnv).
+func QuerySimilarTasks(ctx context.Context, env infra.ToolEnv, queryVector []float32, limit int) ([]Task, error) {
 	ctx, span := infra.StartSpan(ctx, "task.query_similar")
 	defer span.End()
 
-	client, err := infra.GetFirestoreClient(ctx)
+	if env == nil {
+		return nil, fmt.Errorf("env required")
+	}
+	client, err := env.Firestore(ctx)
 	if err != nil {
 		span.RecordError(err)
 		return nil, err

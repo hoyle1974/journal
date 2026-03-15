@@ -23,22 +23,21 @@ type gapDetectItem struct {
 }
 
 // RunGapDetection compares the last 24h journal to relevant knowledge and appends any gaps/contradictions to PendingQuestions.
-func RunGapDetection(ctx context.Context, journalContext string, entryUUIDs []string) error {
+func RunGapDetection(ctx context.Context, app *infra.App, journalContext string, entryUUIDs []string) error {
 	ctx, span := infra.StartSpan(ctx, "cron.gap_detection")
 	defer span.End()
 
 	if len(journalContext) < 100 {
 		return nil
 	}
-	app := infra.GetApp(ctx)
 	if app == nil || app.Config() == nil {
-		return fmt.Errorf("no app config for gap detection")
+		return fmt.Errorf("app config required for gap detection")
 	}
 	vec, err := infra.GenerateEmbedding(ctx, app.Config().GoogleCloudProject, journalContext, infra.EmbedTaskRetrievalDocument)
 	if err != nil {
 		return fmt.Errorf("gap detection embedding: %w", err)
 	}
-	nodes, err := memory.QuerySimilarNodes(ctx, vec, 15)
+	nodes, err := memory.QuerySimilarNodes(ctx, app, vec, 15)
 	if err != nil {
 		return fmt.Errorf("gap detection query nodes: %w", err)
 	}
@@ -107,11 +106,11 @@ func RunGapDetection(ctx context.Context, journalContext string, entryUUIDs []st
 			SourceEntryIDs: entryUUIDs,
 		})
 	}
-	return memory.InsertPendingQuestions(ctx, questions)
+	return memory.InsertPendingQuestions(ctx, app, questions)
 }
 
 // RunProfileSynthesis merges new persona facts into the permanent user_profile context node.
-func RunProfileSynthesis(ctx context.Context, personaFacts []string) error {
+func RunProfileSynthesis(ctx context.Context, app *infra.App, personaFacts []string) error {
 	ctx, span := infra.StartSpan(ctx, "cron.profile_synthesis")
 	defer span.End()
 
@@ -119,7 +118,7 @@ func RunProfileSynthesis(ctx context.Context, personaFacts []string) error {
 		return nil
 	}
 
-	node, _, err := memory.FindContextByName(ctx, "user_profile")
+	node, _, err := memory.FindContextByName(ctx, app, "user_profile")
 	if err != nil || node == nil {
 		return fmt.Errorf("user_profile node not found: %w", err)
 	}
@@ -127,16 +126,15 @@ func RunProfileSynthesis(ctx context.Context, personaFacts []string) error {
 	userPrompt := fmt.Sprintf("Current Profile:\n%s\n\nNew Identity Markers:\n%s",
 		utils.WrapAsUserData(node.Content), utils.WrapAsUserData(strings.Join(personaFacts, "\n")))
 
-	app := infra.GetApp(ctx)
 	if app == nil || app.Config() == nil {
-		return fmt.Errorf("no app config for profile synthesis")
+		return fmt.Errorf("app config required for profile synthesis")
 	}
-	newProfile, err := infra.GenerateContentSimple(ctx, prompts.IdentityArchitect(), userPrompt, app.Config(), &infra.GenConfig{MaxOutputTokens: 1024, ModelOverride: app.Config().DreamerModel})
+	newProfile, err := infra.GenerateContentSimple(ctx, app, prompts.IdentityArchitect(), userPrompt, app.Config(), &infra.GenConfig{MaxOutputTokens: 1024, ModelOverride: app.Config().DreamerModel})
 	if err != nil {
 		return err
 	}
 
-	client, err := infra.GetFirestoreClient(ctx)
+	client, err := app.Firestore(ctx)
 	if err != nil {
 		return err
 	}
@@ -154,11 +152,18 @@ func RunProfileSynthesis(ctx context.Context, personaFacts []string) error {
 }
 
 // RunEvolutionSynthesis runs the Cognitive Engineer on recent queries (and journal summary), writes the result to the system_evolution context, and returns the audit for use by the Dream Narrative.
-func RunEvolutionSynthesis(ctx context.Context, journalSummary string) (*EvolutionAuditOutput, error) {
+func RunEvolutionSynthesis(ctx context.Context, env infra.ToolEnv, journalSummary string) (*EvolutionAuditOutput, error) {
 	ctx, span := infra.StartSpan(ctx, "cron.evolution_synthesis")
 	defer span.End()
 
-	queries, err := journal.GetRecentQueries(ctx, 50)
+	if env == nil {
+		return nil, fmt.Errorf("env required")
+	}
+	client, err := env.Firestore(ctx)
+	if err != nil {
+		return nil, err
+	}
+	queries, err := journal.GetRecentQueries(ctx, client, 50)
 	if err != nil {
 		return nil, fmt.Errorf("get recent queries: %w", err)
 	}
@@ -177,11 +182,11 @@ func RunEvolutionSynthesis(ctx context.Context, journalSummary string) (*Evoluti
 
 	// Big Picture: pass user persona and active contexts so the Auditor can reason about mission-level gaps.
 	personaContent := ""
-	if node, _, err := memory.FindContextByName(ctx, "user_profile"); err == nil && node != nil && node.Content != "" {
+	if node, _, err := memory.FindContextByName(ctx, env, "user_profile"); err == nil && node != nil && node.Content != "" {
 		personaContent = node.Content
 	}
 	activeContextsSummary := ""
-	if nodes, metas, err := memory.GetActiveContexts(ctx, 10); err == nil && len(nodes) > 0 {
+	if nodes, metas, err := memory.GetActiveContexts(ctx, env, 10); err == nil && len(nodes) > 0 {
 		var lines []string
 		for i := range nodes {
 			if i >= len(metas) {
@@ -196,14 +201,14 @@ func RunEvolutionSynthesis(ctx context.Context, journalSummary string) (*Evoluti
 	}
 
 	toolManifest := tools.GetCompactDirectory()
-	audit, err := RunEvolutionAudit(ctx, queriesText, journalForEvolution, toolManifest, personaContent, activeContextsSummary)
+	audit, err := RunEvolutionAudit(ctx, env, queriesText, journalForEvolution, toolManifest, personaContent, activeContextsSummary)
 	if err != nil {
 		return nil, err
 	}
 
 	// EngineerQuestions are no longer written to PendingQuestions; they are passed to the Dream Narrative only.
 
-	node, _, err := memory.FindContextByName(ctx, "system_evolution")
+	node, _, err := memory.FindContextByName(ctx, env, "system_evolution")
 	if err != nil || node == nil {
 		return nil, fmt.Errorf("system_evolution context not found: %w", err)
 	}
@@ -219,9 +224,8 @@ func RunEvolutionSynthesis(ctx context.Context, journalSummary string) (*Evoluti
 	}
 	content := strings.Join(sections, "\n\n")
 
-	client, err := infra.GetFirestoreClient(ctx)
-	if err != nil {
-		return nil, err
+	if client == nil {
+		return nil, fmt.Errorf("firestore client required to write system_evolution")
 	}
 	_, err = client.Collection(memory.KnowledgeCollection).Doc(node.UUID).Update(ctx, []firestore.Update{
 		{Path: "content", Value: content},

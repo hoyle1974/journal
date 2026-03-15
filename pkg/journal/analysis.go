@@ -94,18 +94,17 @@ func parseKeyValueAnalysis(text string) (summary, mood, category string, tags []
 }
 
 // AnalyzeJournalEntry uses Gemini with key/value output (no JSON schema) to analyze a journal entry.
-func AnalyzeJournalEntry(ctx context.Context, entryContent, entryUUID, entryTimestamp string) (*JournalAnalysis, error) {
+// env supplies config and LLM dispatch; pass explicitly from the caller (e.g. ToolEnv).
+func AnalyzeJournalEntry(ctx context.Context, env infra.ToolEnv, entryContent, entryUUID, entryTimestamp string) (*JournalAnalysis, error) {
 	ctx, span := infra.StartSpan(ctx, "journal.analyze")
 	defer span.End()
 
 	if len(entryContent) < 20 {
 		return nil, nil
 	}
-
-	app := infra.GetApp(ctx)
-	if app == nil || app.Config() == nil {
-		infra.LoggerFrom(ctx).Warn("journal analysis skipped", "reason", "no app or config")
-		return nil, fmt.Errorf("no app or config")
+	if env == nil || env.Config() == nil {
+		infra.LoggerFrom(ctx).Warn("journal analysis skipped", "reason", "no env or config")
+		return nil, fmt.Errorf("no env or config")
 	}
 
 	entryDate := entryTimestamp
@@ -126,10 +125,10 @@ func AnalyzeJournalEntry(ctx context.Context, entryContent, entryUUID, entryTime
 	}
 	req := &infra.LLMRequest{
 		Parts:     []*genai.Part{{Text: prompt}},
-		Model:     app.Config().GeminiModel,
+		Model:     env.Config().GeminiModel,
 		GenConfig: &infra.GenConfig{MaxOutputTokens: 512},
 	}
-	resp, err := app.Dispatch(ctx, req)
+	resp, err := env.Dispatch(ctx, req)
 	if err != nil {
 		infra.LoggerFrom(ctx).Warn("journal analysis failed", "error", err)
 		return nil, fmt.Errorf("journal analysis: %w", err)

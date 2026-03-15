@@ -10,18 +10,16 @@ import (
 
 // LinkEntryToPeople appends the given journal entry to each mentioned person node's journal_entry_ids
 // so get_entity_network and other tools can surface that entry when viewing the entity.
-// Call with a context that has app attached (e.g. infra.WithApp(context.Background(), app)).
 func LinkEntryToPeople(ctx context.Context, app *infra.App, entryUUID string, entities []journal.Entity) {
-	ctx = infra.WithApp(ctx, app)
 	for _, ent := range entities {
 		if ent.Type != "person" {
 			continue
 		}
-		personNode, err := memory.FindEntityNodeByName(ctx, ent.Name)
+		personNode, err := memory.FindEntityNodeByName(ctx, app, ent.Name)
 		if err != nil || personNode == nil {
 			continue
 		}
-		if err := memory.AppendJournalEntryIDsToNode(ctx, personNode.UUID, []string{entryUUID}); err != nil {
+		if err := memory.AppendJournalEntryIDsToNode(ctx, app, personNode.UUID, []string{entryUUID}); err != nil {
 			infra.LoggerFrom(ctx).Debug("graph link append failed", "person", ent.Name, "entry", entryUUID, "error", err)
 			continue
 		}

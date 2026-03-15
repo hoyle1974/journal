@@ -25,11 +25,14 @@ type PendingQuestion struct {
 }
 
 // InsertPendingQuestions writes one or more pending questions to Firestore.
-func InsertPendingQuestions(ctx context.Context, questions []PendingQuestion) error {
+func InsertPendingQuestions(ctx context.Context, env infra.ToolEnv, questions []PendingQuestion) error {
 	if len(questions) == 0 {
 		return nil
 	}
-	client, err := infra.GetFirestoreClient(ctx)
+	if env == nil {
+		return fmt.Errorf("env required")
+	}
+	client, err := env.Firestore(ctx)
 	if err != nil {
 		return err
 	}
@@ -59,8 +62,11 @@ func InsertPendingQuestions(ctx context.Context, questions []PendingQuestion) er
 }
 
 // GetPendingQuestion fetches a single pending question by its UUID.
-func GetPendingQuestion(ctx context.Context, uuid string) (*PendingQuestion, error) {
-	client, err := infra.GetFirestoreClient(ctx)
+func GetPendingQuestion(ctx context.Context, env infra.ToolEnv, uuid string) (*PendingQuestion, error) {
+	if env == nil {
+		return nil, fmt.Errorf("env required")
+	}
+	client, err := env.Firestore(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -77,8 +83,11 @@ func GetPendingQuestion(ctx context.Context, uuid string) (*PendingQuestion, err
 }
 
 // GetUnresolvedPendingQuestions returns pending questions that have not been resolved, newest first.
-func GetUnresolvedPendingQuestions(ctx context.Context, limit int) ([]PendingQuestion, error) {
-	client, err := infra.GetFirestoreClient(ctx)
+func GetUnresolvedPendingQuestions(ctx context.Context, env infra.ToolEnv, limit int) ([]PendingQuestion, error) {
+	if env == nil {
+		return nil, fmt.Errorf("env required")
+	}
+	client, err := env.Firestore(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -116,9 +125,12 @@ func GetUnresolvedPendingQuestions(ctx context.Context, limit int) ([]PendingQue
 
 // ResolvePendingQuestion sets resolved_at and answer for a pending question.
 // If the question has kind "onboarding", the answer is also upserted as a user_identity
-// knowledge node in a goroutine (non-blocking).
-func ResolvePendingQuestion(ctx context.Context, uuid, answer string) error {
-	client, err := infra.GetFirestoreClient(ctx)
+// knowledge node in a goroutine (non-blocking). env supplies Firestore and Config; pass from the caller.
+func ResolvePendingQuestion(ctx context.Context, env infra.ToolEnv, uuid, answer string) error {
+	if env == nil {
+		return fmt.Errorf("env required")
+	}
+	client, err := env.Firestore(ctx)
 	if err != nil {
 		return err
 	}
@@ -138,8 +150,9 @@ func ResolvePendingQuestion(ctx context.Context, uuid, answer string) error {
 	}
 	if kind == "onboarding" && answer != "" {
 		bgCtx := context.WithoutCancel(ctx)
+		envCopy := env
 		go func() {
-			if _, upErr := UpsertSemanticMemory(bgCtx, answer, "user_identity", "selfmodel", 1.0, nil, nil); upErr != nil {
+			if _, upErr := UpsertSemanticMemory(bgCtx, envCopy, answer, "user_identity", "selfmodel", 1.0, nil, nil); upErr != nil {
 				infra.LoggerFrom(bgCtx).Warn("onboarding answer upsert failed", "error", upErr)
 			}
 		}()

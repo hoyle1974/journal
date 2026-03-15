@@ -30,7 +30,7 @@ func registerContextTools() {
 		},
 		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
 			limit := args.IntBounded("limit", 10, 1, 20)
-			contexts, metas, err := memory.GetActiveContexts(ctx, limit)
+			contexts, metas, err := memory.GetActiveContexts(ctx, env, limit)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
@@ -62,7 +62,7 @@ func registerContextTools() {
 			}
 			contextType := args.String("context_type", "auto")
 
-			existing, _, err := memory.FindContextByName(ctx, name)
+			existing, _, err := memory.FindContextByName(ctx, env, name)
 			if err == nil && existing != nil {
 				return tools.Fail("Context '%s' already exists.", name)
 			}
@@ -71,7 +71,7 @@ func registerContextTools() {
 			if cur := agent.CurrentEntryUUIDFrom(ctx); cur != "" {
 				sourceEntries = []string{cur}
 			}
-			uuid, err := memory.CreateContext(ctx, name, description, contextType, nil, sourceEntries)
+			uuid, err := memory.CreateContext(ctx, env, name, description, contextType, nil, sourceEntries)
 			if err != nil {
 				return tools.Fail("Error creating context: %v", err)
 			}
@@ -100,7 +100,7 @@ func registerContextTools() {
 				boost = 0.5
 			}
 
-			node, meta, err := memory.FindContextByName(ctx, name)
+			node, meta, err := memory.FindContextByName(ctx, env, name)
 			if err != nil || node == nil {
 				return tools.Fail("Context '%s' not found.", name)
 			}
@@ -109,7 +109,7 @@ func registerContextTools() {
 			if cur := agent.CurrentEntryUUIDFrom(ctx); cur != "" {
 				newSourceEntry = &cur
 			}
-			err = memory.TouchContext(ctx, node.UUID, newSourceEntry, boost)
+			err = memory.TouchContext(ctx, env, node.UUID, newSourceEntry, boost)
 			if err != nil {
 				return tools.Fail("Error touching context: %v", err)
 			}
@@ -134,7 +134,7 @@ func registerContextTools() {
 				return tools.MissingParam("context_id")
 			}
 
-			err := memory.DeleteContext(ctx, contextID)
+			err := memory.DeleteContext(ctx, env, contextID)
 			if err != nil {
 				return tools.Fail("Error deleting context: %v", err)
 			}
@@ -150,7 +150,7 @@ func registerSystemEvolutionTools() {
 		Category:    "context",
 		Params:      nil,
 		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
-			node, _, err := memory.FindContextByName(ctx, "system_evolution")
+			node, _, err := memory.FindContextByName(ctx, env, "system_evolution")
 			if err != nil {
 				return tools.Fail("Error finding system_evolution context: %v", err)
 			}
@@ -190,7 +190,7 @@ func registerProjectStatusTools() {
 			if err != nil {
 				return tools.Fail("Error finding project: %v", err)
 			}
-			nodes, err := memory.QuerySimilarNodes(ctx, vec, 5)
+			nodes, err := memory.QuerySimilarNodes(ctx, env, vec, 5)
 			if err != nil {
 				return tools.Fail("Error querying knowledge: %v", err)
 			}
@@ -205,7 +205,11 @@ func registerProjectStatusTools() {
 			if err != nil {
 				return tools.Fail("Date range error: %v", err)
 			}
-			withAnalyses, err := journal.GetEntriesWithAnalysisByDateRange(ctx, startStr, endStr, 100)
+			client, err := env.Firestore(ctx)
+			if err != nil {
+				return tools.Fail("Error: %v", err)
+			}
+			withAnalyses, err := journal.GetEntriesWithAnalysisByDateRange(ctx, client, startStr, endStr, 100)
 			if err != nil {
 				return tools.Fail("Error fetching journal entries: %v", err)
 			}
@@ -283,14 +287,14 @@ func registerProjectStatusTools() {
 			if status == "" {
 				return tools.MissingParam("status")
 			}
-			node, err := memory.FindProjectOrGoalByName(ctx, projectName)
+			node, err := memory.FindProjectOrGoalByName(ctx, env, projectName)
 			if err != nil {
 				return tools.Fail("Error finding project: %v", err)
 			}
 			if node == nil {
 				return tools.Fail("Project '%s' not found.", projectName)
 			}
-			if err := memory.UpdateProjectStatus(ctx, node.UUID, status); err != nil {
+			if err := memory.UpdateProjectStatus(ctx, env, node.UUID, status); err != nil {
 				return tools.Fail("Failed to update status: %v", err)
 			}
 			return tools.OK("Project '%s' is now marked as %s.", projectName, status)

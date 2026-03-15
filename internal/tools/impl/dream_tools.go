@@ -2,11 +2,23 @@ package impl
 
 import (
 	"context"
+	"fmt"
 
+	"cloud.google.com/go/firestore"
 	"github.com/jackstrohm/jot/internal/infra"
 	"github.com/jackstrohm/jot/pkg/system"
 	"github.com/jackstrohm/jot/tools"
 )
+
+// firestoreProviderFromEnv adapts infra.ToolEnv to system.FirestoreProvider.
+type firestoreProviderFromEnv struct{ env infra.ToolEnv }
+
+func (a firestoreProviderFromEnv) Firestore(ctx context.Context) (*firestore.Client, error) {
+	if a.env == nil {
+		return nil, fmt.Errorf("env required")
+	}
+	return a.env.Firestore(ctx)
+}
 
 func init() {
 	registerDreamTools()
@@ -19,7 +31,7 @@ func registerDreamTools() {
 		Category:    "knowledge",
 		Params:      nil,
 		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
-			latest, err := system.GetLatestDreamFromContext(ctx)
+			latest, err := system.GetLatestDream(ctx, firestoreProviderFromEnv{env})
 			if err != nil {
 				return tools.Fail("Error getting Firestore: %v", err)
 			}

@@ -42,7 +42,8 @@ func truncateForLog(s string, maxLen int) string {
 }
 
 // UpsertKnowledge saves a fact/list item and computes its vector embedding automatically.
-func UpsertKnowledge(ctx context.Context, content, nodeType, metadata string, journalEntryIDs []string) (string, error) {
+// env supplies Firestore and Config; pass from the caller (e.g. ToolEnv).
+func UpsertKnowledge(ctx context.Context, env infra.ToolEnv, content, nodeType, metadata string, journalEntryIDs []string) (string, error) {
 	ctx, span := infra.StartSpan(ctx, "knowledge.upsert")
 	defer span.End()
 
@@ -74,18 +75,17 @@ func UpsertKnowledge(ctx context.Context, content, nodeType, metadata string, jo
 		}
 	}
 
-	client, err := infra.GetFirestoreClient(ctx)
+	if env == nil || env.Config() == nil {
+		return "", fmt.Errorf("env and config required")
+	}
+	client, err := env.Firestore(ctx)
 	if err != nil {
 		infra.LoggerFrom(ctx).Error("failed to get firestore client", "error", err)
 		span.RecordError(err)
 		return "", err
 	}
 
-	app := infra.GetApp(ctx)
-	if app == nil || app.Config() == nil {
-		return "", fmt.Errorf("no app in context")
-	}
-	projectID := app.Config().GoogleCloudProject
+	projectID := env.Config().GoogleCloudProject
 	vector, err := infra.GenerateEmbedding(ctx, projectID, content+" "+metaToStore, infra.EmbedTaskRetrievalDocument)
 	if err != nil {
 		infra.LoggerFrom(ctx).Error("failed to generate embedding", "error", err)
@@ -127,7 +127,7 @@ func UpsertKnowledge(ctx context.Context, content, nodeType, metadata string, jo
 	var nodeUUID string
 	if err == nil && doc != nil {
 		existingContent := infra.GetStringField(doc.Data(), "content")
-		action, collErr := infra.EvaluateFactCollision(ctx, app.Config(), content, existingContent)
+		action, collErr := infra.EvaluateFactCollision(ctx, env, env.Config(), content, existingContent)
 		if collErr != nil {
 			infra.LoggerFrom(ctx).Warn("fact collision check failed, inserting new node", "error", collErr)
 			action = "insert"
@@ -165,20 +165,20 @@ func UpsertKnowledge(ctx context.Context, content, nodeType, metadata string, jo
 }
 
 // UpsertSemanticMemory saves a fact with extended schema (significance, domain, etc.).
-func UpsertSemanticMemory(ctx context.Context, content, nodeType, domain string, significanceWeight float64, entityLinks []string, journalEntryIDs []string) (string, error) {
+// env supplies Firestore and Config; pass from the caller (e.g. ToolEnv).
+func UpsertSemanticMemory(ctx context.Context, env infra.ToolEnv, content, nodeType, domain string, significanceWeight float64, entityLinks []string, journalEntryIDs []string) (string, error) {
 	ctx, span := infra.StartSpan(ctx, "semantic.upsert")
 	defer span.End()
 
+	if env == nil || env.Config() == nil {
+		return "", fmt.Errorf("env and config required")
+	}
 	metadata := fmt.Sprintf(`{"domain":"%s"}`, domain)
-	client, err := infra.GetFirestoreClient(ctx)
+	client, err := env.Firestore(ctx)
 	if err != nil {
 		return "", err
 	}
-	app := infra.GetApp(ctx)
-	if app == nil || app.Config() == nil {
-		return "", fmt.Errorf("no app in context")
-	}
-	projectID := app.Config().GoogleCloudProject
+	projectID := env.Config().GoogleCloudProject
 	vector, err := infra.GenerateEmbedding(ctx, projectID, content+" "+metadata, infra.EmbedTaskRetrievalDocument)
 	if err != nil {
 		return "", err
@@ -215,7 +215,7 @@ func UpsertSemanticMemory(ctx context.Context, content, nodeType, domain string,
 	var nodeUUID string
 	if err == nil && doc != nil {
 		existingContent := infra.GetStringField(doc.Data(), "content")
-		action, collErr := infra.EvaluateFactCollision(ctx, app.Config(), content, existingContent)
+		action, collErr := infra.EvaluateFactCollision(ctx, env, env.Config(), content, existingContent)
 		if collErr != nil {
 			infra.LoggerFrom(ctx).Warn("fact collision check failed, inserting new node", "error", collErr)
 			action = "insert"
@@ -239,8 +239,11 @@ func UpsertSemanticMemory(ctx context.Context, content, nodeType, domain string,
 }
 
 // FindNearestWithThreshold returns the single nearest knowledge node if within distanceThreshold, else nil.
-func FindNearestWithThreshold(ctx context.Context, queryVector []float32, distanceThreshold float64) (*KnowledgeNode, error) {
-	client, err := infra.GetFirestoreClient(ctx)
+func FindNearestWithThreshold(ctx context.Context, env infra.ToolEnv, queryVector []float32, distanceThreshold float64) (*KnowledgeNode, error) {
+	if env == nil {
+		return nil, fmt.Errorf("env required")
+	}
+	client, err := env.Firestore(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -266,11 +269,15 @@ func FindNearestWithThreshold(ctx context.Context, queryVector []float32, distan
 }
 
 // AppendJournalEntryIDsToNode merges entryIDs into the node's journal_entry_ids (deduped) and updates the document.
-func AppendJournalEntryIDsToNode(ctx context.Context, nodeUUID string, entryIDs []string) error {
+// env supplies Firestore; pass from the caller (e.g. ToolEnv).
+func AppendJournalEntryIDsToNode(ctx context.Context, env infra.ToolEnv, nodeUUID string, entryIDs []string) error {
 	if len(entryIDs) == 0 {
 		return nil
 	}
-	client, err := infra.GetFirestoreClient(ctx)
+	if env == nil {
+		return fmt.Errorf("env required")
+	}
+	client, err := env.Firestore(ctx)
 	if err != nil {
 		return err
 	}
@@ -297,11 +304,14 @@ func AppendJournalEntryIDsToNode(ctx context.Context, nodeUUID string, entryIDs 
 
 // AddEntityLink appends a target UUID (e.g. a fact or project node) to a source node's entity_links.
 // Idempotent: if targetUUID is already in the list, no update is performed.
-func AddEntityLink(ctx context.Context, sourceUUID, targetUUID string) error {
+func AddEntityLink(ctx context.Context, env infra.ToolEnv, sourceUUID, targetUUID string) error {
 	if sourceUUID == "" || targetUUID == "" {
 		return nil
 	}
-	client, err := infra.GetFirestoreClient(ctx)
+	if env == nil {
+		return fmt.Errorf("env required")
+	}
+	client, err := env.Firestore(ctx)
 	if err != nil {
 		return err
 	}
@@ -325,11 +335,15 @@ func AddEntityLink(ctx context.Context, sourceUUID, targetUUID string) error {
 }
 
 // QuerySimilarNodes performs a KNN vector search in Firestore.
-func QuerySimilarNodes(ctx context.Context, queryVector []float32, limit int) ([]KnowledgeNode, error) {
+// QuerySimilarNodes performs a KNN vector search. env supplies Firestore; pass from the caller (e.g. ToolEnv).
+func QuerySimilarNodes(ctx context.Context, env infra.ToolEnv, queryVector []float32, limit int) ([]KnowledgeNode, error) {
 	ctx, span := infra.StartSpan(ctx, "knowledge.query_similar")
 	defer span.End()
 
-	client, err := infra.GetFirestoreClient(ctx)
+	if env == nil {
+		return nil, fmt.Errorf("env required")
+	}
+	client, err := env.Firestore(ctx)
 	if err != nil {
 		span.RecordError(err)
 		return nil, err
@@ -397,8 +411,11 @@ func QuerySimilarNodes(ctx context.Context, queryVector []float32, limit int) ([
 }
 
 // SearchKnowledgeNodes searches knowledge nodes by keywords (case-insensitive) in Content and Metadata.
-func SearchKnowledgeNodes(ctx context.Context, keywords string, limit int) ([]KnowledgeNode, error) {
-	client, err := infra.GetFirestoreClient(ctx)
+func SearchKnowledgeNodes(ctx context.Context, env infra.ToolEnv, keywords string, limit int) ([]KnowledgeNode, error) {
+	if env == nil {
+		return nil, fmt.Errorf("env required")
+	}
+	client, err := env.Firestore(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -439,8 +456,11 @@ func SearchKnowledgeNodes(ctx context.Context, keywords string, limit int) ([]Kn
 }
 
 // GetKnowledgeNodeByID loads one document from KnowledgeCollection and returns it with entity_links and journal_entry_ids.
-func GetKnowledgeNodeByID(ctx context.Context, id string) (*KnowledgeNodeWithLinks, error) {
-	client, err := infra.GetFirestoreClient(ctx)
+func GetKnowledgeNodeByID(ctx context.Context, env infra.ToolEnv, id string) (*KnowledgeNodeWithLinks, error) {
+	if env == nil {
+		return nil, fmt.Errorf("env required")
+	}
+	client, err := env.Firestore(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -464,7 +484,7 @@ func GetKnowledgeNodeByID(ctx context.Context, id string) (*KnowledgeNodeWithLin
 }
 
 // GetKnowledgeNodesByIDs fetches multiple knowledge nodes by UUID.
-func GetKnowledgeNodesByIDs(ctx context.Context, ids []string) ([]KnowledgeNode, error) {
+func GetKnowledgeNodesByIDs(ctx context.Context, env infra.ToolEnv, ids []string) ([]KnowledgeNode, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
@@ -476,7 +496,10 @@ func GetKnowledgeNodesByIDs(ctx context.Context, ids []string) ([]KnowledgeNode,
 			deduped = append(deduped, id)
 		}
 	}
-	client, err := infra.GetFirestoreClient(ctx)
+	if env == nil {
+		return nil, fmt.Errorf("env required")
+	}
+	client, err := env.Firestore(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -502,18 +525,18 @@ func GetKnowledgeNodesByIDs(ctx context.Context, ids []string) ([]KnowledgeNode,
 }
 
 // FindEntityNodeByName does an embedding search for a person/entity by name.
-func FindEntityNodeByName(ctx context.Context, entityName string) (*KnowledgeNode, error) {
-	app := infra.GetApp(ctx)
-	if app == nil || app.Config() == nil {
-		return nil, fmt.Errorf("no app in context")
+// env supplies Firestore and Config; pass from the caller (e.g. ToolEnv).
+func FindEntityNodeByName(ctx context.Context, env infra.ToolEnv, entityName string) (*KnowledgeNode, error) {
+	if env == nil || env.Config() == nil {
+		return nil, fmt.Errorf("env and config required")
 	}
-	projectID := app.Config().GoogleCloudProject
+	projectID := env.Config().GoogleCloudProject
 	query := "Person: " + entityName + " relationship"
 	vec, err := infra.GenerateEmbedding(ctx, projectID, query)
 	if err != nil {
 		return nil, err
 	}
-	nodes, err := QuerySimilarNodes(ctx, vec, 15)
+	nodes, err := QuerySimilarNodes(ctx, env, vec, 15)
 	if err != nil {
 		return nil, err
 	}
@@ -536,18 +559,17 @@ func FindEntityNodeByName(ctx context.Context, entityName string) (*KnowledgeNod
 }
 
 // FindProjectOrGoalByName finds the nearest project or goal knowledge node by semantic similarity to the given name.
-// Returns nil if no project/goal node is found within the search results.
-func FindProjectOrGoalByName(ctx context.Context, projectName string) (*KnowledgeNode, error) {
-	app := infra.GetApp(ctx)
-	if app == nil || app.Config() == nil {
-		return nil, fmt.Errorf("no app in context")
+// env supplies Firestore and Config; pass from the caller (e.g. ToolEnv).
+func FindProjectOrGoalByName(ctx context.Context, env infra.ToolEnv, projectName string) (*KnowledgeNode, error) {
+	if env == nil || env.Config() == nil {
+		return nil, fmt.Errorf("env and config required")
 	}
-	projectID := app.Config().GoogleCloudProject
+	projectID := env.Config().GoogleCloudProject
 	vec, err := infra.GenerateEmbedding(ctx, projectID, "Project: "+projectName)
 	if err != nil {
 		return nil, err
 	}
-	nodes, err := QuerySimilarNodes(ctx, vec, 5)
+	nodes, err := QuerySimilarNodes(ctx, env, vec, 5)
 	if err != nil {
 		return nil, err
 	}
@@ -561,11 +583,11 @@ func FindProjectOrGoalByName(ctx context.Context, projectName string) (*Knowledg
 
 // UpdateProjectStatus sets the status field on a project or goal node's metadata and updates last_recalled_at.
 // The node must exist and have node_type "project" or "goal"; status is validated against the project/goal schema.
-func UpdateProjectStatus(ctx context.Context, nodeID, status string) error {
+func UpdateProjectStatus(ctx context.Context, env infra.ToolEnv, nodeID, status string) error {
 	ctx, span := infra.StartSpan(ctx, "knowledge.update_project_status")
 	defer span.End()
 
-	node, err := GetKnowledgeNodeByID(ctx, nodeID)
+	node, err := GetKnowledgeNodeByID(ctx, env, nodeID)
 	if err != nil {
 		return err
 	}
@@ -596,7 +618,7 @@ func UpdateProjectStatus(ctx context.Context, nodeID, status string) error {
 		return err
 	}
 
-	client, err := infra.GetFirestoreClient(ctx)
+	client, err := env.Firestore(ctx)
 	if err != nil {
 		return err
 	}
@@ -613,18 +635,17 @@ func UpdateProjectStatus(ctx context.Context, nodeID, status string) error {
 }
 
 // DiscoverRelatedNodes finds nodes semantically related to an entity name that may not be in entity_links.
-// Excludes person nodes whose content contains the entity name (to avoid returning the primary entity card).
-func DiscoverRelatedNodes(ctx context.Context, entityName string, limit int) ([]KnowledgeNode, error) {
-	app := infra.GetApp(ctx)
-	if app == nil || app.Config() == nil {
-		return nil, fmt.Errorf("no app in context")
+// env supplies Firestore and Config; pass from the caller (e.g. ToolEnv).
+func DiscoverRelatedNodes(ctx context.Context, env infra.ToolEnv, entityName string, limit int) ([]KnowledgeNode, error) {
+	if env == nil || env.Config() == nil {
+		return nil, fmt.Errorf("env and config required")
 	}
 	query := fmt.Sprintf("Facts and information about %s", entityName)
-	vec, err := infra.GenerateEmbedding(ctx, app.Config().GoogleCloudProject, query)
+	vec, err := infra.GenerateEmbedding(ctx, env.Config().GoogleCloudProject, query)
 	if err != nil {
 		return nil, err
 	}
-	candidates, err := QuerySimilarNodes(ctx, vec, limit*2)
+	candidates, err := QuerySimilarNodes(ctx, env, vec, limit*2)
 	if err != nil {
 		return nil, err
 	}
@@ -655,8 +676,11 @@ func metadataStatus(metadata string) string {
 }
 
 // AppendToProjectArchiveSummary appends a one-line summary to a project/goal node's archive_summary in metadata.
-func AppendToProjectArchiveSummary(ctx context.Context, projectID, oneLine string) error {
-	client, err := infra.GetFirestoreClient(ctx)
+func AppendToProjectArchiveSummary(ctx context.Context, env infra.ToolEnv, projectID, oneLine string) error {
+	if env == nil {
+		return fmt.Errorf("env required")
+	}
+	client, err := env.Firestore(ctx)
 	if err != nil {
 		return err
 	}
@@ -698,7 +722,7 @@ func AppendToProjectArchiveSummary(ctx context.Context, projectID, oneLine strin
 }
 
 // GetLinkedCompletedProjectID returns the ID of a completed project linked to this node, or "".
-func GetLinkedCompletedProjectID(ctx context.Context, nodeData map[string]interface{}) string {
+func GetLinkedCompletedProjectID(ctx context.Context, env infra.ToolEnv, nodeData map[string]interface{}) string {
 	metadataStr := infra.GetStringField(nodeData, "metadata")
 	var meta map[string]interface{}
 	if metadataStr != "" {
@@ -706,26 +730,26 @@ func GetLinkedCompletedProjectID(ctx context.Context, nodeData map[string]interf
 	}
 	if meta != nil {
 		if pid, ok := meta["parent_goal"].(string); ok && pid != "" {
-			if isCompletedProjectByID(ctx, pid) {
+			if isCompletedProjectByID(ctx, env, pid) {
 				return pid
 			}
 		}
 		if pid, ok := meta["project_id"].(string); ok && pid != "" {
-			if isCompletedProjectByID(ctx, pid) {
+			if isCompletedProjectByID(ctx, env, pid) {
 				return pid
 			}
 		}
 	}
 	for _, id := range infra.GetStringSliceField(nodeData, "entity_links") {
-		if isCompletedProjectByID(ctx, id) {
+		if isCompletedProjectByID(ctx, env, id) {
 			return id
 		}
 	}
 	return ""
 }
 
-func isCompletedProjectByID(ctx context.Context, id string) bool {
-	node, err := GetKnowledgeNodeByID(ctx, id)
+func isCompletedProjectByID(ctx context.Context, env infra.ToolEnv, id string) bool {
+	node, err := GetKnowledgeNodeByID(ctx, env, id)
 	if err != nil || node == nil {
 		return false
 	}
@@ -733,8 +757,11 @@ func isCompletedProjectByID(ctx context.Context, id string) bool {
 }
 
 // GetUserIdentityNodes returns knowledge nodes of type user_identity, for easy retrieval of self-referential identity statements.
-func GetUserIdentityNodes(ctx context.Context, limit int) ([]KnowledgeNode, error) {
-	client, err := infra.GetFirestoreClient(ctx)
+func GetUserIdentityNodes(ctx context.Context, env infra.ToolEnv, limit int) ([]KnowledgeNode, error) {
+	if env == nil {
+		return nil, fmt.Errorf("env required")
+	}
+	client, err := env.Firestore(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -760,8 +787,11 @@ func GetUserIdentityNodes(ctx context.Context, limit int) ([]KnowledgeNode, erro
 }
 
 // GetActiveSignals retrieves recent proactive signals (selfmodel thought nodes) for the FOH.
-func GetActiveSignals(ctx context.Context, limit int) (string, error) {
-	client, err := infra.GetFirestoreClient(ctx)
+func GetActiveSignals(ctx context.Context, env infra.ToolEnv, limit int) (string, error) {
+	if env == nil {
+		return "", fmt.Errorf("env required")
+	}
+	client, err := env.Firestore(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -795,9 +825,12 @@ func GetActiveSignals(ctx context.Context, limit int) (string, error) {
 }
 
 // ListKnowledgeNodes lists all knowledge nodes (for diagnostics).
-func ListKnowledgeNodes(ctx context.Context, limit int) ([]KnowledgeNode, error) {
+func ListKnowledgeNodes(ctx context.Context, env infra.ToolEnv, limit int) ([]KnowledgeNode, error) {
 	infra.LoggerFrom(ctx).Info("listing knowledge nodes", "collection", KnowledgeCollection, "limit", limit)
-	client, err := infra.GetFirestoreClient(ctx)
+	if env == nil {
+		return nil, fmt.Errorf("env required")
+	}
+	client, err := env.Firestore(ctx)
 	if err != nil {
 		return nil, err
 	}

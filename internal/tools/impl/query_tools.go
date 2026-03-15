@@ -19,8 +19,12 @@ func registerQueryTools() {
 		Category:    "query",
 		Params:      []tools.Param{tools.CountParam()},
 		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
+			client, err := env.Firestore(ctx)
+			if err != nil {
+				return tools.Fail("Error: %v", err)
+			}
 			count := args.IntBounded("count", 10, 1, 50)
-			queries, err := journal.GetRecentQueries(ctx, count)
+			queries, err := journal.GetRecentQueries(ctx, client, count)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
@@ -41,12 +45,16 @@ func registerQueryTools() {
 			tools.LimitParam(10, 50),
 		},
 		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
+			client, err := env.Firestore(ctx)
+			if err != nil {
+				return tools.Fail("Error: %v", err)
+			}
 			query, ok := args.RequiredString("query")
 			if !ok {
 				return tools.MissingParam("query")
 			}
 			limit := args.IntBounded("limit", 10, 1, 50)
-			queries, err := journal.SearchQueries(ctx, query, limit)
+			queries, err := journal.SearchQueries(ctx, client, query, limit)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
@@ -80,8 +88,12 @@ func registerQueryTools() {
 			if err != nil {
 				return tools.Fail("Date range error: %v", err)
 			}
+			client, err := env.Firestore(ctx)
+			if err != nil {
+				return tools.Fail("Error: %v", err)
+			}
 			limit := args.IntBounded("limit", 20, 1, 50)
-			queries, err := journal.GetQueriesByDateRange(ctx, startStr, endStr, limit)
+			queries, err := journal.GetQueriesByDateRange(ctx, client, startStr, endStr, limit)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}

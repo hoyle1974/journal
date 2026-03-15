@@ -13,10 +13,6 @@ import (
 	"github.com/panjf2000/ants/v2"
 )
 
-type appKeyType struct{}
-
-var appKey = &appKeyType{}
-
 // GDocLogFunc is the callback invoked by the app's gdoc log pool to write a line to the Google Doc.
 // The caller (e.g. jot or main) provides this so infra does not depend on doc-writing logic.
 type GDocLogFunc func(ctx context.Context, msg string)
@@ -31,23 +27,11 @@ type gdocLogPayload struct {
 	msg string
 }
 
-// WithApp returns a context that carries the given App.
-func WithApp(ctx context.Context, app *App) context.Context {
-	return context.WithValue(ctx, appKey, app)
-}
-
-// GetApp returns the App from the context, or nil if not set.
-func GetApp(ctx context.Context) *App {
-	if a, ok := ctx.Value(appKey).(*App); ok {
-		return a
-	}
-	return nil
-}
-
-// ToolEnv is the minimal interface tools need: config (for embedding, project) and single-shot LLM dispatch.
+// ToolEnv is the minimal interface tools need: config, Firestore, and single-shot LLM dispatch.
 // Implemented by *App. Passed explicitly to tool execution so tools do not pull app from context.
 type ToolEnv interface {
 	Config() *config.Config
+	Firestore(ctx context.Context) (*firestore.Client, error)
 	Dispatch(ctx context.Context, req *LLMRequest) (*genai.GenerateContentResponse, error)
 }
 
@@ -120,6 +104,12 @@ func (a *App) Config() *config.Config {
 	return a.cfg
 }
 
+// App returns the app for use when the full *App is required (e.g. AddEntryAndEnqueue, EnqueueSaveQuery, ProcessEntry).
+// Satisfies agent.FOHEnv and similar interfaces that need to pass *App explicitly.
+func (a *App) App() *App {
+	return a
+}
+
 // EnqueueTask creates a Cloud Task that POSTs the payload to the API at endpoint.
 func (a *App) EnqueueTask(ctx context.Context, endpoint string, payload map[string]interface{}) error {
 	return EnqueueTask(ctx, a.cfg, endpoint, payload)
@@ -185,9 +175,10 @@ func (a *App) WaitForBackgroundTasks() {
 	}
 }
 
-// WithContext returns a context that carries this App.
+// WithContext attaches request-scoped logger and gdoc submitter to the context (no app in context).
 func (a *App) WithContext(ctx context.Context) context.Context {
-	return WithApp(ctx, a)
+	ctx = WithLogger(ctx, a.Logger)
+	return WithGDocSubmitter(ctx, a.SubmitGDocLog)
 }
 
 var (

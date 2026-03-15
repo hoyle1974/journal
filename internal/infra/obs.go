@@ -58,10 +58,29 @@ func isSyncInProgress(ctx context.Context) bool {
 // Logger is the global structured logger (set by InitObservability).
 var Logger *slog.Logger
 
-// LoggerFrom returns the logger from the App in context, or the global Logger when app is nil.
+type loggerKeyType struct{}
+type gdocSubmitterKeyType struct{}
+
+var loggerKey = &loggerKeyType{}
+var gdocSubmitterKey = &gdocSubmitterKeyType{}
+
+// GDocSubmitterFunc is the type for submitting a log line to the Google Doc. Set per-request via WithGDocSubmitter.
+type GDocSubmitterFunc func(ctx context.Context, msg string)
+
+// WithLogger attaches a request-scoped logger to the context. Use at the request boundary (e.g. router middleware).
+func WithLogger(ctx context.Context, logger *slog.Logger) context.Context {
+	return context.WithValue(ctx, loggerKey, logger)
+}
+
+// WithGDocSubmitter attaches a callback to submit log lines to the Google Doc. Use at the request boundary with WithLogger.
+func WithGDocSubmitter(ctx context.Context, submit GDocSubmitterFunc) context.Context {
+	return context.WithValue(ctx, gdocSubmitterKey, submit)
+}
+
+// LoggerFrom returns the request-scoped logger from the context (set via WithLogger), or the global Logger when unset.
 func LoggerFrom(ctx context.Context) *slog.Logger {
-	if app := GetApp(ctx); app != nil {
-		return app.Logger
+	if l, ok := ctx.Value(loggerKey).(*slog.Logger); ok && l != nil {
+		return l
 	}
 	return Logger
 }
@@ -223,8 +242,8 @@ func (h *gdocForwardingHandler) Handle(ctx context.Context, r slog.Record) error
 	}
 	line := formatRecordForGDoc(&r)
 	if line != "" {
-		if app := GetApp(ctx); app != nil {
-			app.SubmitGDocLog(ctx, line)
+		if submit, ok := ctx.Value(gdocSubmitterKey).(GDocSubmitterFunc); ok && submit != nil {
+			submit(ctx, line)
 		}
 	}
 	return nil

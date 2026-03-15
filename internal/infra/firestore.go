@@ -48,15 +48,6 @@ func QueryDocuments[T any](ctx context.Context, query firestore.Query, mapDoc fu
 	return results, nil
 }
 
-// GetFirestoreClient returns the Firestore client from the App in context.
-func GetFirestoreClient(ctx context.Context) (*firestore.Client, error) {
-	app := GetApp(ctx)
-	if app == nil {
-		return nil, fmt.Errorf("no app in context")
-	}
-	return app.Firestore(ctx)
-}
-
 // GenerateUUID creates a new UUID for entries.
 func GenerateUUID() string {
 	return uuid.New().String()

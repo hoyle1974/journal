@@ -40,14 +40,17 @@ func registerSpecialistTools() {
 					return tools.MissingParam("query")
 				}
 				journalCtx := ""
-				if entries, err := journal.GetEntries(ctx, 5); err == nil && len(entries) > 0 {
-					var lines []string
-					for _, e := range entries {
-						lines = append(lines, fmt.Sprintf("[%s] %s", e.Timestamp, e.Content))
+				client, _ := env.Firestore(ctx)
+				if client != nil {
+					if entries, err := journal.GetEntries(ctx, client, 5); err == nil && len(entries) > 0 {
+						var lines []string
+						for _, e := range entries {
+							lines = append(lines, fmt.Sprintf("[%s] %s", e.Timestamp, e.Content))
+						}
+						journalCtx = strings.Join(lines, "\n")
 					}
-					journalCtx = strings.Join(lines, "\n")
 				}
-				out, err := agent.RunSpecialist(ctx, dom, &agent.SpecialistInput{
+				out, err := agent.RunSpecialist(ctx, env, dom, &agent.SpecialistInput{
 					UserMessage: query,
 					Context:     "Answer based on your domain expertise and the journal context.",
 					Journal:     journalCtx,

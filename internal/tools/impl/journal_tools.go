@@ -24,8 +24,12 @@ func registerJournalTools() {
 		Category:    "journal",
 		Params:      []tools.Param{tools.CountParam()},
 		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
+			client, err := env.Firestore(ctx)
+			if err != nil {
+				return tools.Fail("Error: %v", err)
+			}
 			count := args.IntBounded("count", 10, 1, 50)
-			entries, err := journal.GetEntries(ctx, count)
+			entries, err := journal.GetEntries(ctx, client, count)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
@@ -40,8 +44,12 @@ func registerJournalTools() {
 		Category:    "journal",
 		Params:      []tools.Param{tools.CountParam()},
 		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
+			client, err := env.Firestore(ctx)
+			if err != nil {
+				return tools.Fail("Error: %v", err)
+			}
 			count := args.IntBounded("count", 10, 1, 50)
-			entries, err := journal.GetEntriesAsc(ctx, count)
+			entries, err := journal.GetEntriesAsc(ctx, client, count)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
@@ -72,8 +80,12 @@ func registerJournalTools() {
 			if err != nil {
 				return tools.Fail("Date range error: %v", err)
 			}
+			client, err := env.Firestore(ctx)
+			if err != nil {
+				return tools.Fail("Error: %v", err)
+			}
 			limit := args.IntBounded("limit", 50, 1, 200)
-			entries, err := journal.GetEntriesByDateRange(ctx, startStr, endStr, limit)
+			entries, err := journal.GetEntriesByDateRange(ctx, client, startStr, endStr, limit)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
@@ -95,6 +107,10 @@ func registerJournalTools() {
 			tools.LimitParam(20, 50),
 		},
 		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
+			client, err := env.Firestore(ctx)
+			if err != nil {
+				return tools.Fail("Error: %v", err)
+			}
 			query, ok := args.RequiredString("query")
 			if !ok {
 				return tools.MissingParam("query")
@@ -107,7 +123,7 @@ func registerJournalTools() {
 				if err != nil {
 					return tools.Fail("Date range error: %v", err)
 				}
-				withAnalyses, err := journal.GetEntriesWithAnalysisByDateRange(ctx, startStr, endStr, 200)
+				withAnalyses, err := journal.GetEntriesWithAnalysisByDateRange(ctx, client, startStr, endStr, 200)
 				if err != nil {
 					return tools.Fail("Error: %v", err)
 				}
@@ -125,8 +141,7 @@ func registerJournalTools() {
 					}
 				}
 			} else {
-				var err error
-				entries, err = journal.SearchEntries(ctx, query, limit)
+				entries, err = journal.SearchEntries(ctx, client, query, limit)
 				if err != nil {
 					return tools.Fail("Error: %v", err)
 				}
@@ -148,6 +163,10 @@ func registerJournalTools() {
 			tools.OptionalStringParam("end_date", "End date (YYYY-MM-DD, optional)"),
 		},
 		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
+			client, err := env.Firestore(ctx)
+			if err != nil {
+				return tools.Fail("Error: %v", err)
+			}
 			startDateStr := args.String("start_date", "")
 			endDateStr := args.String("end_date", "")
 			var startDate, endDate *string
@@ -157,7 +176,7 @@ func registerJournalTools() {
 			if endDateStr != "" {
 				endDate = &endDateStr
 			}
-			count, err := journal.CountEntries(ctx, startDate, endDate)
+			count, err := journal.CountEntries(ctx, client, startDate, endDate)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
@@ -182,7 +201,11 @@ func registerJournalTools() {
 		Category:    "journal",
 		Params:      []tools.Param{},
 		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
-			entries, err := journal.GetEntries(ctx, 100)
+			client, err := env.Firestore(ctx)
+			if err != nil {
+				return tools.Fail("Error: %v", err)
+			}
+			entries, err := journal.GetEntries(ctx, client, 100)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
@@ -212,12 +235,16 @@ func registerJournalTools() {
 			tools.CountParam(),
 		},
 		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
+			client, err := env.Firestore(ctx)
+			if err != nil {
+				return tools.Fail("Error: %v", err)
+			}
 			source, ok := args.RequiredString("source")
 			if !ok {
 				return tools.MissingParam("source")
 			}
 			count := args.IntBounded("count", 10, 1, 50)
-			entries, err := journal.GetEntriesBySource(ctx, source, count)
+			entries, err := journal.GetEntriesBySource(ctx, client, source, count)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
@@ -238,6 +265,10 @@ func registerJournalTools() {
 			tools.OptionalStringParam("timeframe", "Optional timeframe: 'last 6 months', 'last 30 days', 'this year', or leave empty for all matching entries (up to 100)"),
 		},
 		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
+			client, err := env.Firestore(ctx)
+			if err != nil {
+				return tools.Fail("Error: %v", err)
+			}
 			topic, ok := args.RequiredString("topic")
 			if !ok {
 				return tools.MissingParam("topic")
@@ -249,7 +280,7 @@ func registerJournalTools() {
 				if err != nil {
 					return tools.Fail("Invalid timeframe: %v", err)
 				}
-				byDate, err := journal.GetEntriesByDateRange(ctx, startStr, endStr, 200)
+				byDate, err := journal.GetEntriesByDateRange(ctx, client, startStr, endStr, 200)
 				if err != nil {
 					return tools.Fail("Error fetching entries: %v", err)
 				}
@@ -260,8 +291,7 @@ func registerJournalTools() {
 					}
 				}
 			} else {
-				var err error
-				entries, err = journal.SearchEntries(ctx, topic, 100)
+				entries, err = journal.SearchEntries(ctx, client, topic, 100)
 				if err != nil {
 					return tools.Fail("Error searching entries: %v", err)
 				}
@@ -285,7 +315,7 @@ func registerJournalTools() {
 				return tools.Fail("Failed to build activity history prompt: %v", err)
 			}
 			systemPrompt := prompts.DataSafety()
-			summary, err := infra.GenerateContentSimple(ctx, systemPrompt, userPrompt, env.Config(), &infra.GenConfig{MaxOutputTokens: 1024})
+			summary, err := infra.GenerateContentSimple(ctx, env, systemPrompt, userPrompt, env.Config(), &infra.GenConfig{MaxOutputTokens: 1024})
 			if err != nil {
 				return tools.Fail("Summarization failed: %v", err)
 			}
@@ -312,6 +342,10 @@ func registerJournalTools() {
 			tools.LimitParam(50, 200),
 		},
 		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
+			client, err := env.Firestore(ctx)
+			if err != nil {
+				return tools.Fail("Error: %v", err)
+			}
 			startDate := args.String("start_date", "30 days ago")
 			endDate := args.String("end_date", "today")
 			startStr, endStr, err := resolveToolDateRange(startDate, endDate)
@@ -319,7 +353,7 @@ func registerJournalTools() {
 				return tools.Fail("Date range error: %v", err)
 			}
 			limit := args.IntBounded("limit", 50, 1, 200)
-			withAnalyses, err := journal.GetEntriesWithAnalysisByDateRange(ctx, startStr, endStr, limit)
+			withAnalyses, err := journal.GetEntriesWithAnalysisByDateRange(ctx, client, startStr, endStr, limit)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
@@ -372,6 +406,10 @@ func registerJournalTools() {
 			tools.RequiredStringParam("date", "Date to summarize: YYYY-MM-DD or natural language (e.g. yesterday, today, last Monday)"),
 		},
 		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
+			client, err := env.Firestore(ctx)
+			if err != nil {
+				return tools.Fail("Error: %v", err)
+			}
 			dateArg, ok := args.RequiredString("date")
 			if !ok {
 				return tools.MissingParam("date")
@@ -380,7 +418,7 @@ func registerJournalTools() {
 			if err != nil {
 				return tools.Fail("Invalid date: %v", err)
 			}
-			withAnalyses, err := journal.GetEntriesWithAnalysisByDateRange(ctx, startStr, endStr, 100)
+			withAnalyses, err := journal.GetEntriesWithAnalysisByDateRange(ctx, client, startStr, endStr, 100)
 			if err != nil {
 				return tools.Fail("Error fetching entries: %v", err)
 			}

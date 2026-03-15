@@ -31,17 +31,16 @@ type EvaluatorExtract struct {
 }
 
 // RunEvaluatorExtract runs the evaluator LLM on content and returns significance, domain, and fact_to_store.
-func RunEvaluatorExtract(ctx context.Context, content string) (*EvaluatorExtract, error) {
+func RunEvaluatorExtract(ctx context.Context, app *infra.App, content string) (*EvaluatorExtract, error) {
 	if len(strings.TrimSpace(content)) < 10 {
 		return nil, nil
 	}
-	app := infra.GetApp(ctx)
 	if app == nil {
-		return nil, fmt.Errorf("no app in context")
+		return nil, fmt.Errorf("app required")
 	}
 	systemPrompt := prompts.Evaluator() + prompts.DataSafety()
 	prompt := ""
-	node, _, err := memory.FindContextByName(ctx, "user_profile")
+	node, _, err := memory.FindContextByName(ctx, app, "user_profile")
 	if err == nil && node != nil && node.Content != "" {
 		profile := node.Content
 		prompt = fmt.Sprintf("Relevant user preferences/facts (use when assigning domain and significance):\n%s\n\n",
@@ -103,7 +102,7 @@ func RunEvaluator(ctx context.Context, app *infra.App, content, entryUUID, times
 	ctx, span := infra.StartSpan(ctx, "evaluator.run")
 	defer span.End()
 
-	parsed, err := RunEvaluatorExtract(ctx, content)
+	parsed, err := RunEvaluatorExtract(ctx, app, content)
 	if err != nil {
 		infra.LoggerFrom(ctx).Warn("evaluator skipped", "entry_uuid", entryUUID, "reason", "extract failed", "error", err)
 		return nil, err
@@ -123,7 +122,7 @@ func RunEvaluator(ctx context.Context, app *infra.App, content, entryUUID, times
 		}
 		bgCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
-		if _, err := memory.UpsertSemanticMemory(bgCtx, parsed.FactToStore, nodeType, parsed.Domain, parsed.Significance, nil, []string{entryUUID}); err != nil {
+		if _, err := memory.UpsertSemanticMemory(bgCtx, app, parsed.FactToStore, nodeType, parsed.Domain, parsed.Significance, nil, []string{entryUUID}); err != nil {
 			infra.LoggerFrom(ctx).Warn("evaluator upsert failed", "error", err)
 		} else {
 			factStored = true
@@ -147,13 +146,12 @@ const proactiveInsightPrompt = `Based on this highly significant journal entry, 
 func runProactiveInsight(ctx context.Context, app *infra.App, entryUUID, entryContent string) {
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	ctx = infra.WithApp(ctx, app)
 	cfg := app.Config()
 	if cfg == nil {
 		return
 	}
 	userPrompt := "Entry:\n" + utils.WrapAsUserData(utils.SanitizePrompt(utils.TruncateString(entryContent, 2000)))
-	summary, err := infra.GenerateContentSimple(ctx, proactiveInsightPrompt+prompts.DataSafety(), userPrompt, cfg, &infra.GenConfig{MaxOutputTokens: 128})
+	summary, err := infra.GenerateContentSimple(ctx, app, proactiveInsightPrompt+prompts.DataSafety(), userPrompt, cfg, &infra.GenConfig{MaxOutputTokens: 128})
 	if err != nil || strings.TrimSpace(summary) == "" {
 		if err != nil {
 			infra.LoggerFrom(ctx).Debug("proactive insight LLM failed", "entry_uuid", entryUUID, "error", err)
@@ -161,9 +159,8 @@ func runProactiveInsight(ctx context.Context, app *infra.App, entryUUID, entryCo
 		return
 	}
 	bgCtx, cancel2 := context.WithTimeout(context.Background(), 15*time.Second)
-	bgCtx = infra.WithApp(bgCtx, app)
 	defer cancel2()
-	if _, err := memory.UpsertSemanticMemory(bgCtx, strings.TrimSpace(summary), "thought", "selfmodel", 0.9, nil, []string{entryUUID}); err != nil {
+	if _, err := memory.UpsertSemanticMemory(bgCtx, app, strings.TrimSpace(summary), "thought", "selfmodel", 0.9, nil, []string{entryUUID}); err != nil {
 		infra.LoggerFrom(ctx).Debug("proactive insight upsert failed", "entry_uuid", entryUUID, "error", err)
 		return
 	}
@@ -209,13 +206,12 @@ var specialistSystemPrompts = map[Domain]string{
 
 // RunSpecialistDiscussion runs a single specialist in "Chat" mode for the Colloquium Room.
 // Returns the agent's message, a boolean indicating if they are "DONE", and an error.
-func RunSpecialistDiscussion(ctx context.Context, domain Domain, journalContext string, roomTranscript string, modelOverride string) (string, bool, error) {
+func RunSpecialistDiscussion(ctx context.Context, app *infra.App, domain Domain, journalContext string, roomTranscript string, modelOverride string) (string, bool, error) {
 	ctx, span := infra.StartSpan(ctx, "agent.discuss."+string(domain))
 	defer span.End()
 
-	app := infra.GetApp(ctx)
 	if app == nil {
-		return "", false, fmt.Errorf("no app in context")
+		return "", false, fmt.Errorf("app required")
 	}
 	baseSysPrompt := specialistSystemPrompts[domain]
 
@@ -275,14 +271,14 @@ type EvolutionAuditOutput struct {
 
 // RunEvolutionAudit runs the Cognitive Engineer on recent queries.
 // personaBriefing and activeContextsSummary are optional "Big Picture" context so the Auditor can suggest mission-level improvements, not just tactical fixes.
-func RunEvolutionAudit(ctx context.Context, queriesText, journalSummary, toolManifest, personaBriefing, activeContextsSummary string) (*EvolutionAuditOutput, error) {
+func RunEvolutionAudit(ctx context.Context, env infra.ToolEnv, queriesText, journalSummary, toolManifest, personaBriefing, activeContextsSummary string) (*EvolutionAuditOutput, error) {
 	ctx, span := infra.StartSpan(ctx, "agent.evolution_audit")
 	defer span.End()
 
-	app := infra.GetApp(ctx)
-	if app == nil {
-		return nil, fmt.Errorf("no app in context")
+	if env == nil || env.Config() == nil {
+		return nil, fmt.Errorf("env required")
 	}
+	cfg := env.Config()
 	systemPrompt := fmt.Sprintf(prompts.Specialist("evolution"), toolManifest) + prompts.DataSafety()
 	userPrompt := "## SYSTEM CAPABILITIES (Existing Tools):\n" + utils.WrapAsUserData(toolManifest) + "\n\n"
 	if personaBriefing != "" {
@@ -299,14 +295,14 @@ func RunEvolutionAudit(ctx context.Context, queriesText, journalSummary, toolMan
 	req := &infra.LLMRequest{
 		SystemPrompt: systemPrompt,
 		Parts:       []*genai.Part{{Text: userPrompt}},
-		Model:       app.Config().DreamerModel,
+		Model:       cfg.DreamerModel,
 		GenConfig:   &infra.GenConfig{MaxOutputTokens: 2048, TopP: 0.9},
 	}
 	apiCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
 	infra.GeminiCallsTotal.Inc()
-	resp, err := app.Dispatch(apiCtx, req)
+	resp, err := env.Dispatch(apiCtx, req)
 	if err != nil {
 		span.RecordError(err)
 		return nil, infra.WrapLLMError(err)
@@ -329,15 +325,15 @@ func RunEvolutionAudit(ctx context.Context, queriesText, journalSummary, toolMan
 }
 
 // RunSpecialist runs a single specialist agent for key/value extraction.
-func RunSpecialist(ctx context.Context, domain Domain, input *SpecialistInput, modelOverride string) (*SpecialistOutput, error) {
+func RunSpecialist(ctx context.Context, env infra.ToolEnv, domain Domain, input *SpecialistInput, modelOverride string) (*SpecialistOutput, error) {
 	ctx, span := infra.StartSpan(ctx, "agent."+string(domain))
 	defer span.End()
 
 	t0 := time.Now()
-	app := infra.GetApp(ctx)
-	if app == nil {
-		return nil, fmt.Errorf("no app in context")
+	if env == nil || env.Config() == nil {
+		return nil, fmt.Errorf("env required")
 	}
+	cfg := env.Config()
 	clientMs := time.Since(t0).Milliseconds()
 	infra.LoggerFrom(ctx).Info("specialist client_ready", "domain", domain, "client_ms", clientMs)
 
@@ -363,9 +359,9 @@ Recent journal context:
 
 	infra.LoggerFrom(ctx).Info("specialist prompt", "domain", domain, "prompt_len", len(prompt), "prompt", prompt)
 
-	model := app.Config().GeminiModel
+	model := cfg.GeminiModel
 	if modelOverride != "" {
-		model = app.Config().DreamerModel
+		model = cfg.DreamerModel
 	}
 	systemPrompt := specialistSystemPrompts[domain] +
 		"\n\nOutput structured key/value lines only. No JSON, no markdown, no code fences. Use this format:\nsummary: <1-2 sentences>\nfacts:\n<one fact per line, at most 5; use [CATEGORY] Subject: Detail>\nentities:\n<one per line>\n\nCRITICAL: Output at most 5 facts. Keep summaries to 1-2 sentences. Avoid conversational filler." +
@@ -383,7 +379,7 @@ Recent journal context:
 	infra.GeminiCallsTotal.Inc()
 	infra.LoggerFrom(ctx).Info("specialist api_call_start", "domain", domain, "model", model)
 	t1 := time.Now()
-	resp, err := app.Dispatch(apiCtx, req)
+	resp, err := env.Dispatch(apiCtx, req)
 	apiMs := time.Since(t1).Milliseconds()
 
 	if err != nil && (errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "context deadline exceeded")) {
@@ -391,7 +387,7 @@ Recent journal context:
 		apiCtx2, cancel2 := context.WithTimeout(ctx, 60*time.Second)
 		defer cancel2()
 		t1 = time.Now()
-		resp, err = app.Dispatch(apiCtx2, req)
+		resp, err = env.Dispatch(apiCtx2, req)
 		apiMs = time.Since(t1).Milliseconds()
 	}
 
@@ -436,13 +432,12 @@ impacted_contexts:
 (one per line)`
 
 // RunContextExtractor uses Gemini to extract impacted_contexts from the journal.
-func RunContextExtractor(ctx context.Context, journalContext string) ([]string, error) {
+func RunContextExtractor(ctx context.Context, app *infra.App, journalContext string) ([]string, error) {
 	ctx, span := infra.StartSpan(ctx, "agent.context_extractor")
 	defer span.End()
 
-	app := infra.GetApp(ctx)
 	if app == nil {
-		return nil, fmt.Errorf("no app in context")
+		return nil, fmt.Errorf("app required")
 	}
 	userPrompt := "Journal entries:\n" + utils.WrapAsUserData(utils.SanitizePrompt(journalContext))
 	req := &infra.LLMRequest{
@@ -484,7 +479,7 @@ Output structured key/value lines only. No JSON, no markdown, no code fences.
 query_analysis: <full analysis text>`
 
 // RunQueryAnalyzer uses Gemini to analyze recent queries.
-func RunQueryAnalyzer(ctx context.Context, recentQueriesText string) (string, error) {
+func RunQueryAnalyzer(ctx context.Context, app *infra.App, recentQueriesText string) (string, error) {
 	if strings.TrimSpace(recentQueriesText) == "" {
 		return "", nil
 	}
@@ -492,9 +487,8 @@ func RunQueryAnalyzer(ctx context.Context, recentQueriesText string) (string, er
 	ctx, span := infra.StartSpan(ctx, "agent.query_analyzer")
 	defer span.End()
 
-	app := infra.GetApp(ctx)
 	if app == nil {
-		return "", fmt.Errorf("no app in context")
+		return "", fmt.Errorf("app required")
 	}
 	userPrompt := "Recent queries:\n" + utils.WrapAsUserData(utils.SanitizePrompt(recentQueriesText))
 	req := &infra.LLMRequest{
@@ -531,13 +525,12 @@ type DecompositionResult struct {
 }
 
 // DecomposeMessage uses the LLM to determine which specialists to consult.
-func DecomposeMessage(ctx context.Context, userMessage string) ([]Domain, error) {
+func DecomposeMessage(ctx context.Context, app *infra.App, userMessage string) ([]Domain, error) {
 	ctx, span := infra.StartSpan(ctx, "dispatcher.decompose")
 	defer span.End()
 
-	app := infra.GetApp(ctx)
 	if app == nil {
-		return nil, fmt.Errorf("no app in context")
+		return nil, fmt.Errorf("app required")
 	}
 	systemPrompt := prompts.Router() + prompts.DataSafety()
 	prompt := fmt.Sprintf("User message:\n%s\n\nWhich domains to consult?", utils.WrapAsUserData(utils.SanitizePrompt(userMessage)))
@@ -576,7 +569,7 @@ func DecomposeMessage(ctx context.Context, userMessage string) ([]Domain, error)
 }
 
 // RunCommittee runs the selected specialists in parallel.
-func RunCommittee(ctx context.Context, userMessage, journalContext string, domains []Domain) ([]*SpecialistOutput, error) {
+func RunCommittee(ctx context.Context, app *infra.App, userMessage, journalContext string, domains []Domain) ([]*SpecialistOutput, error) {
 	ctx, span := infra.StartSpan(ctx, "dispatcher.committee")
 	defer span.End()
 
@@ -591,7 +584,7 @@ func RunCommittee(ctx context.Context, userMessage, journalContext string, domai
 	for i, d := range domains {
 		idx, domain := i, d
 		g.Go(func() error {
-			out, err := RunSpecialist(gctx, domain, input, "")
+			out, err := RunSpecialist(gctx, app, domain, input, "") // app implements ToolEnv
 			if err != nil {
 				return err
 			}

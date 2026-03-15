@@ -2,7 +2,6 @@ package system
 
 import (
 	"context"
-	"errors"
 
 	"cloud.google.com/go/firestore"
 	"github.com/jackstrohm/jot/internal/infra"
@@ -73,13 +72,4 @@ func WriteLatestDream(ctx context.Context, app FirestoreProvider, narrative stri
 		"unread":    unread,
 	})
 	return err
-}
-
-// GetLatestDreamFromContext reads _system/latest_dream using app from context (for legacy callers such as tools).
-func GetLatestDreamFromContext(ctx context.Context) (*LatestDream, error) {
-	app := infra.GetApp(ctx)
-	if app == nil {
-		return nil, errors.New("no app in context")
-	}
-	return GetLatestDream(ctx, app)
 }

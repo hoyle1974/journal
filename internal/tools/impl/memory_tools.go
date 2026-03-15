@@ -44,7 +44,7 @@ func registerKnowledgeTools() {
 			if cur := agent.CurrentEntryUUIDFrom(ctx); cur != "" {
 				entryIDs = []string{cur}
 			}
-			id, err := memory.UpsertKnowledge(ctx, content, nodeType, metadata, entryIDs)
+			id, err := memory.UpsertKnowledge(ctx, env, content, nodeType, metadata, entryIDs)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
@@ -81,6 +81,10 @@ func registerKnowledgeTools() {
 			if env == nil || env.Config() == nil {
 				return tools.Fail("Error: no app in context")
 			}
+			client, err := env.Firestore(ctx)
+			if err != nil {
+				return tools.Fail("Error: %v", err)
+			}
 			queryVec, err := infra.GenerateEmbedding(ctx, env.Config().GoogleCloudProject, query)
 			if err != nil {
 				return tools.Fail("Error generating embedding: %v", err)
@@ -101,19 +105,19 @@ func registerKnowledgeTools() {
 			wg.Add(4)
 			go func() {
 				defer wg.Done()
-				vectorNodes, nodeVecErr = memory.QuerySimilarNodes(ctx, queryVec, nodeCandidateLimit)
+				vectorNodes, nodeVecErr = memory.QuerySimilarNodes(ctx, env, queryVec, nodeCandidateLimit)
 			}()
 			go func() {
 				defer wg.Done()
-				keywordNodes, nodeKwErr = memory.SearchKnowledgeNodes(ctx, query, nodeCandidateLimit)
+				keywordNodes, nodeKwErr = memory.SearchKnowledgeNodes(ctx, env, query, nodeCandidateLimit)
 			}()
 			go func() {
 				defer wg.Done()
-				vectorEntries, entryVecErr = journal.QuerySimilarEntries(ctx, queryVec, entryCandidateLimit)
+				vectorEntries, entryVecErr = journal.QuerySimilarEntries(ctx, client, queryVec, entryCandidateLimit)
 			}()
 			go func() {
 				defer wg.Done()
-				keywordEntries, entryKwErr = journal.SearchEntries(ctx, query, entryCandidateLimit)
+				keywordEntries, entryKwErr = journal.SearchEntries(ctx, client, query, entryCandidateLimit)
 			}()
 			wg.Wait()
 
@@ -139,7 +143,7 @@ func registerKnowledgeTools() {
 			}
 
 			fusedNodes := memory.FuseKnowledgeNodes(vectorNodes, keywordNodes, fusedNodeTopN)
-			nodes, _ := memory.RerankNodes(ctx, query, fusedNodes, nodeLimit)
+			nodes, _ := memory.RerankNodes(ctx, env, query, fusedNodes, nodeLimit)
 			entries := memory.FuseEntries(vectorEntries, keywordEntries, entryLimit)
 
 			if len(nodes) == 0 && len(entries) == 0 {
@@ -147,7 +151,7 @@ func registerKnowledgeTools() {
 			}
 			var parts []string
 			if len(nodes) > 0 {
-				parts = append(parts, "Knowledge:\n"+formatKnowledgeNodes(ctx, nodes))
+				parts = append(parts, "Knowledge:\n"+formatKnowledgeNodes(ctx, client, nodes))
 			}
 			if len(entries) > 0 {
 				parts = append(parts, "Journal entries:\n"+formatEntries(entries))
@@ -179,7 +183,7 @@ func registerKnowledgeTools() {
 			if err != nil {
 				return tools.Fail("Error generating embedding: %v", err)
 			}
-			nodes, err := memory.QuerySimilarNodes(ctx, queryVec, limit)
+			nodes, err := memory.QuerySimilarNodes(ctx, env, queryVec, limit)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
@@ -198,7 +202,11 @@ func registerKnowledgeTools() {
 				}
 				return tools.OK("No knowledge nodes found.")
 			}
-			result := formatKnowledgeNodes(ctx, nodes)
+			client, err := env.Firestore(ctx)
+			if err != nil {
+				return tools.Fail("Error: %v", err)
+			}
+			result := formatKnowledgeNodes(ctx, client, nodes)
 			if nodeType != "" {
 				return tools.OK("Found %d knowledge nodes of type '%s':\n%s", len(nodes), nodeType, result)
 			}
@@ -225,14 +233,14 @@ func registerKnowledgeTools() {
 			if env == nil || env.Config() == nil {
 				return tools.Fail("Error: no app in context")
 			}
-			node, err := memory.FindEntityNodeByName(ctx, entityName)
+			node, err := memory.FindEntityNodeByName(ctx, env, entityName)
 			if err != nil {
 				return tools.Fail("Error finding entity: %v", err)
 			}
 			if node == nil {
 				return tools.OK("No profile found for '%s'. Try semantic_search for related facts.", entityName)
 			}
-			full, err := memory.GetKnowledgeNodeByID(ctx, node.UUID)
+			full, err := memory.GetKnowledgeNodeByID(ctx, env, node.UUID)
 			if err != nil {
 				return tools.Fail("Error loading entity: %v", err)
 			}
@@ -242,12 +250,12 @@ func registerKnowledgeTools() {
 			wg.Add(2)
 			go func() {
 				defer wg.Done()
-				discovered, _ = memory.DiscoverRelatedNodes(ctx, entityName, 10)
+				discovered, _ = memory.DiscoverRelatedNodes(ctx, env, entityName, 10)
 			}()
 			go func() {
 				defer wg.Done()
 				if len(full.EntityLinks) > 0 {
-					linked, _ = memory.GetKnowledgeNodesByIDs(ctx, full.EntityLinks)
+					linked, _ = memory.GetKnowledgeNodesByIDs(ctx, env, full.EntityLinks)
 				}
 			}()
 			wg.Wait()
@@ -276,12 +284,16 @@ func registerKnowledgeTools() {
 			for _, n := range merged {
 				allParts = append(allParts, fmt.Sprintf("FACT: %s", n.Content))
 			}
+			client, err := env.Firestore(ctx)
+			if err != nil {
+				return tools.Fail("Error: %v", err)
+			}
 			for i, eid := range full.JournalEntryIDs {
 				if i >= 5 {
 					allParts = append(allParts, fmt.Sprintf("JOURNAL: ... and %d more entries", len(full.JournalEntryIDs)-5))
 					break
 				}
-				e, err := journal.GetEntry(ctx, eid)
+				e, err := journal.GetEntry(ctx, client, eid)
 				if err != nil || e == nil {
 					continue
 				}
@@ -299,7 +311,7 @@ func registerKnowledgeTools() {
 
 			const synthesisPrompt = "Consolidate the following entity data into a concise profile. Remove redundant facts and merge overlapping information. Use bullets. Output only the profile, no preamble."
 			userPrompt := utils.WrapAsUserData(allInfo)
-			summary, err := infra.GenerateContentSimple(ctx, synthesisPrompt, userPrompt, env.Config(), &infra.GenConfig{MaxOutputTokens: 512})
+			summary, err := infra.GenerateContentSimple(ctx, env, synthesisPrompt, userPrompt, env.Config(), &infra.GenConfig{MaxOutputTokens: 512})
 			if err != nil {
 				infra.LoggerFrom(ctx).Debug("get_entity_network synthesis failed, returning raw data", "error", err)
 				return tools.OK("Entity: %s\n\n%s", entityName, allInfo)
@@ -340,7 +352,7 @@ func registerSignalTools() {
 		Params:      []tools.Param{tools.LimitParam(5, 10)},
 		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
 			limit := args.IntBounded("limit", 5, 1, 10)
-			signals, err := memory.GetActiveSignals(ctx, limit)
+			signals, err := memory.GetActiveSignals(ctx, env, limit)
 			if err != nil {
 				return tools.Fail("Error fetching signals: %v", err)
 			}

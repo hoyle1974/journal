@@ -17,10 +17,9 @@ type EntryWithAnalysis struct {
 }
 
 // GetEntriesWithAnalysisByDateRange fetches entries in the date range and parses journal_analysis from each doc.
-func GetEntriesWithAnalysisByDateRange(ctx context.Context, startDate, endDate string, limit int) ([]EntryWithAnalysis, error) {
-	client, err := infra.GetFirestoreClient(ctx)
-	if err != nil {
-		return nil, err
+func GetEntriesWithAnalysisByDateRange(ctx context.Context, client *firestore.Client, startDate, endDate string, limit int) ([]EntryWithAnalysis, error) {
+	if client == nil {
+		return nil, fmt.Errorf("firestore client is required")
 	}
 	if limit <= 0 || limit > 500 {
 		limit = 200
@@ -67,14 +66,12 @@ func GetEntriesWithAnalysisByDateRange(ctx context.Context, startDate, endDate s
 }
 
 // QuerySimilarEntries performs a KNN vector search on journal entries.
-func QuerySimilarEntries(ctx context.Context, queryVector []float32, limit int) ([]Entry, error) {
+func QuerySimilarEntries(ctx context.Context, client *firestore.Client, queryVector []float32, limit int) ([]Entry, error) {
 	ctx, span := infra.StartSpan(ctx, "entries.query_similar")
 	defer span.End()
 
-	client, err := infra.GetFirestoreClient(ctx)
-	if err != nil {
-		span.RecordError(err)
-		return nil, err
+	if client == nil {
+		return nil, fmt.Errorf("firestore client is required")
 	}
 
 	const distanceResultField = "_vector_distance"
@@ -128,23 +125,17 @@ func QuerySimilarEntries(ctx context.Context, queryVector []float32, limit int) 
 }
 
 // BackfillEntryEmbeddings finds entries without embeddings, generates them, and updates docs.
-func BackfillEntryEmbeddings(ctx context.Context, limit int) (int, error) {
+// client and projectID must be provided by the caller (e.g. from ToolEnv or FirestoreProvider + Config).
+func BackfillEntryEmbeddings(ctx context.Context, client *firestore.Client, projectID string, limit int) (int, error) {
 	ctx, span := infra.StartSpan(ctx, "entries.backfill_embeddings")
 	defer span.End()
 
+	if client == nil {
+		return 0, fmt.Errorf("firestore client is required")
+	}
 	if limit <= 0 || limit > 50 {
 		limit = 20
 	}
-
-	client, err := infra.GetFirestoreClient(ctx)
-	if err != nil {
-		return 0, err
-	}
-	app := infra.GetApp(ctx)
-	if app == nil || app.Config() == nil {
-		return 0, fmt.Errorf("no app in context")
-	}
-	projectID := app.Config().GoogleCloudProject
 
 	iter := client.Collection(EntriesCollection).
 		OrderBy("timestamp", firestore.Asc).

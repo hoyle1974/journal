@@ -12,7 +12,6 @@ import (
 
 	"cloud.google.com/go/firestore"
 	"google.golang.org/genai"
-	"github.com/jackstrohm/jot/internal/config"
 	"github.com/jackstrohm/jot/internal/prompts"
 	"github.com/jackstrohm/jot/internal/infra"
 	"github.com/jackstrohm/jot/pkg/journal"
@@ -25,14 +24,6 @@ func truncateForLogContext(s string, maxLen int) string {
 		return s
 	}
 	return utils.TruncateString(s, maxLen) + "..."
-}
-
-func getConfigFromCtx(ctx context.Context) *config.Config {
-	app := infra.GetApp(ctx)
-	if app == nil {
-		return nil
-	}
-	return app.Config()
 }
 
 // Context system constants
@@ -57,7 +48,8 @@ type ContextMetadata struct {
 }
 
 // CreateContext creates a new context node in the knowledge graph.
-func CreateContext(ctx context.Context, name, content, contextType string, entities, sourceEntries []string) (string, error) {
+// env supplies Firestore and Config; pass from the caller (e.g. ToolEnv).
+func CreateContext(ctx context.Context, env infra.ToolEnv, name, content, contextType string, entities, sourceEntries []string) (string, error) {
 	ctx, span := infra.StartSpan(ctx, "context.create")
 	defer span.End()
 
@@ -84,7 +76,10 @@ func CreateContext(ctx context.Context, name, content, contextType string, entit
 		return "", fmt.Errorf("failed to marshal context metadata: %w", err)
 	}
 
-	nodeUUID, err := UpsertKnowledge(ctx, content, ContextNodeType, string(metadataJSON), nil)
+	if env == nil {
+		return "", fmt.Errorf("env required")
+	}
+	nodeUUID, err := UpsertKnowledge(ctx, env, content, ContextNodeType, string(metadataJSON), nil)
 	if err != nil {
 		span.RecordError(err)
 		return "", err
@@ -100,13 +95,17 @@ func CreateContext(ctx context.Context, name, content, contextType string, entit
 }
 
 // TouchContext updates a context's last_touched timestamp and optionally boosts relevance.
-func TouchContext(ctx context.Context, contextUUID string, newSourceEntry *string, relevanceBoost float64) error {
+// env supplies Firestore; pass from the caller (e.g. ToolEnv).
+func TouchContext(ctx context.Context, env infra.ToolEnv, contextUUID string, newSourceEntry *string, relevanceBoost float64) error {
 	ctx, span := infra.StartSpan(ctx, "context.touch")
 	defer span.End()
 
 	infra.LoggerFrom(ctx).Info("touching context", "uuid", contextUUID, "boost", relevanceBoost)
 
-	client, err := infra.GetFirestoreClient(ctx)
+	if env == nil {
+		return fmt.Errorf("env required")
+	}
+	client, err := env.Firestore(ctx)
 	if err != nil {
 		span.RecordError(err)
 		return err
@@ -159,7 +158,8 @@ func normalizeContextName(name string) string {
 }
 
 // EnsureContextExists finds a context by name or creates it with placeholder content.
-func EnsureContextExists(ctx context.Context, name string) (string, error) {
+// env supplies Firestore; pass from the caller (e.g. ToolEnv).
+func EnsureContextExists(ctx context.Context, env infra.ToolEnv, name string) (string, error) {
 	ctx, span := infra.StartSpan(ctx, "context.ensure_exists")
 	defer span.End()
 
@@ -168,7 +168,7 @@ func EnsureContextExists(ctx context.Context, name string) (string, error) {
 		return "", fmt.Errorf("context name is empty after normalization")
 	}
 
-	existing, _, err := FindContextByName(ctx, norm)
+	existing, _, err := FindContextByName(ctx, env, norm)
 	if err != nil {
 		return "", err
 	}
@@ -177,7 +177,7 @@ func EnsureContextExists(ctx context.Context, name string) (string, error) {
 	}
 
 	placeholderContent := "Ongoing: " + norm
-	uuid, err := CreateContext(ctx, norm, placeholderContent, "auto", nil, nil)
+	uuid, err := CreateContext(ctx, env, norm, placeholderContent, "auto", nil, nil)
 	if err != nil {
 		span.RecordError(err)
 		return "", err
@@ -187,7 +187,8 @@ func EnsureContextExists(ctx context.Context, name string) (string, error) {
 }
 
 // TouchContextBatch appends multiple entry UUIDs to a context's SourceEntries and updates last_touched.
-func TouchContextBatch(ctx context.Context, contextUUID string, entryUUIDs []string, relevanceBoost float64) error {
+// env supplies Firestore; pass from the caller (e.g. ToolEnv).
+func TouchContextBatch(ctx context.Context, env infra.ToolEnv, contextUUID string, entryUUIDs []string, relevanceBoost float64) error {
 	ctx, span := infra.StartSpan(ctx, "context.touch_batch")
 	defer span.End()
 
@@ -195,7 +196,10 @@ func TouchContextBatch(ctx context.Context, contextUUID string, entryUUIDs []str
 		return nil
 	}
 
-	client, err := infra.GetFirestoreClient(ctx)
+	if env == nil {
+		return fmt.Errorf("env required")
+	}
+	client, err := env.Firestore(ctx)
 	if err != nil {
 		span.RecordError(err)
 		return err
@@ -250,25 +254,29 @@ func (b byRelevanceDesc) Swap(i, j int) {
 }
 
 // GetActiveContexts returns contexts with relevance above MinActiveRelevance, sorted by relevance.
-func GetActiveContexts(ctx context.Context, limit int) ([]KnowledgeNode, []ContextMetadata, error) {
+// env supplies Firestore; pass from the caller (e.g. ToolEnv).
+func GetActiveContexts(ctx context.Context, env infra.ToolEnv, limit int) ([]KnowledgeNode, []ContextMetadata, error) {
 	ctx, span := infra.StartSpan(ctx, "context.get_active")
 	defer span.End()
 	infra.LoggerFrom(ctx).Debug("get active contexts", "limit", limit, "reason", "for system prompt and context-aware answers")
 
-	client, err := infra.GetFirestoreClient(ctx)
+	if env == nil {
+		return nil, nil, fmt.Errorf("env required")
+	}
+	client, err := env.Firestore(ctx)
 	if err != nil {
 		span.RecordError(err)
 		return nil, nil, err
 	}
 
 	permanentContextsOnce.Do(func() {
-		app := infra.GetApp(ctx)
-		if app == nil {
+		if env == nil {
 			return
 		}
-		bgCtx := infra.WithApp(context.Background(), app)
+		envCopy := env
+		bgCtx := context.Background()
 		go func() {
-			if err := InitializePermanentContexts(bgCtx); err != nil {
+			if err := InitializePermanentContexts(bgCtx, envCopy); err != nil {
 				infra.LoggerFrom(bgCtx).Warn("failed to initialize permanent contexts", "error", err)
 			}
 		}()
@@ -329,13 +337,13 @@ func GetActiveContexts(ctx context.Context, limit int) ([]KnowledgeNode, []Conte
 }
 
 // DecayContexts applies time-based decay to all auto contexts.
-func DecayContexts(ctx context.Context) (int, error) {
+func DecayContexts(ctx context.Context, env infra.ToolEnv) (int, error) {
 	ctx, span := infra.StartSpan(ctx, "context.decay")
 	defer span.End()
 
 	infra.LoggerFrom(ctx).Info("starting context decay")
 
-	client, err := infra.GetFirestoreClient(ctx)
+	client, err := env.Firestore(ctx)
 	if err != nil {
 		span.RecordError(err)
 		return 0, err
@@ -423,11 +431,11 @@ func DecayContexts(ctx context.Context) (int, error) {
 }
 
 // DeleteContext deletes a context by UUID.
-func DeleteContext(ctx context.Context, contextUUID string) error {
+func DeleteContext(ctx context.Context, env infra.ToolEnv, contextUUID string) error {
 	ctx, span := infra.StartSpan(ctx, "context.delete")
 	defer span.End()
 
-	client, err := infra.GetFirestoreClient(ctx)
+	client, err := env.Firestore(ctx)
 	if err != nil {
 		span.RecordError(err)
 		return err
@@ -443,9 +451,12 @@ func DeleteContext(ctx context.Context, contextUUID string) error {
 	return nil
 }
 
-// GetContextMetadata returns metadata for a context by UUID.
-func GetContextMetadata(ctx context.Context, contextUUID string) (*ContextMetadata, error) {
-	client, err := infra.GetFirestoreClient(ctx)
+// GetContextMetadata returns metadata for a context by UUID. env supplies Firestore; pass from the caller (e.g. ToolEnv).
+func GetContextMetadata(ctx context.Context, env infra.ToolEnv, contextUUID string) (*ContextMetadata, error) {
+	if env == nil {
+		return nil, fmt.Errorf("env required")
+	}
+	client, err := env.Firestore(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -462,12 +473,15 @@ func GetContextMetadata(ctx context.Context, contextUUID string) (*ContextMetada
 	return &meta, nil
 }
 
-// FindContextByName finds a context by its name.
-func FindContextByName(ctx context.Context, name string) (*KnowledgeNode, *ContextMetadata, error) {
+// FindContextByName finds a context by its name. env supplies Firestore; pass from the caller (e.g. ToolEnv).
+func FindContextByName(ctx context.Context, env infra.ToolEnv, name string) (*KnowledgeNode, *ContextMetadata, error) {
 	ctx, span := infra.StartSpan(ctx, "context.find_by_name")
 	defer span.End()
 
-	client, err := infra.GetFirestoreClient(ctx)
+	if env == nil {
+		return nil, nil, fmt.Errorf("env required")
+	}
+	client, err := env.Firestore(ctx)
 	if err != nil {
 		span.RecordError(err)
 		return nil, nil, err
@@ -514,21 +528,22 @@ func FindContextByName(ctx context.Context, name string) (*KnowledgeNode, *Conte
 }
 
 // MatchEntryToContexts finds contexts that semantically match the entry content.
-func MatchEntryToContexts(ctx context.Context, entryContent string, threshold float64) ([]string, []float64, error) {
+// env supplies Firestore and Config; pass from the caller (e.g. ToolEnv).
+func MatchEntryToContexts(ctx context.Context, env infra.ToolEnv, entryContent string, threshold float64) ([]string, []float64, error) {
 	ctx, span := infra.StartSpan(ctx, "context.match_entry")
 	defer span.End()
 
-	cfg := getConfigFromCtx(ctx)
-	if cfg == nil {
-		return nil, nil, fmt.Errorf("no app config in context")
+	if env == nil || env.Config() == nil {
+		return nil, nil, fmt.Errorf("env and config required")
 	}
+	cfg := env.Config()
 	entryVector, err := infra.GenerateEmbedding(ctx, cfg.GoogleCloudProject, entryContent)
 	if err != nil {
 		span.RecordError(err)
 		return nil, nil, err
 	}
 
-	client, err := infra.GetFirestoreClient(ctx)
+	client, err := env.Firestore(ctx)
 	if err != nil {
 		span.RecordError(err)
 		return nil, nil, err
@@ -575,13 +590,14 @@ func MatchEntryToContexts(ctx context.Context, entryContent string, threshold fl
 }
 
 // DetectOrCreateContext analyzes entry content and either links to existing context or creates new.
-func DetectOrCreateContext(ctx context.Context, entryContent, entryUUID string) ([]string, error) {
+// env supplies Firestore and Config; pass from the caller (e.g. ToolEnv).
+func DetectOrCreateContext(ctx context.Context, env infra.ToolEnv, entryContent, entryUUID string) ([]string, error) {
 	ctx, span := infra.StartSpan(ctx, "context.detect_or_create")
 	defer span.End()
 
 	infra.LoggerFrom(ctx).Info("detecting context for entry", "entry_uuid", entryUUID, "content", truncateForLogContext(entryContent, 50))
 
-	matchedUUIDs, scores, err := MatchEntryToContexts(ctx, entryContent, 0.6)
+	matchedUUIDs, scores, err := MatchEntryToContexts(ctx, env, entryContent, 0.6)
 	if err != nil {
 		infra.LoggerFrom(ctx).Warn("context matching failed", "error", err)
 	}
@@ -592,7 +608,7 @@ func DetectOrCreateContext(ctx context.Context, entryContent, entryUUID string) 
 			if scores[i] > 0.8 {
 				relevanceBoost = 0.10
 			}
-			if err := TouchContext(ctx, uuid, &entryUUID, relevanceBoost); err != nil {
+			if err := TouchContext(ctx, env, uuid, &entryUUID, relevanceBoost); err != nil {
 				infra.LoggerFrom(ctx).Warn("failed to touch matched context", "uuid", uuid, "error", err)
 			}
 		}
@@ -600,22 +616,22 @@ func DetectOrCreateContext(ctx context.Context, entryContent, entryUUID string) 
 		return matchedUUIDs, nil
 	}
 
-	shouldCreate, contextName, entities := analyzeForNewContext(ctx, entryContent)
+	shouldCreate, contextName, entities := analyzeForNewContext(ctx, env, entryContent)
 	if !shouldCreate {
 		infra.LoggerFrom(ctx).Debug("no new context needed", "entry_uuid", entryUUID)
 		return nil, nil
 	}
 
-	existingNode, _, err := FindContextByName(ctx, contextName)
+	existingNode, _, err := FindContextByName(ctx, env, contextName)
 	if err == nil && existingNode != nil {
 		infra.LoggerFrom(ctx).Info("context with name already exists, touching instead", "name", contextName, "uuid", existingNode.UUID)
-		if err := TouchContext(ctx, existingNode.UUID, &entryUUID, 0.05); err != nil {
+		if err := TouchContext(ctx, env, existingNode.UUID, &entryUUID, 0.05); err != nil {
 			infra.LoggerFrom(ctx).Warn("failed to touch existing context", "uuid", existingNode.UUID, "error", err)
 		}
 		return []string{existingNode.UUID}, nil
 	}
 
-	nodeUUID, err := CreateContext(ctx, contextName, entryContent, "auto", entities, []string{entryUUID})
+	nodeUUID, err := CreateContext(ctx, env, contextName, entryContent, "auto", entities, []string{entryUUID})
 	if err != nil {
 		span.RecordError(err)
 		return nil, fmt.Errorf("failed to create context: %w", err)
@@ -625,17 +641,15 @@ func DetectOrCreateContext(ctx context.Context, entryContent, entryUUID string) 
 	return []string{nodeUUID}, nil
 }
 
-func analyzeForNewContext(ctx context.Context, entryContent string) (bool, string, []string) {
+func analyzeForNewContext(ctx context.Context, env infra.ToolEnv, entryContent string) (bool, string, []string) {
 	ctx, span := infra.StartSpan(ctx, "context.analyze_for_new")
 	defer span.End()
 
 	if len(strings.TrimSpace(entryContent)) < 20 {
 		return false, "", nil
 	}
-
-	app := infra.GetApp(ctx)
-	if app == nil || getConfigFromCtx(ctx) == nil {
-		infra.LoggerFrom(ctx).Warn("failed to get app for context analysis")
+	if env == nil || env.Config() == nil {
+		infra.LoggerFrom(ctx).Warn("env required for context analysis")
 		return false, "", nil
 	}
 	prompt, err := prompts.BuildContextAnalyze(prompts.ContextAnalyzeData{
@@ -647,10 +661,10 @@ func analyzeForNewContext(ctx context.Context, entryContent string) (bool, strin
 	}
 	req := &infra.LLMRequest{
 		Parts:     []*genai.Part{{Text: prompt}},
-		Model:     app.Config().GeminiModel,
+		Model:     env.Config().GeminiModel,
 		GenConfig: &infra.GenConfig{MaxOutputTokens: 512},
 	}
-	resp, err := app.Dispatch(ctx, req)
+	resp, err := env.Dispatch(ctx, req)
 	if err != nil {
 		infra.LoggerFrom(ctx).Warn("context analysis failed", "error", err)
 		return false, "", nil
@@ -722,11 +736,15 @@ func synthesisHasNoNewInfo(rawLogs, oldContent string) bool {
 }
 
 // SynthesizeContext loads the context node and its source entries, then uses the LLM to produce a briefing.
-func SynthesizeContext(ctx context.Context, contextUUID string) error {
+// env supplies Firestore and Config; pass from the caller (e.g. ToolEnv).
+func SynthesizeContext(ctx context.Context, env infra.ToolEnv, contextUUID string) error {
 	ctx, span := infra.StartSpan(ctx, "context.synthesize")
 	defer span.End()
 
-	client, err := infra.GetFirestoreClient(ctx)
+	if env == nil {
+		return fmt.Errorf("env required")
+	}
+	client, err := env.Firestore(ctx)
 	if err != nil {
 		span.RecordError(err)
 		return err
@@ -759,7 +777,7 @@ func SynthesizeContext(ctx context.Context, contextUUID string) error {
 		if totalLen >= maxRawLogsChars {
 			break
 		}
-		entry, err := journal.GetEntry(ctx, uuid)
+		entry, err := journal.GetEntry(ctx, client, uuid)
 		if err != nil || entry == nil {
 			continue
 		}
@@ -792,14 +810,14 @@ func SynthesizeContext(ctx context.Context, contextUUID string) error {
 		return nil
 	}
 
-	cfg := getConfigFromCtx(ctx)
+	cfg := env.Config()
 	if cfg == nil {
 		return fmt.Errorf("no app config for synthesis")
 	}
 	userPrompt := fmt.Sprintf("Current Briefing:\n%s\n\nNew Information:\n%s\n\nTask: Write a new briefing (max 250 words) that preserves active Open Loops, critical dates, and key stakeholder preferences. Use bullet points for status.",
 		utils.WrapAsUserData(oldContent), utils.WrapAsUserData(rawLogs))
 
-	newContent, err := infra.GenerateContentSimple(ctx, prompts.ExecutiveSummary(), userPrompt, cfg, &infra.GenConfig{MaxOutputTokens: 512})
+	newContent, err := infra.GenerateContentSimple(ctx, env, prompts.ExecutiveSummary(), userPrompt, cfg, &infra.GenConfig{MaxOutputTokens: 512})
 	if err != nil {
 		span.RecordError(err)
 		return err
@@ -835,10 +853,14 @@ func SynthesizeContext(ctx context.Context, contextUUID string) error {
 }
 
 // InitializePermanentContexts ensures permanent contexts exist.
-func InitializePermanentContexts(ctx context.Context) error {
+// env supplies Firestore and Config; pass from the caller (e.g. ToolEnv).
+func InitializePermanentContexts(ctx context.Context, env infra.ToolEnv) error {
 	ctx, span := infra.StartSpan(ctx, "context.init_permanent")
 	defer span.End()
 
+	if env == nil {
+		return fmt.Errorf("env required")
+	}
 	permanentContexts := []struct {
 		Name    string
 		Content string
@@ -850,7 +872,7 @@ func InitializePermanentContexts(ctx context.Context) error {
 	}
 
 	for _, pc := range permanentContexts {
-		existing, _, err := FindContextByName(ctx, pc.Name)
+		existing, _, err := FindContextByName(ctx, env, pc.Name)
 		if err != nil {
 			infra.LoggerFrom(ctx).Warn("error checking permanent context", "name", pc.Name, "error", err)
 			continue
@@ -858,7 +880,7 @@ func InitializePermanentContexts(ctx context.Context) error {
 		if existing != nil {
 			continue
 		}
-		_, err = CreateContext(ctx, pc.Name, pc.Content, "permanent", nil, nil)
+		_, err = CreateContext(ctx, env, pc.Name, pc.Content, "permanent", nil, nil)
 		if err != nil {
 			infra.LoggerFrom(ctx).Warn("failed to create permanent context", "name", pc.Name, "error", err)
 			continue

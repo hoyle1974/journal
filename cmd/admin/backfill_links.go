@@ -23,7 +23,11 @@ func runBackfillLinks(ctx context.Context, app *infra.App, args []string) {
 	_ = fs.Parse(args)
 
 	cfg := app.Config()
-	entries, err := journal.GetEntriesAsc(ctx, *limit)
+	client, err := app.Firestore(ctx)
+	if err != nil {
+		log.Fatalf("firestore: %v", err)
+	}
+	entries, err := journal.GetEntriesAsc(ctx, client, *limit)
 	if err != nil {
 		log.Fatalf("get entries: %v", err)
 	}
@@ -31,7 +35,7 @@ func runBackfillLinks(ctx context.Context, app *infra.App, args []string) {
 
 	linked, created, skipped, errors := 0, 0, 0, 0
 	for i, e := range entries {
-		extract, err := agent.RunEvaluatorExtract(ctx, e.Content)
+		extract, err := agent.RunEvaluatorExtract(ctx, app, e.Content)
 		if err != nil {
 			log.Printf("[%d/%d] %s extract error: %v", i+1, len(entries), e.UUID, err)
 			errors++
@@ -49,7 +53,7 @@ func runBackfillLinks(ctx context.Context, app *infra.App, args []string) {
 			continue
 		}
 
-		existing, err := memory.FindNearestWithThreshold(ctx, vec, distanceThreshold)
+		existing, err := memory.FindNearestWithThreshold(ctx, app, vec, distanceThreshold)
 		if err != nil {
 			log.Printf("[%d/%d] %s find-nearest error: %v", i+1, len(entries), e.UUID, err)
 			errors++
@@ -57,13 +61,13 @@ func runBackfillLinks(ctx context.Context, app *infra.App, args []string) {
 		}
 
 		if existing != nil {
-			action, collErr := infra.EvaluateFactCollision(ctx, cfg, extract.FactToStore, existing.Content)
+			action, collErr := infra.EvaluateFactCollision(ctx, app, cfg, extract.FactToStore, existing.Content)
 			if collErr != nil {
 				action = "insert"
 			}
 			if action == "update" {
 				if !*dryRun {
-					if err := memory.AppendJournalEntryIDsToNode(ctx, existing.UUID, []string{e.UUID}); err != nil {
+					if err := memory.AppendJournalEntryIDsToNode(ctx, app, existing.UUID, []string{e.UUID}); err != nil {
 						log.Printf("[%d/%d] %s append link error: %v", i+1, len(entries), e.UUID, err)
 						errors++
 						continue
@@ -79,7 +83,7 @@ func runBackfillLinks(ctx context.Context, app *infra.App, args []string) {
 					} else if extract.Domain == "work" {
 						nodeType = "project"
 					}
-					if _, err := memory.UpsertSemanticMemory(ctx, extract.FactToStore, nodeType, extract.Domain, extract.Significance, nil, []string{e.UUID}); err != nil {
+					if _, err := memory.UpsertSemanticMemory(ctx, app, extract.FactToStore, nodeType, extract.Domain, extract.Significance, nil, []string{e.UUID}); err != nil {
 						log.Printf("[%d/%d] %s upsert error: %v", i+1, len(entries), e.UUID, err)
 						errors++
 						continue
@@ -96,7 +100,7 @@ func runBackfillLinks(ctx context.Context, app *infra.App, args []string) {
 				} else if extract.Domain == "work" {
 					nodeType = "project"
 				}
-				if _, err := memory.UpsertSemanticMemory(ctx, extract.FactToStore, nodeType, extract.Domain, extract.Significance, nil, []string{e.UUID}); err != nil {
+				if _, err := memory.UpsertSemanticMemory(ctx, app, extract.FactToStore, nodeType, extract.Domain, extract.Significance, nil, []string{e.UUID}); err != nil {
 					log.Printf("[%d/%d] %s upsert error: %v", i+1, len(entries), e.UUID, err)
 					errors++
 					continue
