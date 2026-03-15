@@ -11,5 +11,5 @@ Produce detailed updates and instructions  with specific changes that need to oc
 While cleaning up docs also call out any duplicate code that should be consolidated.
 
 "
-gitingest . --output /tmp/digest.txt --exclude-pattern "briefs/done/*" --exclude-pattern ".gitkeep" --exclude-pattern "go.sum" --exclude-pattern "go.mod"  2>/dev/null 
+gitingest . --output /tmp/digest.txt --include "cmd/**" --exclude-pattern "briefs/done/*" --exclude-pattern ".gitkeep" --exclude-pattern "go.sum" --exclude-pattern "go.mod"  2>/dev/null 
 cat /tmp/digest.txt
