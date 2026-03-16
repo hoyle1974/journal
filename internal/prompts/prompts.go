@@ -35,9 +35,6 @@ var contextAnalyzeTxt string
 //go:embed journal_analyze.txt
 var journalAnalyzeTxt string
 
-//go:embed reflection_check.txt
-var reflectionCheckTxt string
-
 //go:embed knowledge_gap.txt
 var knowledgeGapTxt string
 
@@ -77,9 +74,6 @@ var activityHistoryTxt string
 //go:embed dream_story.txt
 var dreamStoryTxt string
 
-//go:embed synthesis_pass.txt
-var synthesisPassTxt string
-
 //go:embed app_capabilities.txt
 var appCapabilitiesTxt string
 
@@ -87,8 +81,7 @@ var (
 	systemPromptTmpl    = template.Must(template.New("system").Parse(systemPromptTxt))
 	contextAnalyzeTmpl  = template.Must(template.New("context").Parse(contextAnalyzeTxt))
 	journalAnalyzeTmpl  = template.Must(template.New("journal").Parse(journalAnalyzeTxt))
-	reflectionCheckTmpl = template.Must(template.New("reflection").Parse(reflectionCheckTxt))
-	knowledgeGapTmpl    = template.Must(template.New("knowledgeGap").Parse(knowledgeGapTxt))
+	knowledgeGapTmpl = template.Must(template.New("knowledgeGap").Parse(knowledgeGapTxt))
 	gapDetectorTmpl     = template.Must(template.New("gapDetector").Parse(gapDetectorTxt))
 	rollUpTmpl          = template.Must(template.New("rollUp").Parse(rollUpTxt))
 	activityHistoryTmpl = template.Must(template.New("activityHistory").Parse(activityHistoryTxt))
@@ -163,21 +156,6 @@ func BuildJournalAnalyze(data JournalAnalyzeData) (string, error) {
 	var buf bytes.Buffer
 	if err := journalAnalyzeTmpl.Execute(&buf, data); err != nil {
 		return "", fmt.Errorf("execute journal analyze: %w", err)
-	}
-	return buf.String(), nil
-}
-
-// ReflectionCheckData holds answer and semantic memory for reflection check.
-type ReflectionCheckData struct {
-	Answer         string
-	SemanticMemory string
-}
-
-// BuildReflectionCheck executes the reflection-check template.
-func BuildReflectionCheck(data ReflectionCheckData) (string, error) {
-	var buf bytes.Buffer
-	if err := reflectionCheckTmpl.Execute(&buf, data); err != nil {
-		return "", fmt.Errorf("execute reflection check: %w", err)
 	}
 	return buf.String(), nil
 }
@@ -275,9 +253,6 @@ func Specialist(domain string) string {
 
 // DreamStoryTemplate returns the dream narrative (morning readout) system prompt.
 func DreamStoryTemplate() string { return dreamStoryTxt }
-
-// SynthesisPass returns the synthesis-pass system prompt (retrieve-and-summarize refinement).
-func SynthesisPass() string { return synthesisPassTxt }
 
 // AppCapabilities returns the static, LLM-readable description of Jot's parts (entry points, agents, memory, journal, tools).
 // Injected into gap-detection during dreaming so the model understands current capabilities. Keep app_capabilities.txt up to date when the codebase changes.

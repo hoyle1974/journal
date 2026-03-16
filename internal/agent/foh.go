@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"google.golang.org/genai"
-	"github.com/jackstrohm/jot/internal/prompts"
 	"github.com/jackstrohm/jot/internal/infra"
 	"github.com/jackstrohm/jot/pkg/utils"
 	"github.com/jackstrohm/jot/tools"
@@ -276,16 +275,11 @@ func RunQueryWithDebug(ctx context.Context, app FOHEnv, question, source string,
 
 		if !hasCalls {
 			if answerText != "" {
-				answer := strings.TrimSpace(answerText)
-
-				if pass, reason, err := runReflectionCheck(ctx, app, answer, question); err == nil && !pass {
-					infra.LoggerFrom(ctx).Debug("FOH: reflection check failed", "query_run_id", queryRunID, "phase", "reflection", "reason", reason, "action", "revising answer against semantic memory")
-					logDebug("[reflect] failed: %s", reason)
-					revised := runReflectionRevision(ctx, app, session, question, answer, reason)
-					if revised != "" {
-						answer = revised
-						logDebug("[reflect] revised answer (%d chars)", len(answer))
-					}
+				answer, missingFromAudit := extractMissingInfoAndAnswer(answerText)
+				if len(missingFromAudit) > 0 {
+					knowledgeGapDetected = true
+					infra.LoggerFrom(ctx).Debug("FOH: model reported missing info (unified audit)", "query_run_id", queryRunID, "phase", "answer", "missing", missingFromAudit)
+					logDebug("[audit] missing_info: %v", missingFromAudit)
 				}
 
 				toolNamesFromCalls := make([]string, 0, len(toolCalls))
@@ -303,14 +297,6 @@ func RunQueryWithDebug(ctx context.Context, app FOHEnv, question, source string,
 					"tool_calls", len(toolCalls),
 					"duration_ms", time.Since(startTime).Milliseconds(),
 				)
-
-				// Synthesis pass: when multiple search results were used, refine the answer to avoid dumping/repetition.
-				if searchToolCallCount > 1 || retrievedContent.Len() > 2000 {
-					if refined, err := runSynthesisPass(ctx, app, question, answer, retrievedContent.String()); err == nil && refined != "" {
-						logDebug("[synthesis] applied synthesis pass (%d -> %d chars)", len(answer), len(refined))
-						answer = refined
-					}
-				}
 
 				if !strings.HasPrefix(answer, "Error:") {
 					if err := EnqueueSaveQuery(ctx, app.App(), question, answer, source, knowledgeGapDetected); err != nil {
@@ -566,11 +552,10 @@ func RunQueryWithDebug(ctx context.Context, app FOHEnv, question, source string,
 	infra.GeminiCallsTotal.Inc()
 	text := infra.ExtractTextFromResponse(resp)
 	if text != "" {
-		answer := strings.TrimSpace(text)
-		if searchToolCallCount > 1 || retrievedContent.Len() > 2000 {
-			if refined, err := runSynthesisPass(ctx, app, question, answer, retrievedContent.String()); err == nil && refined != "" {
-				answer = refined
-			}
+		answer, missingFromAudit := extractMissingInfoAndAnswer(text)
+		if len(missingFromAudit) > 0 {
+			knowledgeGapDetected = true
+			infra.LoggerFrom(ctx).Debug("FOH: model reported missing info (forced conclusion)", "query_run_id", queryRunID, "phase", "forced_conclusion", "missing", missingFromAudit)
 		}
 		if !strings.HasPrefix(answer, "Error:") {
 			_ = EnqueueSaveQuery(ctx, app.App(), question, answer, source, knowledgeGapDetected)
@@ -609,102 +594,36 @@ func RunQueryWithDebug(ctx context.Context, app FOHEnv, question, source string,
 	}
 }
 
-const memoryQueryTemplate = "Permanent facts about: {{.Input}}"
-
-func runReflectionCheck(ctx context.Context, app FOHEnv, answer, question string) (pass bool, reason string, err error) {
-	// Use question (user intent) for the memory query, not the answer. Otherwise for
-	// short answers like "Logged." we search for "Permanent facts about: Logged."
-	// and pull irrelevant entries instead of facts relevant to what the user said.
-	memoryQuery := "Permanent facts about: "
-	if len(question) > 200 {
-		memoryQuery += question[:200]
-	} else {
-		memoryQuery += question
+// extractMissingInfoAndAnswer parses the model's final answer text. If the model included
+// "MISSING_INFO: <semicolon-separated list>" (per unified-audit instructions), that line is
+// stripped and the list is returned; otherwise missing is nil. The cleaned answer is returned.
+func extractMissingInfoAndAnswer(raw string) (answer string, missing []string) {
+	raw = strings.TrimSpace(raw)
+	simple, _ := utils.ParseKeyValueMap(raw)
+	missingVal := strings.TrimSpace(simple["missing_info"])
+	if missingVal == "" {
+		return raw, nil
 	}
-	searchResult := tools.Execute(ctx, app, "semantic_search", map[string]interface{}{
-		"query":       memoryQuery,
-		"limit":       5,
-		"source_text": question,
-		"template":    memoryQueryTemplate,
-	})
-	semanticMemory := searchResult.Result
-	if !searchResult.Success || semanticMemory == "" {
-		semanticMemory = "(No semantic memory retrieved)"
+	for _, s := range strings.Split(missingVal, ";") {
+		if t := strings.TrimSpace(s); t != "" {
+			missing = append(missing, t)
+		}
 	}
-
-	if app == nil {
-		return true, "", nil
+	// Strip the MISSING_INFO line from the answer so it is not shown to the user.
+	const prefix = "MISSING_INFO:"
+	var out []string
+	for _, line := range strings.Split(raw, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(strings.ToUpper(trimmed), prefix) {
+			continue
+		}
+		out = append(out, line)
 	}
-	prompt, err := prompts.BuildReflectionCheck(prompts.ReflectionCheckData{
-		Answer:         utils.SanitizePrompt(answer),
-		SemanticMemory: utils.SanitizePrompt(semanticMemory),
-	})
-	if err != nil {
-		return true, "", fmt.Errorf("build reflection check prompt: %w", err)
+	answer = strings.TrimSpace(strings.Join(out, "\n"))
+	if answer == "" {
+		answer = raw // fallback: strip failed or left nothing
 	}
-	req := &infra.LLMRequest{
-		Parts:     []*genai.Part{{Text: prompt}},
-		Model:     app.Config().GeminiModel,
-		GenConfig: &infra.GenConfig{MaxOutputTokens: 256},
-	}
-	infra.GeminiCallsTotal.Inc()
-	resp, err := app.Dispatch(ctx, req)
-	if err != nil {
-		return true, "", err
-	}
-	text := strings.TrimSpace(infra.ExtractTextFromResponse(resp))
-	simple, _ := utils.ParseKeyValueMap(text)
-	passStr := strings.TrimSpace(strings.ToLower(simple["pass"]))
-	pass = passStr == "true" || passStr == "yes" || passStr == "1"
-	reason = strings.TrimSpace(simple["reason"])
-	return pass, reason, nil
-}
-
-const synthesisPassRetrievedMaxBytes = 6000
-
-// runSynthesisPass refines a candidate answer when multiple search results were merged, to reduce repetition and "dumping."
-func runSynthesisPass(ctx context.Context, app FOHEnv, question, candidateAnswer, retrievedContent string) (string, error) {
-	if app == nil || app.Config() == nil {
-		return candidateAnswer, fmt.Errorf("no app or config")
-	}
-	truncated := retrievedContent
-	if len(truncated) > synthesisPassRetrievedMaxBytes {
-		truncated = truncated[:synthesisPassRetrievedMaxBytes] + "\n... (truncated)"
-	}
-	userPrompt := fmt.Sprintf("User question:\n%s\n\nDraft answer (to refine):\n%s\n\nRetrieved content (merge and deduplicate):\n%s",
-		utils.WrapAsUserData(utils.SanitizePrompt(question)),
-		utils.WrapAsUserData(utils.SanitizePrompt(candidateAnswer)),
-		utils.WrapAsUserData(utils.SanitizePrompt(truncated)))
-	refined, err := infra.GenerateContentSimple(ctx, app, prompts.SynthesisPass()+prompts.DataSafety(), userPrompt, app.Config(), &infra.GenConfig{
-		MaxOutputTokens: 1024,
-		ModelOverride:   app.Config().GeminiModel,
-	})
-	if err != nil {
-		return candidateAnswer, err
-	}
-	return refined, nil
-}
-
-func runReflectionRevision(ctx context.Context, app FOHEnv, session *infra.ChatSession, question, previousAnswer, reason string) string {
-	searchResult := tools.Execute(ctx, app, "semantic_search", map[string]interface{}{
-		"query": question,
-		"limit": 10,
-	})
-	extraMemory := searchResult.Result
-	if !searchResult.Success {
-		extraMemory = "(Search failed)"
-	}
-	revisePrompt := fmt.Sprintf("Additional semantic memory:\n%s\n\nYour previous answer was flagged: %s\nPlease provide a revised final answer that avoids contradicting permanent facts and removes Gravel. Be concise.", utils.SanitizePrompt(extraMemory), utils.SanitizePrompt(reason))
-	resp, err := session.SendMessage(ctx,
-		&genai.Part{FunctionResponse: &genai.FunctionResponse{Name: "semantic_search", Response: map[string]any{"result": utils.SanitizePrompt(extraMemory)}}},
-		&genai.Part{Text: revisePrompt},
-	)
-	if err != nil {
-		return ""
-	}
-	infra.GeminiCallsTotal.Inc()
-	text := infra.ExtractTextFromResponse(resp)
-	return strings.TrimSpace(text)
+	return answer, missing
 }
 
 func normalizedToolArgs(args map[string]interface{}) string {

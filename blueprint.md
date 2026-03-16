@@ -29,10 +29,9 @@ The main query loop. Invoked via `internal/service` (`RunQuery` → `agent.RunQu
 
 1. **Start:** Log user input as an entry (`AddEntryAndEnqueue`), build system prompt (identity, contexts, knowledge-gap block, open todos).
 2. **Loop:** LLM either answers or issues tool calls. Tools run in parallel (worker pool); results are sent back to the LLM.
-3. **Reflect:** Before returning, a reflection check validates the draft answer against semantic memory to reduce hallucinations; revision may be applied.
-4. **Synthesis pass:** When multiple search results were used, a refinement pass reduces repetition and dumping.
-5. **Answer:** Save query (and optional knowledge-gap flag) via `EnqueueSaveQuery`. The raw answer is then passed through the **persona layer** (`internal/persona`), which rewrites it in a default friendly-assistant tone before delivery.
-6. **Persona:** CLI, Twilio, Telegram, Google Doc sync, GET /dream/latest narrative, and GET /pending-questions question text are all formatted through the persona layer (default: friendly personal assistant, professional, transparent when unable to answer).
+3. **Unified audit:** The system prompt requires the model to perform reflection, gap detection, and synthesis in its reasoning before giving the final answer (no separate reflection or synthesis API passes). If the model outputs `MISSING_INFO: <list>`, that is parsed and the query is saved as a knowledge gap.
+4. **Answer:** Save query (and optional knowledge-gap flag) via `EnqueueSaveQuery`. The raw answer is then passed through the **persona layer** (`internal/persona`), which rewrites it in a default friendly-assistant tone before delivery.
+5. **Persona:** CLI, Twilio, Telegram, Google Doc sync, GET /dream/latest narrative, and GET /pending-questions question text are all formatted through the persona layer (default: friendly personal assistant, professional, transparent when unable to answer).
 
 Tools include journal, knowledge (semantic_search, upsert_knowledge, etc.), context, task, web, utility, and specialists. `discovery_search` maps intent to tool schemas when the model is unsure which tool to use.
 
