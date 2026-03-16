@@ -1,9 +1,9 @@
 # Brief: Multimodal image support
 
 **Date:** 20250315
-**Status:** in-progress
-**Branch:** `feature/multimodal-image-support`
-**Worktree:** `../jot-multimodal-image-support`
+**Status:** done
+**Branch:** `feature/multimodal-image-support` (merged to main)
+**Worktree:** removed
 
 ---
 
@@ -67,25 +67,25 @@ Add image support to JOT so users can attach images to journal entries via CLI (
 ## Checklist
 
 **Implementation**
-- [ ] New code passes `*infra.App` explicitly
-- [ ] All logging uses `LoggerFrom(ctx)`
-- [ ] Errors wrapped with `%w`
-- [ ] No file exceeds 400 lines
+- [x] New code passes `*infra.App` explicitly
+- [x] All logging uses `LoggerFrom(ctx)`
+- [x] Errors wrapped with `%w`
+- [x] No file exceeds 400 lines
 
 **Verification**
-- [ ] `go build ./...` passes
-- [ ] `go test ./...` passes
+- [x] `go build ./...` passes
+- [x] `go test ./...` passes
 - [ ] Manual: `jot log --attach ./image.png "Caption"` and curl multipart to `/log`
 
 **Wrap-up**
-- [ ] `app_capabilities.txt` updated if capabilities changed
-- [ ] Brief status set to `done` and moved to `briefs/done/`
+- [x] `app_capabilities.txt` updated if capabilities changed
+- [x] Brief status set to `done` and moved to `briefs/done/`
 
 ---
 
 Key Files
 
-briefs/active/20250315_multimodal_image_support.md (this file)
+briefs/done/20250315_multimodal_image_support.md (this file)
 internal/infra/app.go
 pkg/storage/gcs.go (new)
 pkg/journal/entries.go
@@ -105,3 +105,4 @@ internal/config/config.go
 
 - 20250315: Implemented Phase 1–4: GCS storage (pkg/storage), infra.ImageStorage, journal image_url, Agent.AddEntry(imageBytes), handleLog multipart, CLI --attach, Telegram photo download + AddEntry. Build and tests pass. app_capabilities.txt updated. FOH/Dreamer consuming image Parts left for follow-up.
 - 20250316: Multimodal agent awareness: (1) app_capabilities.txt — added "Multimodal capabilities" section and has_image param note on journal tools. (2) system_prompt.txt — identity updated to "multimodal Agentic Second Brain", guidance to use has_image when reasoning about photos. (3) Journal tools — get_recent_entries, get_entries_by_date_range, search_entries now accept optional has_image=true; filterEntriesWithImage in helpers.go. (4) pkg/journal — Entry.ParsedImageDescription added; FormatEntriesForContext appends "[Attached Image Content: ...]" or "[Attached image]" when entry has image so FOH tool results expose visual data to the LLM.
+- 20250316: Merged feature/multimodal-image-support into main; resolved conflicts (journal Entry ImageURL/ParsedImageDescription, AddEntry imageURL, Agent.AddEntry imageBytes, FOH EntryAlreadyAdded, Telegram DownloadFile single signature). Moved brief to briefs/done/, removed worktree.
