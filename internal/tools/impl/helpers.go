@@ -97,8 +97,12 @@ func formatEntries(entries []journal.Entry) string {
 			src = fmt.Sprintf(" (%s)", e.Source)
 		}
 		line := fmt.Sprintf("%d. [%s]%s %s", i+1, ts, src, content)
-		if e.ImageFileID != "" {
-			line += fmt.Sprintf(" [image_file_id: %s]", e.ImageFileID)
+		if e.ImageURL != "" {
+			if e.ParsedImageDescription != "" {
+				line += fmt.Sprintf(" [Attached Image: %s]", e.ParsedImageDescription)
+			} else {
+				line += " [Attached image]"
+			}
 		}
 		lines = append(lines, line)
 	}
@@ -131,4 +135,18 @@ func formatContexts(nodes []memory.KnowledgeNode, metas []memory.ContextMetadata
 // formatQueriesForContext formats query history for LLM context using jot's formatter.
 func formatQueriesForContext(queries []journal.QueryLog) string {
 	return journal.FormatQueriesForContext(queries, 10000)
+}
+
+// filterEntriesWithImage returns entries that have an attached image (ImageURL != ""), up to maxN, preserving order.
+func filterEntriesWithImage(entries []journal.Entry, maxN int) []journal.Entry {
+	out := make([]journal.Entry, 0, maxN)
+	for i := range entries {
+		if entries[i].ImageURL != "" {
+			out = append(out, entries[i])
+			if len(out) >= maxN {
+				break
+			}
+		}
+	}
+	return out
 }

@@ -8,7 +8,9 @@ import (
 	"sync"
 
 	"cloud.google.com/go/firestore"
+	gcs "cloud.google.com/go/storage"
 	"github.com/jackstrohm/jot/internal/config"
+	"github.com/jackstrohm/jot/pkg/storage"
 	"google.golang.org/genai"
 	"github.com/panjf2000/ants/v2"
 )
@@ -48,6 +50,8 @@ type App struct {
 	effectiveDreamerModel  string
 	configuredGeminiModel  string
 	configuredDreamerModel string
+
+	imageStorage storage.ImageStorage
 
 	gdocLogPool             *ants.PoolWithFunc
 	toolExecutionPool       *ants.Pool
@@ -108,6 +112,14 @@ func (a *App) Config() *config.Config {
 // Satisfies agent.FOHEnv and similar interfaces that need to pass *App explicitly.
 func (a *App) App() *App {
 	return a
+}
+
+// ImageStorage returns the image storage for uploading journal attachments. May be a no-op if JOT_IMAGES_BUCKET is not set.
+func (a *App) ImageStorage() storage.ImageStorage {
+	if a.imageStorage != nil {
+		return a.imageStorage
+	}
+	return storage.NoopImageStorage()
 }
 
 // EnqueueTask creates a Cloud Task that POSTs the payload to the API at endpoint.
@@ -242,6 +254,15 @@ func NewApp(ctx context.Context, cfg *config.Config, gdocLog GDocLogFunc, gemini
 	app.geminiClient, app.effectiveGeminiModel, app.effectiveDreamerModel, app.geminiErr = factory(ctx, cfg)
 	if app.geminiErr != nil {
 		return app, app.geminiErr
+	}
+
+	if cfg.ImagesBucket != "" {
+		gcsClient, err := gcs.NewClient(ctx)
+		if err != nil {
+			app.Logger.Warn("GCS client for image upload failed, image attach disabled", "bucket", cfg.ImagesBucket, "error", err)
+		} else {
+			app.imageStorage = storage.NewGCSImageStorage(gcsClient, cfg.ImagesBucket)
+		}
 	}
 
 	if gdocLog != nil {

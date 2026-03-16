@@ -81,6 +81,22 @@ func handleTelegram(s *Server, w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, map[string]string{"ok": "true"})
 	infra.LoggerFrom(ctx).Info("telegram responded 200, processing in background")
 
+	// When message includes a photo, add a journal entry with image before enqueueing the query task.
+	if incoming.ImageFileID != "" {
+		imageBytes, err := s.Telegram.DownloadFile(ctx, incoming.ImageFileID)
+		if err != nil {
+			infra.LoggerFrom(ctx).Warn("telegram photo download failed", "error", err)
+		} else {
+			content := incoming.Text
+			if content == "" {
+				content = "Photo"
+			}
+			if _, addErr := s.Agent.AddEntry(ctx, content, "telegram", nil, imageBytes); addErr != nil {
+				infra.LoggerFrom(ctx).Warn("telegram add entry with image failed", "error", addErr)
+			}
+		}
+	}
+
 	taskID := "process-telegram-query-" + infra.GenShortRunID()
 	parentTraceID := infra.TraceIDFromContext(ctx)
 	payload := map[string]interface{}{

@@ -96,11 +96,12 @@ func QuerySimilarEntries(ctx context.Context, client *firestore.Client, queryVec
 		data := doc.Data()
 		content := infra.GetStringField(data, "content")
 		entries = append(entries, Entry{
-			UUID:        doc.Ref.ID,
-			Content:     content,
-			Source:      infra.GetStringField(data, "source"),
-			Timestamp:   infra.GetStringField(data, "timestamp"),
-			ImageFileID: infra.GetStringField(data, "image_file_id"),
+			UUID:                   doc.Ref.ID,
+			Content:                content,
+			Source:                 infra.GetStringField(data, "source"),
+			Timestamp:              infra.GetStringField(data, "timestamp"),
+			ImageURL:               infra.GetStringField(data, "image_url"),
+			ParsedImageDescription: infra.GetStringField(data, "parsed_image_description"),
 		})
 		score := 0.0
 		if v, ok := data[distanceResultField]; ok {

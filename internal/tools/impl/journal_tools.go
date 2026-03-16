@@ -20,18 +20,35 @@ func init() {
 func registerJournalTools() {
 	tools.Register(&tools.Tool{
 		Name:        "get_recent_entries",
-		Description: "Get the most recent journal entries (newest first). First result is the latest in time; last result is the oldest in the returned set. Use for 'recent' or 'latest' — NOT for 'oldest' or 'earliest'.",
+		Description: "Get the most recent journal entries (newest first). First result is the latest in time; last result is the oldest in the returned set. Use for 'recent' or 'latest' — NOT for 'oldest' or 'earliest'. Set has_image=true to return only entries that contain an attached image.",
 		Category:    "journal",
-		Params:      []tools.Param{tools.CountParam()},
+		Params: []tools.Param{
+			tools.CountParam(),
+			tools.BoolParam("has_image", "Set to true to filter results strictly to journal entries that contain an attached image.", false),
+		},
 		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
 			client, err := env.Firestore(ctx)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
 			count := args.IntBounded("count", 10, 1, 50)
-			entries, err := journal.GetEntries(ctx, client, count)
+			hasImage := args.Bool("has_image", false)
+			limit := count
+			if hasImage {
+				limit = count * 5 // fetch extra to allow filtering down to count
+				if limit > 100 {
+					limit = 100
+				}
+			}
+			entries, err := journal.GetEntries(ctx, client, limit)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
+			}
+			if hasImage {
+				entries = filterEntriesWithImage(entries, count)
+				if len(entries) == 0 {
+					return tools.OK("No recent entries with an attached image found.")
+				}
 			}
 			result := journal.FormatEntriesForContext(entries, 10000)
 			return tools.OK("Found %d recent entries:\n%s", len(entries), result)
@@ -66,6 +83,7 @@ func registerJournalTools() {
 			tools.RequiredStringParam("start_date", "Start date (YYYY-MM-DD or natural: yesterday, last week, this morning, since Tuesday)"),
 			tools.RequiredStringParam("end_date", "End date (YYYY-MM-DD or natural: today, yesterday, last week)"),
 			tools.LimitParam(50, 200),
+			tools.BoolParam("has_image", "Set to true to filter results strictly to journal entries that contain an attached image.", false),
 		},
 		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
 			startDate, ok := args.RequiredString("start_date")
@@ -85,9 +103,20 @@ func registerJournalTools() {
 				return tools.Fail("Error: %v", err)
 			}
 			limit := args.IntBounded("limit", 50, 1, 200)
-			entries, err := journal.GetEntriesByDateRange(ctx, client, startStr, endStr, limit)
+			hasImage := args.Bool("has_image", false)
+			fetchLimit := limit
+			if hasImage {
+				fetchLimit = limit * 3
+				if fetchLimit > 500 {
+					fetchLimit = 500
+				}
+			}
+			entries, err := journal.GetEntriesByDateRange(ctx, client, startStr, endStr, fetchLimit)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
+			}
+			if hasImage {
+				entries = filterEntriesWithImage(entries, limit)
 			}
 			if len(entries) == 0 {
 				return tools.OK("No entries found between %s and %s.", startStr, endStr)
@@ -99,12 +128,13 @@ func registerJournalTools() {
 
 	tools.Register(&tools.Tool{
 		Name:        "search_entries",
-		Description: "Search journal entries for a keyword or phrase. Use semantic_search FIRST for factual questions. Optional category filters by analysis category (work, personal, health, finance, logistics). Limitation: when category is used, only the last calendar month of entries is searched.",
+		Description: "Search journal entries for a keyword or phrase. Use semantic_search FIRST for factual questions. Optional category filters by analysis category (work, personal, health, finance, logistics). Set has_image=true to return only entries that contain an attached image. Limitation: when category is used, only the last calendar month of entries is searched.",
 		Category:    "journal",
 		Params: []tools.Param{
 			tools.RequiredStringParam("query", "The keyword or phrase to search for"),
 			tools.OptionalStringParam("category", "Filter by category: work, personal, health, finance, logistics (requires entries to have been analyzed)"),
 			tools.LimitParam(20, 50),
+			tools.BoolParam("has_image", "Set to true to filter results strictly to journal entries that contain an attached image.", false),
 		},
 		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
 			client, err := env.Firestore(ctx)
@@ -116,6 +146,14 @@ func registerJournalTools() {
 				return tools.MissingParam("query")
 			}
 			limit := args.IntBounded("limit", 20, 1, 50)
+			hasImage := args.Bool("has_image", false)
+			searchLimit := limit
+			if hasImage {
+				searchLimit = limit * 5
+				if searchLimit > 100 {
+					searchLimit = 100
+				}
+			}
 			categoryFilter := strings.ToLower(strings.TrimSpace(args.String("category", "")))
 			var entries []journal.Entry
 			if categoryFilter != "" {
@@ -136,15 +174,18 @@ func registerJournalTools() {
 						continue
 					}
 					entries = append(entries, ew.Entry)
-					if len(entries) >= limit {
+					if len(entries) >= searchLimit {
 						break
 					}
 				}
 			} else {
-				entries, err = journal.SearchEntries(ctx, client, query, limit)
+				entries, err = journal.SearchEntries(ctx, client, query, searchLimit)
 				if err != nil {
 					return tools.Fail("Error: %v", err)
 				}
+			}
+			if hasImage {
+				entries = filterEntriesWithImage(entries, limit)
 			}
 			if len(entries) == 0 {
 				return tools.OK("No entries matching '%s' found.", query)

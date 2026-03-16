@@ -39,6 +39,9 @@ type Config struct {
 	TelegramSecretToken   string
 	AllowedTelegramUserID string
 
+	// ImagesBucket is the GCS bucket name for journal image uploads (optional). Set JOT_IMAGES_BUCKET to enable --attach and Telegram photo ingestion.
+	ImagesBucket string
+
 	// Env is the deployment environment (e.g. production, staging, development). Set via JOT_ENV or GO_ENV; defaults to "production" when K_SERVICE is set, else "development".
 	Env string
 
@@ -77,6 +80,7 @@ func Load() (*Config, error) {
 		cfg.AllowedTelegramUserID = loadSecretOptionalWithDefault(cfg.GoogleCloudProject, "ALLOWED_TELEGRAM_USER_ID", "")
 	}
 
+	cfg.ImagesBucket = loadEnv("JOT_IMAGES_BUCKET", "")
 	cfg.Env = loadEnv("JOT_ENV", loadEnv("GO_ENV", ""))
 	if cfg.Env == "" {
 		if os.Getenv("K_SERVICE") != "" {

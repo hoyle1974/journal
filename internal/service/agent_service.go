@@ -45,10 +45,19 @@ func NewAgentService(app *infra.App) *AgentService {
 	return &AgentService{app: app}
 }
 
-// AddEntry adds an entry and enqueues processing. imageFileID is optional (e.g. Telegram file_id) to link the entry to an image.
-func (a *AgentService) AddEntry(ctx context.Context, content, source string, timestamp *string, imageFileID string) (string, error) {
-	infra.LoggerFrom(ctx).Info("function call", "fn", "AddEntry", "source", source, "content_length", len(content), "image_file_id", imageFileID)
-	entryUUID, err := agent.AddEntryAndEnqueue(ctx, a.app, content, source, timestamp, imageFileID)
+// AddEntry adds an entry and enqueues processing. imageBytes is optional; when non-empty, uploads to GCS and stores image_url on the entry.
+func (a *AgentService) AddEntry(ctx context.Context, content, source string, timestamp *string, imageBytes []byte) (string, error) {
+	infra.LoggerFrom(ctx).Info("function call", "fn", "AddEntry", "source", source, "content_length", len(content), "has_image", len(imageBytes) > 0)
+	var imageURL string
+	if len(imageBytes) > 0 {
+		var err error
+		imageURL, err = a.app.ImageStorage().UploadImage(ctx, imageBytes)
+		if err != nil {
+			infra.LoggerFrom(ctx).Error("function result", "fn", "AddEntry", "error", err.Error())
+			return "", err
+		}
+	}
+	entryUUID, err := agent.AddEntryAndEnqueue(ctx, a.app, content, source, timestamp, imageURL)
 	if err != nil {
 		infra.LoggerFrom(ctx).Error("function result", "fn", "AddEntry", "error", err.Error())
 		return "", err

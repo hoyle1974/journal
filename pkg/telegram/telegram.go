@@ -23,8 +23,7 @@ type Logger interface {
 }
 
 const (
-	telegramAPIBase = "https://api.telegram.org/bot"
-	// telegramFileBase is for downloading files; getFile returns file_path, use this base + token + "/" + file_path.
+	telegramAPIBase  = "https://api.telegram.org/bot"
 	telegramFileBase = "https://api.telegram.org/file/bot"
 )
 
@@ -35,9 +34,12 @@ type WebhookUpdate struct {
 	Edited   *TgMsg  `json:"edited_message"`
 }
 
-// TgPhotoSize is one size of a photo (Telegram sends the same photo in multiple sizes).
+// TgPhotoSize is one size of a photo (Telegram sends multiple; use the last for highest resolution).
 type TgPhotoSize struct {
-	FileID string `json:"file_id"`
+	FileID   string `json:"file_id"`
+	Width    int    `json:"width"`
+	Height   int    `json:"height"`
+	FileSize int    `json:"file_size"`
 }
 
 // TgMsg is the message part of an Update (chat, from, text/caption, photo).
@@ -63,13 +65,14 @@ type TgUser struct {
 }
 
 // IncomingMessage normalizes an incoming webhook to a single message + chat + sender for processing.
+// When the message is a photo, Text is the caption and ImageFileID is the file_id of the largest photo.
 type IncomingMessage struct {
-	UpdateID   int64
-	MessageID  int64
-	ChatID     int64
-	UserID     int64
-	Text       string
-	ImageFileID string // file_id of largest photo when message has a photo (for journal entry with image).
+	UpdateID    int64
+	MessageID   int64
+	ChatID      int64
+	UserID      int64
+	Text        string
+	ImageFileID string // set when message has photo; use DownloadFile to get bytes
 }
 
 // ValidateSecretToken checks the X-Telegram-Bot-Api-Secret-Token header when secret is configured.
@@ -176,7 +179,7 @@ func truncateToMaxBytes(s string, maxBytes int) string {
 // MaxDownloadBytes is the maximum size we will download for a file (e.g. photo) from Telegram.
 const MaxDownloadBytes = 10 * 1024 * 1024 // 10 MiB
 
-// getFileResponse is the JSON shape of getFile API result.
+// getFileResponse is the JSON shape of Telegram getFile API result. FileSize may be omitted by the API.
 type getFileResponse struct {
 	OK     bool `json:"ok"`
 	Result struct {
@@ -219,7 +222,7 @@ func DownloadFile(ctx context.Context, cfg *config.Config, fileID string, log Lo
 		return nil, "", fmt.Errorf("getFile failed or missing file_path: %s", string(respBody))
 	}
 	filePath := fileResp.Result.FilePath
-	if fileResp.Result.FileSize > MaxDownloadBytes {
+	if fileResp.Result.FileSize > 0 && fileResp.Result.FileSize > MaxDownloadBytes {
 		return nil, "", fmt.Errorf("file too large: %d bytes (max %d)", fileResp.Result.FileSize, MaxDownloadBytes)
 	}
 	// 2. Download file from https://api.telegram.org/file/bot<token>/<file_path>

@@ -1,5 +1,12 @@
 #!/bin/bash
 
+NO_TOOLS=0
+for arg in "$@"; do
+    case "$arg" in
+        --no-tools) NO_TOOLS=1 ;;
+    esac
+done
+
 # Define specific files and patterns to exclude based on previous analysis
 # - go.sum: Massive checksum noise 
 # - briefs/done/: Historical records
@@ -22,6 +29,10 @@ EXCLUDE_PATTERNS=(
 # Function to check if a file should be excluded
 is_excluded() {
     local file=$1
+    if [ "$NO_TOOLS" -eq 1 ]; then
+        [[ "$file" == internal/tools/* ]] && return 0
+        [[ "$file" == tools/* ]] && return 0
+    fi
     for pattern in "${EXCLUDE_PATTERNS[@]}"; do
         if [[ "$file" == *"$pattern"* ]]; then
             return 0 # True, it is excluded

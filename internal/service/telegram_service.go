@@ -41,6 +41,17 @@ func (s *TelegramService) IsAllowedUser(userID int64) bool {
 	return telegram.IsAllowedUser(s.cfg(), userID)
 }
 
+// DownloadFile fetches file bytes from Telegram by file_id. Returns bytes and optional MIME type.
+func (s *TelegramService) DownloadFile(ctx context.Context, fileID string) ([]byte, error) {
+	b, _, err := telegram.DownloadFile(ctx, s.cfg(), fileID, infra.LoggerFrom(ctx))
+	return b, err
+}
+
+// DownloadFileWithMIME downloads the file (e.g. photo) from Telegram by file_id. Returns bytes and MIME type.
+func (s *TelegramService) DownloadFileWithMIME(ctx context.Context, fileID string) ([]byte, string, error) {
+	return telegram.DownloadFile(ctx, s.cfg(), fileID, infra.LoggerFrom(ctx))
+}
+
 // ProcessIncomingTelegram processes an incoming Telegram message and returns the response body. app must be non-nil.
 func (s *TelegramService) ProcessIncomingTelegram(ctx context.Context, app *infra.App, msg *telegram.IncomingMessage) string {
 	if msg == nil {
@@ -52,9 +63,4 @@ func (s *TelegramService) ProcessIncomingTelegram(ctx context.Context, app *infr
 // SendMessage sends a message to a Telegram chat via the Bot API.
 func (s *TelegramService) SendMessage(ctx context.Context, chatID int64, body string) error {
 	return telegram.SendMessage(ctx, s.cfg(), chatID, body, infra.LoggerFrom(ctx))
-}
-
-// DownloadFile downloads the file (e.g. photo) from Telegram by file_id. Returns bytes and MIME type.
-func (s *TelegramService) DownloadFile(ctx context.Context, fileID string) ([]byte, string, error) {
-	return telegram.DownloadFile(ctx, s.cfg(), fileID, infra.LoggerFrom(ctx))
 }

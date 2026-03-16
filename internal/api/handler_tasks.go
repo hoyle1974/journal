@@ -142,10 +142,13 @@ func handleProcessTelegramQuery(s *Server, w http.ResponseWriter, r *http.Reques
 	if data.TaskID != "" || data.ParentTraceID != "" {
 		ctx = infra.WithCorrelation(ctx, data.TaskID, data.ParentTraceID)
 	}
-	// When message has an image, download it and generate a caption so the journal entry and FOH get full text.
+	// When message has an image, download it, optionally generate a caption, then create a journal entry (upload to GCS) and pass entry UUID so FOH skips adding a duplicate.
+	var imageBytes []byte
 	if data.ImageFileID != "" {
 		infra.LoggerFrom(ctx).Info("process-telegram-query: processing image, downloading", "chat_id", data.ChatID, "image_file_id", data.ImageFileID)
-		imageBytes, mime, err := s.Telegram.DownloadFile(ctx, data.ImageFileID)
+		var mime string
+		var err error
+		imageBytes, mime, err = s.Telegram.DownloadFileWithMIME(ctx, data.ImageFileID)
 		if err != nil {
 			infra.LoggerFrom(ctx).Warn("process-telegram-query: download image failed, using placeholder", "chat_id", data.ChatID, "error", err)
 		} else {
@@ -172,11 +175,7 @@ func handleProcessTelegramQuery(s *Server, w http.ResponseWriter, r *http.Reques
 				infra.LoggerFrom(ctx).Debug("process-telegram-query: image caption full", "chat_id", data.ChatID, "caption", data.Body)
 			}
 		}
-	}
-	// When message had an image, create a journal entry first so the image counts as logged.
-	// Pass the entry UUID in context so FOH skips adding a duplicate entry.
-	if data.ImageFileID != "" {
-		entryUUID, err := s.Agent.AddEntry(ctx, data.Body, "telegram", nil, data.ImageFileID)
+		entryUUID, err := s.Agent.AddEntry(ctx, data.Body, "telegram", nil, imageBytes)
 		if err != nil {
 			infra.LoggerFrom(ctx).Error("process-telegram-query: add entry for image failed", "chat_id", data.ChatID, "error", err)
 		} else {

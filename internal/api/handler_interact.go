@@ -1,12 +1,15 @@
 package api
 
 import (
+	"io"
 	"net/http"
 	"strings"
 
 	"github.com/jackstrohm/jot/internal/infra"
 	"github.com/jackstrohm/jot/pkg/utils"
 )
+
+const logMultipartMaxBytes = 10 << 20 // 10MB
 
 func handleLog(s *Server, w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
@@ -17,30 +20,55 @@ func handleLog(s *Server, w http.ResponseWriter, r *http.Request) {
 		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
 		return
 	}
-	var data struct {
-		Content   string  `json:"content" validate:"required"`
-		Source    string  `json:"source"`
-		Timestamp *string `json:"timestamp"`
+	var content, source string
+	var timestamp *string
+	var imageBytes []byte
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
+		if err := r.ParseMultipartForm(logMultipartMaxBytes); err != nil {
+			infra.LoggerFrom(ctx).Warn("log multipart parse error", "error", err)
+			LogHandlerResponse(ctx, r.Method, path, http.StatusBadRequest, "error", "invalid multipart form")
+			WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid multipart form"})
+			return
+		}
+		content = strings.TrimSpace(r.FormValue("content"))
+		if content == "" {
+			content = strings.TrimSpace(r.FormValue("text"))
+		}
+		source = strings.TrimSpace(r.FormValue("source"))
+		if ts := r.FormValue("timestamp"); ts != "" {
+			timestamp = &ts
+		}
+		if f, _, err := r.FormFile("image"); err == nil {
+			defer f.Close()
+			imageBytes, _ = io.ReadAll(f)
+		}
+	} else {
+		var data struct {
+			Content   string  `json:"content" validate:"required"`
+			Source    string  `json:"source"`
+			Timestamp *string `json:"timestamp"`
+		}
+		if err := DecodeAndValidate(r, &data, s.Validator); err != nil {
+			infra.LoggerFrom(ctx).Warn("log request decode/validate error", "error", err)
+			LogHandlerResponse(ctx, r.Method, path, http.StatusBadRequest, "error", err.Error())
+			WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		content = strings.TrimSpace(data.Content)
+		source = data.Source
+		timestamp = data.Timestamp
 	}
-	if err := DecodeAndValidate(r, &data, s.Validator); err != nil {
-		infra.LoggerFrom(ctx).Warn("log request decode/validate error", "error", err)
-		LogHandlerResponse(ctx, r.Method, path, http.StatusBadRequest, "error", err.Error())
-		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-		return
-	}
-	content := strings.TrimSpace(data.Content)
 	if content == "" {
 		LogHandlerResponse(ctx, r.Method, path, http.StatusBadRequest, "error", "content cannot be only whitespace")
 		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "content cannot be only whitespace"})
 		return
 	}
-	source := data.Source
 	if source == "" {
 		source = "api"
 	}
-	LogHandlerRequest(ctx, r.Method, path, "source", source, "content_length", len(content))
+	LogHandlerRequest(ctx, r.Method, path, "source", source, "content_length", len(content), "has_image", len(imageBytes) > 0)
 	infra.EntriesTotal.Inc()
-	entryUUID, err := s.Agent.AddEntry(ctx, content, source, data.Timestamp, "")
+	entryUUID, err := s.Agent.AddEntry(ctx, content, source, timestamp, imageBytes)
 	if err != nil {
 		infra.ErrorsTotal.Inc()
 		infra.LoggerFrom(ctx).Error("entry failed", "error", err)

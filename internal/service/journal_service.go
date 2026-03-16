@@ -78,7 +78,7 @@ func journalEntryToAPI(e *journal.Entry) *api.Entry {
 	if e == nil {
 		return nil
 	}
-	return &api.Entry{UUID: e.UUID, Content: e.Content, Source: e.Source, Timestamp: e.Timestamp}
+	return &api.Entry{UUID: e.UUID, Content: e.Content, Source: e.Source, Timestamp: e.Timestamp, ImageURL: e.ImageURL}
 }
 
 // UpdateEntry updates an entry's content.
