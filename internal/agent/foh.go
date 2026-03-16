@@ -99,7 +99,7 @@ func RunQueryWithDebug(ctx context.Context, app FOHEnv, question, source string,
 	}
 
 	infra.EntriesTotal.Inc()
-	entryUUID, err := AddEntryAndEnqueue(ctx, app.App(), question, source, nil)
+	entryUUID, err := AddEntryAndEnqueue(ctx, app.App(), question, source, nil, "")
 	if err != nil {
 		infra.LoggerFrom(ctx).Error("failed to log user input", "error", err)
 		infra.ErrorsTotal.Inc()

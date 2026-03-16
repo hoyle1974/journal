@@ -17,15 +17,18 @@ const EntriesCollection = "entries"
 
 // Entry represents a journal entry.
 type Entry struct {
-	UUID      string `firestore:"-" json:"uuid"`
-	Content   string `firestore:"content" json:"content"`
-	Source    string `firestore:"source" json:"source"`
-	Timestamp string `firestore:"timestamp" json:"timestamp"`
+	UUID                   string `firestore:"-" json:"uuid"`
+	Content                string `firestore:"content" json:"content"`
+	Source                 string `firestore:"source" json:"source"`
+	Timestamp              string `firestore:"timestamp" json:"timestamp"`
+	ImageURL               string `firestore:"image_url,omitempty" json:"image_url,omitempty"`
+	ParsedImageDescription string `firestore:"parsed_image_description,omitempty" json:"parsed_image_description,omitempty"` // vision-generated description for FOH to reason about
 }
 
 // AddEntry writes a new entry to Firestore and returns the entry UUID. Caller is responsible for enqueueing process-entry (e.g. in jot).
+// imageURL is optional (e.g. gs://bucket/path); when non-empty it is stored on the entry.
 // client must be non-nil; obtain it from infra.FirestoreProvider.Firestore(ctx) at the call site.
-func AddEntry(ctx context.Context, client *firestore.Client, content, source string, timestamp *string) (string, error) {
+func AddEntry(ctx context.Context, client *firestore.Client, content, source string, timestamp *string, imageURL string) (string, error) {
 	if client == nil {
 		return "", fmt.Errorf("firestore client is required")
 	}
@@ -42,11 +45,15 @@ func AddEntry(ctx context.Context, client *firestore.Client, content, source str
 		ts = *timestamp
 	}
 
-	_, err := client.Collection(EntriesCollection).Doc(entryUUID).Set(ctx, map[string]interface{}{
+	doc := map[string]interface{}{
 		"content":   content,
-		"source":    source,
+		"source":   source,
 		"timestamp": ts,
-	})
+	}
+	if imageURL != "" {
+		doc["image_url"] = imageURL
+	}
+	_, err := client.Collection(EntriesCollection).Doc(entryUUID).Set(ctx, doc)
 	if err != nil {
 		return "", err
 	}

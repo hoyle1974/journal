@@ -128,3 +128,17 @@ func formatContexts(nodes []memory.KnowledgeNode, metas []memory.ContextMetadata
 func formatQueriesForContext(queries []journal.QueryLog) string {
 	return journal.FormatQueriesForContext(queries, 10000)
 }
+
+// filterEntriesWithImage returns entries that have an attached image (ImageURL != ""), up to maxN, preserving order.
+func filterEntriesWithImage(entries []journal.Entry, maxN int) []journal.Entry {
+	out := make([]journal.Entry, 0, maxN)
+	for i := range entries {
+		if entries[i].ImageURL != "" {
+			out = append(out, entries[i])
+			if len(out) >= maxN {
+				break
+			}
+		}
+	}
+	return out
+}

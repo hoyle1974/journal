@@ -41,6 +41,11 @@ func (s *TelegramService) IsAllowedUser(userID int64) bool {
 	return telegram.IsAllowedUser(s.cfg(), userID)
 }
 
+// DownloadFile fetches file bytes from Telegram by file_id.
+func (s *TelegramService) DownloadFile(ctx context.Context, fileID string) ([]byte, error) {
+	return telegram.DownloadFile(ctx, s.cfg(), fileID)
+}
+
 // ProcessIncomingTelegram processes an incoming Telegram message and returns the response body. app must be non-nil.
 func (s *TelegramService) ProcessIncomingTelegram(ctx context.Context, app *infra.App, msg *telegram.IncomingMessage) string {
 	if msg == nil {

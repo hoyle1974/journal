@@ -78,6 +78,7 @@ type Entry struct {
 	Content   string `json:"content"`
 	Source    string `json:"source"`
 	Timestamp string `json:"timestamp"`
+	ImageURL  string `json:"image_url,omitempty"`
 }
 
 // KnowledgeNode is the API shape for a knowledge node (avoids api importing pkg/memory).
@@ -110,7 +111,7 @@ type MemoryService interface {
 
 // AgentService provides agent, query, dreamer, and cron operations for HTTP handlers.
 type AgentService interface {
-	AddEntry(ctx context.Context, content, source string, timestamp *string) (string, error)
+	AddEntry(ctx context.Context, content, source string, timestamp *string, imageBytes []byte) (string, error)
 	RunQuery(ctx context.Context, question, source string) *QueryResult
 	CreateAndSavePlan(ctx context.Context, goal string) (string, error)
 	ProcessEntry(ctx context.Context, entryUUID, content, timestamp, source string) (*infra.LatencyBreakdown, error)
@@ -136,6 +137,7 @@ type TelegramService interface {
 	ValidateSecretToken(r *http.Request) bool
 	ParseWebhook(r *http.Request) (*telegram.WebhookUpdate, *telegram.IncomingMessage, error)
 	IsAllowedUser(userID int64) bool
+	DownloadFile(ctx context.Context, fileID string) ([]byte, error)
 	ProcessIncomingTelegram(ctx context.Context, app *infra.App, msg *telegram.IncomingMessage) string
 	SendMessage(ctx context.Context, chatID int64, body string) error
 }

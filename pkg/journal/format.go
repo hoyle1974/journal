@@ -34,6 +34,14 @@ func FormatEntriesForContext(entries []Entry, maxChars int) string {
 		}
 		content := utils.SanitizePrompt(e.Content)
 		line := fmt.Sprintf("[%s] (%s) %s", ts, e.Source, content)
+		if e.ImageURL != "" {
+			if e.ParsedImageDescription != "" {
+				desc := utils.SanitizePrompt(e.ParsedImageDescription)
+				line += fmt.Sprintf("\n[Attached Image Content: %s]", desc)
+			} else {
+				line += "\n[Attached image]"
+			}
+		}
 		lineRunes := utf8.RuneCountInString(line)
 		if totalRunes+lineRunes+1 > maxChars {
 			lines = append(lines, fmt.Sprintf("... and %d more entries (truncated)", len(entries)-i))

@@ -11,8 +11,9 @@ import (
 )
 
 // AddEntryAndEnqueue adds the entry to the journal and enqueues process-entry (or runs it inline if enqueue fails). Returns entry UUID.
+// imageURL is optional (e.g. gs://bucket/path); pass "" when no image.
 // app is passed explicitly; use app.Firestore(ctx) for journal and app for enqueue/ProcessEntry.
-func AddEntryAndEnqueue(ctx context.Context, app *infra.App, content, source string, timestamp *string) (string, error) {
+func AddEntryAndEnqueue(ctx context.Context, app *infra.App, content, source string, timestamp *string, imageURL string) (string, error) {
 	if app == nil {
 		return "", fmt.Errorf("app required for AddEntryAndEnqueue")
 	}
@@ -20,7 +21,7 @@ func AddEntryAndEnqueue(ctx context.Context, app *infra.App, content, source str
 	if err != nil {
 		return "", err
 	}
-	entryUUID, err := journal.AddEntry(ctx, client, content, source, timestamp)
+	entryUUID, err := journal.AddEntry(ctx, client, content, source, timestamp, imageURL)
 	if err != nil {
 		return "", err
 	}

@@ -9,8 +9,10 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"mime/multipart"
 	"net/http"
 	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -194,6 +196,23 @@ func parseTraceFlag(args []string) ([]string, bool) {
 	return out, trace
 }
 
+// parseAttachFlag removes --attach and its value from args and returns filtered args and the attach path (or "").
+func parseAttachFlag(args []string) ([]string, string) {
+	var out []string
+	var attach string
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--attach" {
+			if i+1 < len(args) {
+				attach = args[i+1]
+				i++
+			}
+			continue
+		}
+		out = append(out, args[i])
+	}
+	return out, attach
+}
+
 // traceFlag is set when the user passes --trace or -t (parsed in main).
 var traceFlag bool
 
@@ -226,13 +245,78 @@ func (c *apiClient) DoOrExit(ctx context.Context, method, endpoint string, paylo
 
 var api = &apiClient{}
 
+// apiPostLog sends a log entry to the API. When attachPath is non-empty, uses multipart/form-data with the image file.
+func apiPostLog(ctx context.Context, content, source, attachPath string, timeout time.Duration) (map[string]interface{}, http.Header, error) {
+	if attachPath == "" {
+		return api.Do(ctx, "POST", "/log", map[string]string{"content": content, "source": source}, timeout)
+	}
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	_ = w.WriteField("content", content)
+	_ = w.WriteField("source", source)
+	f, err := os.Open(attachPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("open attachment: %w", err)
+	}
+	defer f.Close()
+	fw, err := w.CreateFormFile("image", filepath.Base(attachPath))
+	if err != nil {
+		return nil, nil, fmt.Errorf("create form file: %w", err)
+	}
+	if _, err := io.Copy(fw, f); err != nil {
+		return nil, nil, fmt.Errorf("write attachment: %w", err)
+	}
+	if err := w.Close(); err != nil {
+		return nil, nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, "POST", APIBaseURL+"/log", &buf)
+	if err != nil {
+		return nil, nil, err
+	}
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	if APIKey != "" {
+		req.Header.Set("X-API-Key", APIKey)
+	}
+	if traceFlag {
+		req.Header.Set("X-Want-Trace-Id", "true")
+	}
+	client := &http.Client{Timeout: timeout}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer resp.Body.Close()
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	var result map[string]interface{}
+	_ = json.Unmarshal(bodyBytes, &result)
+	if resp.StatusCode >= 400 {
+		errMsg := "unknown error"
+		if s, ok := result["error"].(string); ok && s != "" {
+			errMsg = s
+		}
+		return nil, nil, fmt.Errorf("API error %d: %s", resp.StatusCode, errMsg)
+	}
+	return result, resp.Header.Clone(), nil
+}
+
 // =============================================================================
 // COMMANDS
 // =============================================================================
 
-func cmdLog(content string) {
+func cmdLog(content, attachPath string) {
 	source := fmt.Sprintf("cli:%s", MachineName)
-	api.DoOrExit(context.Background(), "POST", "/log", map[string]string{"content": content, "source": source}, RequestTimeout)
+	result, headers, err := apiPostLog(context.Background(), content, source, attachPath, RequestTimeout)
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		os.Exit(1)
+	}
+	if result == nil {
+		fmt.Println("Error: No response from API")
+		os.Exit(1)
+	}
+	if traceFlag && headers != nil {
+		printTraceInfo(headers)
+	}
 	fmt.Println("Logged.")
 }
 
@@ -668,8 +752,10 @@ func cmdHelp(topic string) {
 		"log": `
 jot log <message>
 jot l <message>
+jot log --attach <image path> <message>
+jot l --attach ./photo.jpg Lunch with the team
 
-  Log a journal entry. Requires internet connection.
+  Log a journal entry. Use --attach to include an image (stored in GCS; requires JOT_IMAGES_BUCKET). Requires internet connection.
 
   Example: jot log Had a great meeting with the team today
 `,
@@ -792,6 +878,7 @@ func main() {
 
 	switch cmd {
 	case "log", "l":
+		args, attachPath := parseAttachFlag(args)
 		if len(args) < 2 {
 			fmt.Println("Error: content is required")
 			os.Exit(1)
@@ -800,7 +887,7 @@ func main() {
 		if len(content) > 10000 {
 			fmt.Printf("Warning: Entry is very long (%d chars)\n", len(content))
 		}
-		cmdLog(content)
+		cmdLog(content, attachPath)
 
 	case "query", "q":
 		if len(args) < 2 {
