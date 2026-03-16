@@ -31,7 +31,7 @@ Jot is a personal journaling and memory system. It ingests journal entries, extr
 
 ## Tools (by category)
 - **knowledge**: semantic_search, upsert_knowledge, list_knowledge, get_entity_network (discovers related facts via vector search and synthesizes a concise profile), generate_plan, check_proactive_signals, get_latest_dream.
-- **journal**: get_recent_entries, get_oldest_entries, get_entries_by_date_range, search_entries, count_entries, list_sources, get_entries_by_source, query_activity_history, query_entities, summarize_daily_activities. get_recent_entries, get_entries_by_date_range, and search_entries accept optional has_image=true to restrict results to entries with an attached image. Date-range tools accept YYYY-MM-DD or natural expressions (yesterday, last week, today); phrases like "last 6 months" are not supported.
+- **journal**: get_recent_entries, get_oldest_entries, get_entries_by_date_range, search_entries, count_entries, list_sources, get_entries_by_source, query_activity_history, query_entities, summarize_daily_activities. get_recent_entries, get_entries_by_date_range, and search_entries accept optional has_image=true to restrict results to entries with an attached image. Date-range tools accept YYYY-MM-DD or natural expressions (yesterday, last week, today); "today" and date ranges use the server's calendar day (UTC). Phrases like "last 6 months" are not supported.
 - **context**: list_contexts, create_context, touch_context, delete_context, get_system_health_audit, get_project_timeline, update_project_status.
 - **task**: create_task, get_task, update_task, update_task_status, search_tasks.
 - **query**: get_recent_queries, search_queries, get_queries_by_date.

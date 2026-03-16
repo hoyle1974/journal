@@ -376,7 +376,7 @@ func RunQueryWithDebug(ctx context.Context, app FOHEnv, question, source string,
 			infra.ErrorsTotal.Inc()
 			logDebug("[error] No text or function calls in response: %s", reason)
 			msg := "The model returned no content. This can happen occasionally; please try again."
-			if !strings.Contains(reason, "Stop") {
+			if !strings.Contains(strings.ToLower(reason), "stop") {
 				msg = fmt.Sprintf("Error: The model returned no content (%s). Please try again.", reason)
 			}
 			return &QueryResult{

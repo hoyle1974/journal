@@ -77,7 +77,7 @@ func registerJournalTools() {
 
 	tools.Register(&tools.Tool{
 		Name:        "get_entries_by_date_range",
-		Description: "Get journal entries within a date range (newest first within range). Accepts YYYY-MM-DD or natural language (e.g. 'yesterday', 'last week', 'this morning', 'since Tuesday'). For 'oldest entry ever' use get_oldest_entries instead.",
+		Description: "Get journal entries within a date range (newest first within range). Accepts YYYY-MM-DD or natural language (e.g. 'yesterday', 'last week', 'this morning', 'since Tuesday'). Dates use server (UTC) calendar day. For 'oldest entry ever' use get_oldest_entries instead.",
 		Category:    "journal",
 		Params: []tools.Param{
 			tools.RequiredStringParam("start_date", "Start date (YYYY-MM-DD or natural: yesterday, last week, this morning, since Tuesday)"),
