@@ -53,3 +53,8 @@ func (s *TelegramService) ProcessIncomingTelegram(ctx context.Context, app *infr
 func (s *TelegramService) SendMessage(ctx context.Context, chatID int64, body string) error {
 	return telegram.SendMessage(ctx, s.cfg(), chatID, body, infra.LoggerFrom(ctx))
 }
+
+// DownloadFile downloads the file (e.g. photo) from Telegram by file_id. Returns bytes and MIME type.
+func (s *TelegramService) DownloadFile(ctx context.Context, fileID string) ([]byte, string, error) {
+	return telegram.DownloadFile(ctx, s.cfg(), fileID, infra.LoggerFrom(ctx))
+}

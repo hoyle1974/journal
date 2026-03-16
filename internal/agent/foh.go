@@ -31,6 +31,7 @@ type FOHEnv interface {
 }
 
 type entryUUIDKey struct{}
+type entryAlreadyAddedKey struct{}
 
 // WithCurrentEntryUUID returns a context that carries the current journal entry UUID (e.g. the query that triggered FOH).
 func WithCurrentEntryUUID(ctx context.Context, entryUUID string) context.Context {
@@ -40,6 +41,20 @@ func WithCurrentEntryUUID(ctx context.Context, entryUUID string) context.Context
 // CurrentEntryUUIDFrom returns the current entry UUID from context, or "" if not set.
 func CurrentEntryUUIDFrom(ctx context.Context) string {
 	if s, ok := ctx.Value(entryUUIDKey{}).(string); ok && s != "" {
+		return s
+	}
+	return ""
+}
+
+// WithEntryAlreadyAdded marks that the caller already created a journal entry for this query (e.g. Telegram image).
+// FOH will skip AddEntryAndEnqueue and use this UUID as the current entry.
+func WithEntryAlreadyAdded(ctx context.Context, entryUUID string) context.Context {
+	return context.WithValue(ctx, entryAlreadyAddedKey{}, entryUUID)
+}
+
+// EntryAlreadyAddedUUID returns the entry UUID if the caller already added an entry, or "" if not set.
+func EntryAlreadyAddedUUID(ctx context.Context) string {
+	if s, ok := ctx.Value(entryAlreadyAddedKey{}).(string); ok && s != "" {
 		return s
 	}
 	return ""
@@ -98,21 +113,29 @@ func RunQueryWithDebug(ctx context.Context, app FOHEnv, question, source string,
 		}
 	}
 
-	infra.EntriesTotal.Inc()
-	entryUUID, err := AddEntryAndEnqueue(ctx, app.App(), question, source, nil)
-	if err != nil {
-		infra.LoggerFrom(ctx).Error("failed to log user input", "error", err)
-		infra.ErrorsTotal.Inc()
-		span.RecordError(err)
-		return &QueryResult{
-			Answer:     fmt.Sprintf("Error saving input: %v", err),
-			Iterations: 0,
-			Error:      true,
-			DebugLogs:  debugLogs,
+	var entryUUID string
+	if existing := EntryAlreadyAddedUUID(ctx); existing != "" {
+		entryUUID = existing
+		ctx = withCurrentEntryUUID(ctx, entryUUID)
+		infra.LoggerFrom(ctx).Debug("FOH: using caller-provided entry (skip log)", "query_run_id", queryRunID, "phase", "start", "event", "query_start", "question", question, "entry_uuid", entryUUID, "source", source)
+	} else {
+		infra.EntriesTotal.Inc()
+		var err error
+		entryUUID, err = AddEntryAndEnqueue(ctx, app.App(), question, source, nil, "")
+		if err != nil {
+			infra.LoggerFrom(ctx).Error("failed to log user input", "error", err)
+			infra.ErrorsTotal.Inc()
+			span.RecordError(err)
+			return &QueryResult{
+				Answer:     fmt.Sprintf("Error saving input: %v", err),
+				Iterations: 0,
+				Error:      true,
+				DebugLogs:  debugLogs,
+			}
 		}
+		ctx = withCurrentEntryUUID(ctx, entryUUID)
+		infra.LoggerFrom(ctx).Debug("FOH: user input logged as entry", "query_run_id", queryRunID, "phase", "start", "event", "query_start", "question", question, "entry_uuid", entryUUID, "source", source)
 	}
-	ctx = withCurrentEntryUUID(ctx, entryUUID)
-	infra.LoggerFrom(ctx).Debug("FOH: user input logged as entry", "query_run_id", queryRunID, "phase", "start", "event", "query_start", "question", question, "entry_uuid", entryUUID, "source", source)
 
 	logDebug("[start] Question: %s", question)
 

@@ -239,7 +239,7 @@ func UpdateTaskStatus(ctx context.Context, env infra.ToolEnv, uuid, newStatus, r
 		summary = reflectionReason
 	}
 
-	entryUUID, err := journal.AddEntry(ctx, client, summary, "system:task_engine", nil)
+	entryUUID, err := journal.AddEntry(ctx, client, summary, "system:task_engine", nil, "")
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("add reflection entry: %w", err)

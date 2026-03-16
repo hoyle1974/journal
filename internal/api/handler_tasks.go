@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/jackstrohm/jot/internal/agent"
 	"github.com/jackstrohm/jot/internal/infra"
 	"github.com/jackstrohm/jot/pkg/sms"
 	"github.com/jackstrohm/jot/pkg/telegram"
@@ -114,28 +115,105 @@ func handleProcessTelegramQuery(s *Server, w http.ResponseWriter, r *http.Reques
 		return
 	}
 	var data struct {
-		ChatID         int64  `json:"chat_id" validate:"required"`
-		UserID         int64  `json:"user_id"`
-		Body           string `json:"body" validate:"required"`
-		UpdateID       int64  `json:"update_id"`
-		MessageID      int64  `json:"message_id"`
-		TaskID         string `json:"task_id"`
-		ParentTraceID  string `json:"parent_trace_id"`
+		ChatID        int64  `json:"chat_id" validate:"required"`
+		UserID        int64  `json:"user_id"`
+		Body          string `json:"body"`
+		ImageFileID   string `json:"image_file_id"`
+		UpdateID      int64  `json:"update_id"`
+		MessageID     int64  `json:"message_id"`
+		TaskID        string `json:"task_id"`
+		ParentTraceID string `json:"parent_trace_id"`
 	}
 	if err := DecodeAndValidate(r, &data, s.Validator); err != nil {
 		LogHandlerResponse(ctx, r.Method, path, http.StatusBadRequest, "error", err.Error())
 		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	if data.Body == "" && data.ImageFileID == "" {
+		infra.LoggerFrom(ctx).Info("process-telegram-query: empty body and no image, sending hint", "chat_id", data.ChatID)
+		_ = s.Telegram.SendMessage(ctx, data.ChatID, "I didn't receive any text or image. Send a message or photo to log something.")
+		LogHandlerResponse(ctx, r.Method, path, http.StatusOK, "status", "ok")
+		WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		return
+	}
+	if data.Body == "" && data.ImageFileID != "" {
+		data.Body = "Photo"
+	}
 	if data.TaskID != "" || data.ParentTraceID != "" {
 		ctx = infra.WithCorrelation(ctx, data.TaskID, data.ParentTraceID)
 	}
+	// When message has an image, download it and generate a caption so the journal entry and FOH get full text.
+	if data.ImageFileID != "" {
+		infra.LoggerFrom(ctx).Info("process-telegram-query: processing image, downloading", "chat_id", data.ChatID, "image_file_id", data.ImageFileID)
+		imageBytes, mime, err := s.Telegram.DownloadFile(ctx, data.ImageFileID)
+		if err != nil {
+			infra.LoggerFrom(ctx).Warn("process-telegram-query: download image failed, using placeholder", "chat_id", data.ChatID, "error", err)
+		} else {
+			infra.LoggerFrom(ctx).Info("process-telegram-query: image downloaded",
+				"chat_id", data.ChatID,
+				"image_bytes", len(imageBytes),
+				"mime", mime,
+				"telegram_file_id", data.ImageFileID,
+			)
+			userCaption := ""
+			if data.Body != "" && data.Body != "Photo" {
+				userCaption = data.Body
+			}
+			caption, err := infra.GenerateImageCaption(ctx, s.App.(*infra.App), imageBytes, mime, userCaption, s.Config)
+			if err != nil {
+				infra.LoggerFrom(ctx).Warn("process-telegram-query: image caption failed, using body as-is", "chat_id", data.ChatID, "error", err)
+			} else {
+				data.Body = caption
+				infra.LoggerFrom(ctx).Info("process-telegram-query: image caption generated",
+					"chat_id", data.ChatID,
+					"caption_len", len(data.Body),
+					"caption_preview", utils.TruncateString(data.Body, 120),
+				)
+				infra.LoggerFrom(ctx).Debug("process-telegram-query: image caption full", "chat_id", data.ChatID, "caption", data.Body)
+			}
+		}
+	}
+	// When message had an image, create a journal entry first so the image counts as logged.
+	// Pass the entry UUID in context so FOH skips adding a duplicate entry.
+	if data.ImageFileID != "" {
+		entryUUID, err := s.Agent.AddEntry(ctx, data.Body, "telegram", nil, data.ImageFileID)
+		if err != nil {
+			infra.LoggerFrom(ctx).Error("process-telegram-query: add entry for image failed", "chat_id", data.ChatID, "error", err)
+		} else {
+			ctx = agent.WithEntryAlreadyAdded(ctx, entryUUID)
+		}
+		// Image with no meaningful caption: confirm log only.
+		if data.Body == "Photo" {
+			response := "Photo logged."
+			if err := s.Telegram.SendMessage(ctx, data.ChatID, response); err != nil {
+				infra.LoggerFrom(ctx).Error("process-telegram-query: send reply failed", "chat_id", data.ChatID, "error", err)
+				WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to send Telegram reply"})
+				return
+			}
+			infra.LoggerFrom(ctx).Info("process-telegram-query: reply sent", "chat_id", data.ChatID, "preview", response)
+			LogHandlerResponse(ctx, r.Method, path, http.StatusOK, "status", "ok", "chat_id", data.ChatID)
+			WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+			return
+		}
+		// Image with generated caption: return the caption to the user and confirm log (skip FOH).
+		response := data.Body + "\n\nLogged."
+		if err := s.Telegram.SendMessage(ctx, data.ChatID, response); err != nil {
+			infra.LoggerFrom(ctx).Error("process-telegram-query: send reply failed", "chat_id", data.ChatID, "error", err)
+			WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to send Telegram reply"})
+			return
+		}
+		infra.LoggerFrom(ctx).Info("process-telegram-query: reply sent (caption)", "chat_id", data.ChatID, "preview", utils.TruncateString(response, 60))
+		LogHandlerResponse(ctx, r.Method, path, http.StatusOK, "status", "ok", "chat_id", data.ChatID)
+		WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		return
+	}
 	msg := &telegram.IncomingMessage{
-		UpdateID:  data.UpdateID,
-		MessageID: data.MessageID,
-		ChatID:    data.ChatID,
-		UserID:    data.UserID,
-		Text:      data.Body,
+		UpdateID:    data.UpdateID,
+		MessageID:   data.MessageID,
+		ChatID:      data.ChatID,
+		UserID:      data.UserID,
+		Text:        data.Body,
+		ImageFileID: data.ImageFileID,
 	}
 	LogHandlerRequest(ctx, r.Method, path, "chat_id", data.ChatID, "update_id", data.UpdateID, "body_length", len(data.Body), "task_id", data.TaskID, "parent_trace_id", data.ParentTraceID)
 	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)

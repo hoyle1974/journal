@@ -40,7 +40,7 @@ func handleLog(s *Server, w http.ResponseWriter, r *http.Request) {
 	}
 	LogHandlerRequest(ctx, r.Method, path, "source", source, "content_length", len(content))
 	infra.EntriesTotal.Inc()
-	entryUUID, err := s.Agent.AddEntry(ctx, content, source, data.Timestamp)
+	entryUUID, err := s.Agent.AddEntry(ctx, content, source, data.Timestamp, "")
 	if err != nil {
 		infra.ErrorsTotal.Inc()
 		infra.LoggerFrom(ctx).Error("entry failed", "error", err)

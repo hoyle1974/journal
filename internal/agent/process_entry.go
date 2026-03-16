@@ -38,6 +38,15 @@ func ProcessEntry(ctx context.Context, app *infra.App, entryUUID, content, times
 	}
 	infra.LoggerFrom(ctx).Info("process-entry start", startAttrs...)
 
+	// Log when this entry is linked to an image (e.g. Telegram photo); helps debug caption vs placeholder "Photo".
+	if client, err := app.Firestore(ctx); err == nil {
+		if doc, err := client.Collection(journal.EntriesCollection).Doc(entryUUID).Get(ctx); err == nil {
+			if imageID := infra.GetStringField(doc.Data(), "image_file_id"); imageID != "" {
+				infra.LoggerFrom(ctx).Info("process-entry: entry has linked image", "entry_uuid", entryUUID, "image_file_id", imageID)
+			}
+		}
+	}
+
 	infra.LoggerFrom(ctx).Debug("process-entry: running evaluator", "entry_uuid", entryUUID, "reason", "extract significance and optionally store fact")
 	t0 := time.Now()
 	parsed, err := RunEvaluator(ctx, app, content, entryUUID, timestamp)

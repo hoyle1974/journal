@@ -227,6 +227,56 @@ func GenerateContentSimple(ctx context.Context, env ToolEnv, systemPrompt, userP
 	return text, nil
 }
 
+const imageCaptionSystemPrompt = `You are describing an image for a personal journal entry. Output a short, factual description of what is in the image: people, place, objects, activity, text visible in the image, or "No clear content" if you cannot describe it. One or two sentences only. No preamble or "The image shows".`
+
+// GenerateImageCaption uses a vision model to describe the image for journaling.
+// imageBytes and mimeType are the image data (e.g. from Telegram). userCaption is optional text the user sent with the image.
+// Returns a combined string: userCaption + auto-generated description, suitable for the journal entry and FOH.
+func GenerateImageCaption(ctx context.Context, env ToolEnv, imageBytes []byte, mimeType, userCaption string, cfg *config.Config) (string, error) {
+	ctx, span := StartSpan(ctx, "gemini.generate_image_caption")
+	defer span.End()
+
+	if env == nil || cfg == nil {
+		return "", fmt.Errorf("env and config required")
+	}
+	if len(imageBytes) == 0 {
+		return "", fmt.Errorf("image bytes required")
+	}
+	if mimeType == "" {
+		mimeType = "image/jpeg"
+	}
+	imagePart := genai.NewPartFromBytes(imageBytes, mimeType)
+	if imagePart == nil {
+		return "", fmt.Errorf("failed to create image part")
+	}
+	parts := []*genai.Part{imagePart}
+	if strings.TrimSpace(userCaption) != "" {
+		parts = append(parts, &genai.Part{Text: "User caption: " + utils.WrapAsUserData(userCaption) + "\nInclude this in your description if relevant."})
+	}
+	req := &LLMRequest{
+		SystemPrompt: imageCaptionSystemPrompt,
+		Parts:        parts,
+		Model:        cfg.GeminiModel,
+		GenConfig:    &GenConfig{MaxOutputTokens: 256},
+	}
+	resp, err := env.Dispatch(ctx, req)
+	if err != nil {
+		span.RecordError(err)
+		LoggerFrom(ctx).Error("image caption generation failed", "error", err)
+		return "", WrapLLMError(fmt.Errorf("Gemini image caption: %w", err))
+	}
+	generated := strings.TrimSpace(extractTextFromResponse(resp))
+	span.SetAttributes(map[string]string{"caption_len": fmt.Sprintf("%d", len(generated))})
+	// Combine user caption (if any) and generated description for journal and FOH.
+	var combined strings.Builder
+	if strings.TrimSpace(userCaption) != "" {
+		combined.WriteString(strings.TrimSpace(userCaption))
+		combined.WriteString("\n")
+	}
+	combined.WriteString(generated)
+	return combined.String(), nil
+}
+
 const factCollisionSystemPrompt = `You are a logic engine. Compare New Fact to Existing Fact. If they mean the exact same thing or New Fact is a direct update to Existing Fact, return 'update'. If they contradict each other or refer to different specific details, return 'insert'. If Existing Fact is empty, return 'update'. Reply with ONLY 'update' or 'insert'.`
 
 // EvaluateFactCollision decides whether the new fact should overwrite the existing one (update) or be stored as a new node (insert).

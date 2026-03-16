@@ -20,7 +20,7 @@ Jot is a personal journaling and memory system. It ingests journal entries, extr
 - **Reserved names**: user_profile (identity), system_evolution (audit/friction), latest_dream (narrative). Janitor must not delete identity_anchor / user_identity.
 
 ## Journal
-- **Entries**: Timestamped, optional source (cli, sms, telegram, web, etc.). Stored in Firestore; can be analyzed (categories, entities). When processed, entries that mention person entities are linked to those person nodes (journal_entry_ids) so get_entity_network can surface them. Google Doc sync processes new entries and in-doc questions.
+- **Entries**: Timestamped, optional source (cli, sms, telegram, web, etc.). Stored in Firestore; can be analyzed (categories, entities). Telegram photo messages: image is downloaded, a vision model generates a short description, and the entry gets the user caption (if any) plus the auto-generated description; that same text is passed to FOH. The entry stores image_file_id (Telegram file_id) so it links to the original image. When processed, entries that mention person entities are linked to those person nodes (journal_entry_ids) so get_entity_network can surface them. Google Doc sync processes new entries and in-doc questions.
 - **Queries**: Saved with question, answer, source, is_gap. Gap queries surface in knowledge-gap block for FOH.
 - **Pending questions**: Gaps/contradictions from Dreamer gap detection; user can clarify later.
 

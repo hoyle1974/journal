@@ -45,10 +45,10 @@ func NewAgentService(app *infra.App) *AgentService {
 	return &AgentService{app: app}
 }
 
-// AddEntry adds an entry and enqueues processing.
-func (a *AgentService) AddEntry(ctx context.Context, content, source string, timestamp *string) (string, error) {
-	infra.LoggerFrom(ctx).Info("function call", "fn", "AddEntry", "source", source, "content_length", len(content))
-	entryUUID, err := agent.AddEntryAndEnqueue(ctx, a.app, content, source, timestamp)
+// AddEntry adds an entry and enqueues processing. imageFileID is optional (e.g. Telegram file_id) to link the entry to an image.
+func (a *AgentService) AddEntry(ctx context.Context, content, source string, timestamp *string, imageFileID string) (string, error) {
+	infra.LoggerFrom(ctx).Info("function call", "fn", "AddEntry", "source", source, "content_length", len(content), "image_file_id", imageFileID)
+	entryUUID, err := agent.AddEntryAndEnqueue(ctx, a.app, content, source, timestamp, imageFileID)
 	if err != nil {
 		infra.LoggerFrom(ctx).Error("function result", "fn", "AddEntry", "error", err.Error())
 		return "", err

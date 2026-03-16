@@ -96,7 +96,11 @@ func formatEntries(entries []journal.Entry) string {
 		if e.Source != "" {
 			src = fmt.Sprintf(" (%s)", e.Source)
 		}
-		lines = append(lines, fmt.Sprintf("%d. [%s]%s %s", i+1, ts, src, content))
+		line := fmt.Sprintf("%d. [%s]%s %s", i+1, ts, src, content)
+		if e.ImageFileID != "" {
+			line += fmt.Sprintf(" [image_file_id: %s]", e.ImageFileID)
+		}
+		lines = append(lines, line)
 	}
 	return strings.Join(lines, "\n")
 }

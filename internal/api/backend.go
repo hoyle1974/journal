@@ -110,7 +110,7 @@ type MemoryService interface {
 
 // AgentService provides agent, query, dreamer, and cron operations for HTTP handlers.
 type AgentService interface {
-	AddEntry(ctx context.Context, content, source string, timestamp *string) (string, error)
+	AddEntry(ctx context.Context, content, source string, timestamp *string, imageFileID string) (string, error)
 	RunQuery(ctx context.Context, question, source string) *QueryResult
 	CreateAndSavePlan(ctx context.Context, goal string) (string, error)
 	ProcessEntry(ctx context.Context, entryUUID, content, timestamp, source string) (*infra.LatencyBreakdown, error)
@@ -138,4 +138,5 @@ type TelegramService interface {
 	IsAllowedUser(userID int64) bool
 	ProcessIncomingTelegram(ctx context.Context, app *infra.App, msg *telegram.IncomingMessage) string
 	SendMessage(ctx context.Context, chatID int64, body string) error
+	DownloadFile(ctx context.Context, fileID string) ([]byte, string, error)
 }

@@ -117,6 +117,10 @@ func formatPartsForLog(parts []*genai.Part) string {
 			}
 			continue
 		}
+		if p.InlineData != nil {
+			b.WriteString("[image]")
+			continue
+		}
 		b.WriteString("[part]")
 	}
 	return b.String()
@@ -225,6 +229,10 @@ func (a *App) Dispatch(ctx context.Context, req *LLMRequest) (*genai.GenerateCon
 				}
 			}
 			part.FunctionResponse = &genai.FunctionResponse{Name: p.FunctionResponse.Name, Response: sanitizedResp}
+		}
+		if p.InlineData != nil {
+			part.InlineData = p.InlineData
+			inputSizeBytes += len(p.InlineData.Data)
 		}
 		sanitized[i] = part
 	}
