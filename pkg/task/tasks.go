@@ -233,7 +233,7 @@ func UpdateTaskStatus(ctx context.Context, env infra.ToolEnv, uuid, newStatus, r
 		return fmt.Errorf("generate reflection summary: %w", err)
 	}
 
-	summary = utils.TruncateString(strings.TrimSpace(summary), 500)
+	summary = utils.TruncateString(summary, 500)
 	// Reject malformed output (e.g. model returned "[ 1 ]" or JSON); fall back to reason.
 	if summary == "" || strings.HasPrefix(summary, "[") || strings.HasPrefix(summary, "{") {
 		summary = reflectionReason

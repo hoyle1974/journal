@@ -31,7 +31,8 @@ The main query loop. Invoked via `internal/service` (`RunQuery` → `agent.RunQu
 2. **Loop:** LLM either answers or issues tool calls. Tools run in parallel (worker pool); results are sent back to the LLM.
 3. **Reflect:** Before returning, a reflection check validates the draft answer against semantic memory to reduce hallucinations; revision may be applied.
 4. **Synthesis pass:** When multiple search results were used, a refinement pass reduces repetition and dumping.
-5. **Answer:** Save query (and optional knowledge-gap flag) via `EnqueueSaveQuery`, return a concise, CLI-friendly response.
+5. **Answer:** Save query (and optional knowledge-gap flag) via `EnqueueSaveQuery`. The raw answer is then passed through the **persona layer** (`internal/persona`), which rewrites it in a default friendly-assistant tone before delivery.
+6. **Persona:** CLI, Twilio, Telegram, Google Doc sync, GET /dream/latest narrative, and GET /pending-questions question text are all formatted through the persona layer (default: friendly personal assistant, professional, transparent when unable to answer).
 
 Tools include journal, knowledge (semantic_search, upsert_knowledge, etc.), context, task, web, utility, and specialists. `discovery_search` maps intent to tool schemas when the model is unsure which tool to use.
 
@@ -40,7 +41,7 @@ Tools include journal, knowledge (semantic_search, upsert_knowledge, etc.), cont
 Consolidates the last 24h of journal entries. Entry point: `service.RunDreamer` (cron or API).
 
 1. **Fetch:** Load last 24h entries and journal context; load recent queries text.
-2. **Colloquium:** "Committee" of specialists discuss the journal in a room (up to 2 passes); each can add or correct; they may reply "DONE" when satisfied.
+2. **Colloquium:** "Committee" of specialists discuss the journal in a room (up to 10 passes); each can add or correct; they may reply "DONE" when satisfied.
 3. **Extraction:** Run specialists (relationship, work, task, thought, selfmodel) for final fact extraction; run context extractor and query analyzer.
 4. **Consolidation:** Merge facts by embedding similarity (`mergeDreamerFacts`), then write to semantic memory (`dreamerWriteMergedFacts`).
 5. **Gap detection:** `RunGapDetection` — identify knowledge gaps/contradictions (uses `app_capabilities.txt`).

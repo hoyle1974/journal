@@ -152,7 +152,7 @@ func runProactiveInsight(ctx context.Context, app *infra.App, entryUUID, entryCo
 	}
 	userPrompt := "Entry:\n" + utils.WrapAsUserData(utils.SanitizePrompt(utils.TruncateString(entryContent, 2000)))
 	summary, err := infra.GenerateContentSimple(ctx, app, proactiveInsightPrompt+prompts.DataSafety(), userPrompt, cfg, &infra.GenConfig{MaxOutputTokens: 128})
-	if err != nil || strings.TrimSpace(summary) == "" {
+	if err != nil || summary == "" {
 		if err != nil {
 			infra.LoggerFrom(ctx).Debug("proactive insight LLM failed", "entry_uuid", entryUUID, "error", err)
 		}
@@ -160,7 +160,7 @@ func runProactiveInsight(ctx context.Context, app *infra.App, entryUUID, entryCo
 	}
 	bgCtx, cancel2 := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel2()
-	if _, err := memory.UpsertSemanticMemory(bgCtx, app, strings.TrimSpace(summary), "thought", "selfmodel", 0.9, nil, []string{entryUUID}); err != nil {
+	if _, err := memory.UpsertSemanticMemory(bgCtx, app, summary, "thought", "selfmodel", 0.9, nil, []string{entryUUID}); err != nil {
 		infra.LoggerFrom(ctx).Debug("proactive insight upsert failed", "entry_uuid", entryUUID, "error", err)
 		return
 	}

@@ -365,7 +365,7 @@ func registerJournalTools() {
 					return " (" + timeframe + ")"
 				}
 				return ""
-			}(), strings.TrimSpace(summary))
+			}(), summary)
 		},
 	})
 

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/jackstrohm/jot/internal/infra"
+	"github.com/jackstrohm/jot/internal/persona"
 	"github.com/jackstrohm/jot/pkg/sms"
 )
 
@@ -40,5 +41,5 @@ func processQuerySMS(ctx context.Context, app *infra.App, query, from string) st
 		infra.LoggerFrom(ctx).Error("query failed", "answer", result.Answer)
 		return "Sorry, I couldn't process your query. Please try again."
 	}
-	return result.Answer
+	return persona.Apply(ctx, app, result.Answer, query)
 }

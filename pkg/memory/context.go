@@ -822,8 +822,6 @@ func SynthesizeContext(ctx context.Context, env infra.ToolEnv, contextUUID strin
 		span.RecordError(err)
 		return err
 	}
-
-	newContent = strings.TrimSpace(newContent)
 	if newContent == "" {
 		return nil
 	}

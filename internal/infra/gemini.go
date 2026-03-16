@@ -222,7 +222,7 @@ func GenerateContentSimple(ctx context.Context, env ToolEnv, systemPrompt, userP
 		LoggerFrom(ctx).Error("gemini generation failed", "error", err)
 		return "", WrapLLMError(fmt.Errorf("Gemini API error: %w", err))
 	}
-	text := extractTextFromResponse(resp)
+	text := strings.TrimSpace(extractTextFromResponse(resp))
 	span.SetAttributes(map[string]string{"response_len": fmt.Sprintf("%d", len(text))})
 	return text, nil
 }
@@ -296,8 +296,8 @@ func EvaluateFactCollision(ctx context.Context, env ToolEnv, cfg *config.Config,
 		return "", err
 	}
 
-	span.SetAttributes(map[string]string{"response": strings.TrimSpace(text)})
-	trimmed := strings.ToLower(strings.TrimSpace(text))
+	span.SetAttributes(map[string]string{"response": text})
+	trimmed := strings.ToLower(text)
 	if strings.Contains(trimmed, "update") {
 		return "update", nil
 	}

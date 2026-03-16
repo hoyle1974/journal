@@ -15,6 +15,7 @@ import (
 	"cloud.google.com/go/compute/metadata"
 	"github.com/jackstrohm/jot/internal/config"
 	"github.com/jackstrohm/jot/internal/infra"
+	"github.com/jackstrohm/jot/internal/persona"
 	"github.com/jackstrohm/jot/pkg/utils"
 	"google.golang.org/api/docs/v1"
 	"google.golang.org/api/option"
@@ -256,6 +257,11 @@ func buildSyncRequests(ctx context.Context, s *Server, doneStartIndex, doneEndIn
 	queryStart := time.Now()
 	response := s.Agent.RunQuery(ctx, text, source).Answer
 	infra.LoggerFrom(ctx).Info("input processed", "duration_ms", time.Since(queryStart).Milliseconds())
+	if response != "" {
+		if app, ok := s.App.(*infra.App); ok {
+			response = persona.Apply(ctx, app, response, text)
+		}
+	}
 	inserted := "\n" + response
 	insertEndIndex := block.startIndex + docIndexLen(inserted)
 	requests = append(requests,

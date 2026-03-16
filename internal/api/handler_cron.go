@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/jackstrohm/jot/internal/infra"
+	"github.com/jackstrohm/jot/internal/persona"
 )
 
 // handleDreamLatest serves GET /dream/latest: returns the latest dream narrative and optionally marks it read.
@@ -36,6 +37,11 @@ func handleDreamLatest(s *Server, w http.ResponseWriter, r *http.Request) {
 	narrative := latest.Narrative
 	timestamp := latest.Timestamp
 	unread := latest.Unread
+	if narrative != "" {
+		if app, ok := s.App.(*infra.App); ok {
+			narrative = persona.Apply(ctx, app, narrative, "")
+		}
+	}
 	if markRead := r.URL.Query().Get("mark_read"); markRead == "true" && unread {
 		_ = s.System.MarkLatestDreamRead(ctx)
 		unread = false

@@ -306,7 +306,7 @@ func RunQueryWithDebug(ctx context.Context, app FOHEnv, question, source string,
 
 				// Synthesis pass: when multiple search results were used, refine the answer to avoid dumping/repetition.
 				if searchToolCallCount > 1 || retrievedContent.Len() > 2000 {
-					if refined, err := runSynthesisPass(ctx, app, question, answer, retrievedContent.String()); err == nil && strings.TrimSpace(refined) != "" {
+					if refined, err := runSynthesisPass(ctx, app, question, answer, retrievedContent.String()); err == nil && refined != "" {
 						logDebug("[synthesis] applied synthesis pass (%d -> %d chars)", len(answer), len(refined))
 						answer = refined
 					}
@@ -568,7 +568,7 @@ func RunQueryWithDebug(ctx context.Context, app FOHEnv, question, source string,
 	if text != "" {
 		answer := strings.TrimSpace(text)
 		if searchToolCallCount > 1 || retrievedContent.Len() > 2000 {
-			if refined, err := runSynthesisPass(ctx, app, question, answer, retrievedContent.String()); err == nil && strings.TrimSpace(refined) != "" {
+			if refined, err := runSynthesisPass(ctx, app, question, answer, retrievedContent.String()); err == nil && refined != "" {
 				answer = refined
 			}
 		}
@@ -682,7 +682,7 @@ func runSynthesisPass(ctx context.Context, app FOHEnv, question, candidateAnswer
 	if err != nil {
 		return candidateAnswer, err
 	}
-	return strings.TrimSpace(refined), nil
+	return refined, nil
 }
 
 func runReflectionRevision(ctx context.Context, app FOHEnv, session *infra.ChatSession, question, previousAnswer, reason string) string {

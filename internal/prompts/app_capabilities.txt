@@ -13,8 +13,11 @@ Jot is a personal journaling and memory system. It ingests journal entries, extr
 - **Cron**: Dreamer (daily) consolidates last 24h journal into semantic memory; Janitor (weekly) evicts low-significance, rarely recalled nodes.
 - **First-run onboarding**: On cold start, if _system/onboarding is absent, the system seeds pending_questions with onboarding prompts (name, family, work, role); answers are stored as user_identity nodes.
 
+## Persona layer
+- User-facing text is rewritten in a default persona before delivery: friendly personal assistant, professional and competent, not stiff or too casual, transparent when unable to answer or perform a task. Applied to: CLI/API query answers, Twilio SMS replies, Telegram replies, Google Doc sync responses, GET /dream/latest narrative, and GET /pending-questions question text.
+
 ## Agents
-- **FOH (Front of House)**: Query loop. Uses system prompt, identity, active contexts, knowledge-gap block, open todos; can call tools (journal, knowledge, context, task, web, utility). Produces an answer; may save queries as knowledge gaps (is_gap).
+- **FOH (Front of House)**: Query loop. Uses system prompt, identity, active contexts, knowledge-gap block, open todos; can call tools (journal, knowledge, context, task, web, utility). Produces an answer; may save queries as knowledge gaps (is_gap). Final answer is passed through the persona layer before being returned to the user.
 - **Dreamer**: Nightly pipeline. Loads last 24h journal → colloquium (specialists discuss) → specialist extraction (relationship, work, task, thought, selfmodel) → merge facts → write to semantic memory → gap detection → context synthesis → profile synthesis → evolution synthesis → dream narrative + task phase. Writes latest_dream and system_evolution.
 - **Specialists**: Domain extractors (relationship, work, task, thought, selfmodel) plus evolution (Cognitive Engineer). Consultable via tools (consult_anthropologist, consult_architect, etc.).
 - **Planner**: Generates step-by-step plans from a goal; stores phases in knowledge graph.

@@ -272,7 +272,6 @@ func writeDreamNarrative(ctx context.Context, app *infra.App, in *dreamNarrative
 	if err != nil {
 		return err
 	}
-	narrative = strings.TrimSpace(narrative)
 	if narrative == "" {
 		infra.LoggerFrom(ctx).Warn("dream narrative was empty, skipping write")
 		return nil
@@ -553,7 +552,7 @@ func RunDreamer(ctx context.Context, app *infra.App, opts *RunDreamerOpts) (*Dre
 	}
 	tColloquiumStart := time.Now()
 	roomTranscript := "Room is open. Initial pass.\n"
-	const maxRoomPasses = 2 // 2 passes allows initial thoughts + 1 round of corrections
+	const maxRoomPasses = 10 // up to 10 passes; specialists may reply DONE early
 
 	for pass := 1; pass <= maxRoomPasses; pass++ {
 		infra.LoggerFrom(ctx).Info("dreamer colloquium pass starting", "dreamer_run_id", dreamerRunID, "phase", "colloquium", "pass", pass)

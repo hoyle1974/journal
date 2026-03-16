@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackstrohm/jot/internal/infra"
+	"github.com/jackstrohm/jot/internal/persona"
 )
 
 func handlePendingQuestions(s *Server, w http.ResponseWriter, r *http.Request) {
@@ -23,6 +24,13 @@ func handlePendingQuestions(s *Server, w http.ResponseWriter, r *http.Request) {
 		LogHandlerResponse(ctx, r.Method, path, http.StatusInternalServerError, "error", err.Error())
 		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
+	}
+	if app, ok := s.App.(*infra.App); ok {
+		for i := range questions {
+			if questions[i].Question != "" {
+				questions[i].Question = persona.Apply(ctx, app, questions[i].Question, questions[i].Context)
+			}
+		}
 	}
 	LogHandlerResponse(ctx, r.Method, path, http.StatusOK, "count", len(questions))
 	WriteJSON(w, http.StatusOK, map[string]interface{}{"questions": questions, "count": len(questions)})

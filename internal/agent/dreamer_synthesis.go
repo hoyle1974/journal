@@ -140,7 +140,7 @@ func RunProfileSynthesis(ctx context.Context, app *infra.App, personaFacts []str
 	}
 
 	_, err = client.Collection(memory.KnowledgeCollection).Doc(node.UUID).Update(ctx, []firestore.Update{
-		{Path: "content", Value: strings.TrimSpace(newProfile)},
+		{Path: "content", Value: newProfile},
 		{Path: "timestamp", Value: time.Now().Format(time.RFC3339)},
 	})
 	if err != nil {
