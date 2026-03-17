@@ -10,6 +10,41 @@ import (
 	"github.com/jackstrohm/jot/tools"
 )
 
+type createTaskArgs struct {
+	Content      string `json:"content" description:"Task description or title" required:"true"`
+	ParentID     string `json:"parent_id" description:"Parent task UUID for hierarchy"`
+	DueDate      string `json:"due_date" description:"Due date (YYYY-MM-DD)"`
+	SystemPrompt string `json:"system_prompt" description:"Instructions for the LLM when working on this task"`
+}
+
+type getTaskArgs struct {
+	TaskID string `json:"task_id" description:"Task UUID" required:"true"`
+}
+
+type updateTaskArgs struct {
+	TaskID                string  `json:"task_id" description:"Task UUID" required:"true"`
+	Content               string  `json:"content" description:"New task description/title"`
+	ParentID              string  `json:"parent_id" description:"New parent task UUID, or empty to make root"`
+	DueDate               string  `json:"due_date" description:"Due date (YYYY-MM-DD), or empty to clear"`
+	SystemPrompt          string  `json:"system_prompt" description:"Instructions for the LLM when working on this task"`
+	AddJournalEntryIDs    string  `json:"add_journal_entry_ids" description:"Comma-separated journal entry UUIDs to link to this task"`
+	RemoveJournalEntryIDs string  `json:"remove_journal_entry_ids" description:"Comma-separated journal entry UUIDs to unlink from this task"`
+	AddMemoryNodeIDs      string  `json:"add_memory_node_ids" description:"Comma-separated knowledge node UUIDs to link to this task"`
+	RemoveMemoryNodeIDs   string  `json:"remove_memory_node_ids" description:"Comma-separated knowledge node UUIDs to unlink from this task"`
+}
+
+type updateTaskStatusArgs struct {
+	TaskID    string `json:"task_id" description:"Task UUID" required:"true"`
+	Status    string `json:"status" description:"New status" required:"true" enum:"pending,active,completed,abandoned"`
+	Reasoning string `json:"reasoning" description:"Reason for the status change (required when completing or abandoning)"`
+}
+
+type searchTasksArgs struct {
+	Query  string `json:"query" description:"Natural language search query; omit or leave empty to list open root-level tasks"`
+	Limit  int    `json:"limit" description:"Maximum number of results (default 10, max 20)" default:"10"`
+	Status string `json:"status" description:"Filter by status (pending, active, completed, abandoned)"`
+}
+
 // parseCommaSeparatedIDs splits s by comma and returns non-empty trimmed UUIDs.
 func parseCommaSeparatedIDs(s string) []string {
 	var out []string
@@ -22,6 +57,19 @@ func parseCommaSeparatedIDs(s string) []string {
 	return out
 }
 
+func taskClamp(limit, def, min, max int) int {
+	if limit == 0 {
+		limit = def
+	}
+	if limit < min {
+		return min
+	}
+	if limit > max {
+		return max
+	}
+	return limit
+}
+
 func init() {
 	registerTaskTools()
 }
@@ -31,26 +79,17 @@ func registerTaskTools() {
 		Name:        "create_task",
 		Description: "Create a new task. Optionally set parent_id (for sublists), due_date (YYYY-MM-DD), and system_prompt (instructions for the LLM). Links the task to the current journal entry when available.",
 		Category:    "task",
-		Params: []tools.Param{
-			tools.RequiredStringParam("content", "Task description or title"),
-			tools.OptionalStringParam("parent_id", "Parent task UUID for hierarchy"),
-			tools.OptionalStringParam("due_date", "Due date (YYYY-MM-DD)"),
-			tools.OptionalStringParam("system_prompt", "Instructions for the LLM when working on this task"),
-		},
-		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
-			content, ok := args.RequiredString("content")
-			if !ok {
+		Args:        &createTaskArgs{},
+		Execute: func(ctx context.Context, env infra.ToolEnv, args any) tools.Result {
+			a := args.(*createTaskArgs)
+			if a.Content == "" {
 				return tools.MissingParam("content")
 			}
-			parentID := args.String("parent_id", "")
-			dueDate := args.String("due_date", "")
-			systemPrompt := args.String("system_prompt", "")
-
 			t := &task.Task{
-				Content:      content,
-				ParentID:     parentID,
-				DueDate:      dueDate,
-				SystemPrompt: systemPrompt,
+				Content:      a.Content,
+				ParentID:     a.ParentID,
+				DueDate:      a.DueDate,
+				SystemPrompt: a.SystemPrompt,
 				Status:       task.StatusPending,
 			}
 			if cur := agent.CurrentEntryUUIDFrom(ctx); cur != "" {
@@ -61,8 +100,8 @@ func registerTaskTools() {
 			if err != nil {
 				return tools.Fail("Error creating task: %v", err)
 			}
-			if dueDate != "" {
-				return tools.OK("Task created (ID: %s, due: %s)", uuid, dueDate)
+			if a.DueDate != "" {
+				return tools.OK("Task created (ID: %s, due: %s)", uuid, a.DueDate)
 			}
 			return tools.OK("Task created (ID: %s)", uuid)
 		},
@@ -72,15 +111,13 @@ func registerTaskTools() {
 		Name:        "get_task",
 		Description: "Get full details of a single task by ID (content, status, due_date, system_prompt, journal_entry_ids, memory_node_ids). Use when the user asks for due dates or details of a specific task, or before updating backlinks.",
 		Category:    "task",
-		Params: []tools.Param{
-			tools.RequiredStringParam("task_id", "Task UUID"),
-		},
-		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
-			taskID, ok := args.RequiredString("task_id")
-			if !ok {
+		Args:        &getTaskArgs{},
+		Execute: func(ctx context.Context, env infra.ToolEnv, args any) tools.Result {
+			a := args.(*getTaskArgs)
+			if a.TaskID == "" {
 				return tools.MissingParam("task_id")
 			}
-			t, err := task.GetTask(ctx, env, taskID)
+			t, err := task.GetTask(ctx, env, a.TaskID)
 			if err != nil {
 				return tools.Fail("Error fetching task: %v", err)
 			}
@@ -104,39 +141,36 @@ func registerTaskTools() {
 		Name:        "update_task",
 		Description: "Update a task's editable fields. Provide task_id and any of: content, parent_id, due_date (YYYY-MM-DD or empty to clear), system_prompt; or add/remove journal or memory backlinks (comma-separated UUIDs). Only provided fields are changed. Use update_task_status to change status.",
 		Category:    "task",
-		Params: []tools.Param{
-			tools.RequiredStringParam("task_id", "Task UUID"),
-			tools.OptionalStringParam("content", "New task description/title"),
-			tools.OptionalStringParam("parent_id", "New parent task UUID, or empty to make root"),
-			tools.OptionalStringParam("due_date", "Due date (YYYY-MM-DD), or empty to clear"),
-			tools.OptionalStringParam("system_prompt", "Instructions for the LLM when working on this task"),
-			tools.OptionalStringParam("add_journal_entry_ids", "Comma-separated journal entry UUIDs to link to this task"),
-			tools.OptionalStringParam("remove_journal_entry_ids", "Comma-separated journal entry UUIDs to unlink from this task"),
-			tools.OptionalStringParam("add_memory_node_ids", "Comma-separated knowledge node UUIDs to link to this task"),
-			tools.OptionalStringParam("remove_memory_node_ids", "Comma-separated knowledge node UUIDs to unlink from this task"),
-		},
-		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
-			taskID, ok := args.RequiredString("task_id")
-			if !ok {
+		Args:        &updateTaskArgs{},
+		Execute: func(ctx context.Context, env infra.ToolEnv, args any) tools.Result {
+			a := args.(*updateTaskArgs)
+			if a.TaskID == "" {
 				return tools.MissingParam("task_id")
 			}
-			opts := &task.UpdateTaskOpts{
-				Content:      args.OptionalString("content"),
-				ParentID:     args.OptionalString("parent_id"),
-				DueDate:      args.OptionalString("due_date"),
-				SystemPrompt: args.OptionalString("system_prompt"),
+			opts := &task.UpdateTaskOpts{}
+			if a.Content != "" {
+				opts.Content = &a.Content
 			}
-			if s := args.OptionalString("add_journal_entry_ids"); s != nil && *s != "" {
-				opts.AddJournalEntryIDs = parseCommaSeparatedIDs(*s)
+			if a.ParentID != "" {
+				opts.ParentID = &a.ParentID
 			}
-			if s := args.OptionalString("remove_journal_entry_ids"); s != nil && *s != "" {
-				opts.RemoveJournalEntryIDs = parseCommaSeparatedIDs(*s)
+			if a.DueDate != "" {
+				opts.DueDate = &a.DueDate
 			}
-			if s := args.OptionalString("add_memory_node_ids"); s != nil && *s != "" {
-				opts.AddMemoryNodeIDs = parseCommaSeparatedIDs(*s)
+			if a.SystemPrompt != "" {
+				opts.SystemPrompt = &a.SystemPrompt
 			}
-			if s := args.OptionalString("remove_memory_node_ids"); s != nil && *s != "" {
-				opts.RemoveMemoryNodeIDs = parseCommaSeparatedIDs(*s)
+			if a.AddJournalEntryIDs != "" {
+				opts.AddJournalEntryIDs = parseCommaSeparatedIDs(a.AddJournalEntryIDs)
+			}
+			if a.RemoveJournalEntryIDs != "" {
+				opts.RemoveJournalEntryIDs = parseCommaSeparatedIDs(a.RemoveJournalEntryIDs)
+			}
+			if a.AddMemoryNodeIDs != "" {
+				opts.AddMemoryNodeIDs = parseCommaSeparatedIDs(a.AddMemoryNodeIDs)
+			}
+			if a.RemoveMemoryNodeIDs != "" {
+				opts.RemoveMemoryNodeIDs = parseCommaSeparatedIDs(a.RemoveMemoryNodeIDs)
 			}
 			hasEdit := opts.Content != nil || opts.ParentID != nil || opts.DueDate != nil || opts.SystemPrompt != nil ||
 				len(opts.AddJournalEntryIDs) > 0 || len(opts.RemoveJournalEntryIDs) > 0 ||
@@ -144,11 +178,11 @@ func registerTaskTools() {
 			if !hasEdit {
 				return tools.Fail("provide at least one field to update: content, parent_id, due_date, system_prompt, or add/remove journal/memory IDs")
 			}
-			err := task.UpdateTask(ctx, env, taskID, opts)
+			err := task.UpdateTask(ctx, env, a.TaskID, opts)
 			if err != nil {
 				return tools.Fail("Error updating task: %v", err)
 			}
-			return tools.OK("Task %s updated", taskID)
+			return tools.OK("Task %s updated", a.TaskID)
 		},
 	})
 
@@ -156,31 +190,24 @@ func registerTaskTools() {
 		Name:        "update_task_status",
 		Description: "Update a task's status. Use status: pending, active, completed, or abandoned. When marking completed or abandoned, reasoning is required and a reflection is saved to the journal.",
 		Category:    "task",
-		Params: []tools.Param{
-			tools.RequiredStringParam("task_id", "Task UUID"),
-			tools.EnumParam("status", "New status", true, []string{"pending", "active", "completed", "abandoned"}),
-			tools.OptionalStringParam("reasoning", "Reason for the status change (required when completing or abandoning)"),
-		},
-		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
-			taskID, ok := args.RequiredString("task_id")
-			if !ok {
+		Args:        &updateTaskStatusArgs{},
+		Execute: func(ctx context.Context, env infra.ToolEnv, args any) tools.Result {
+			a := args.(*updateTaskStatusArgs)
+			if a.TaskID == "" {
 				return tools.MissingParam("task_id")
 			}
-			status, ok := args.RequiredString("status")
-			if !ok {
+			if a.Status == "" {
 				return tools.MissingParam("status")
 			}
-			reasoning := args.String("reasoning", "")
-
-			if (status == task.StatusCompleted || status == task.StatusAbandoned) && reasoning == "" {
+			if (a.Status == task.StatusCompleted || a.Status == task.StatusAbandoned) && a.Reasoning == "" {
 				return tools.Fail("reasoning is required when marking a task as completed or abandoned")
 			}
 
-			err := task.UpdateTaskStatus(ctx, env, taskID, status, reasoning)
+			err := task.UpdateTaskStatus(ctx, env, a.TaskID, a.Status, a.Reasoning)
 			if err != nil {
 				return tools.Fail("Error updating task: %v", err)
 			}
-			return tools.OK("Task %s updated to %s", taskID, status)
+			return tools.OK("Task %s updated to %s", a.TaskID, a.Status)
 		},
 	})
 
@@ -188,21 +215,16 @@ func registerTaskTools() {
 		Name:        "search_tasks",
 		Description: "Search tasks by semantic similarity to the query, or list open root-level tasks. If query is empty or omitted, returns your open todo list roots (same as in context). Optionally filter by status (pending, active, completed, abandoned). Returns one line per task: uuid, status, due date (or 'not set'), and content. Use get_task for full details of a single task.",
 		Category:    "task",
-		Params: []tools.Param{
-			tools.OptionalStringParam("query", "Natural language search query; omit or leave empty to list open root-level tasks"),
-			tools.LimitParam(10, 20),
-			tools.OptionalStringParam("status", "Filter by status (pending, active, completed, abandoned)"),
-		},
-		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
-			query := args.String("query", "")
-			query = strings.TrimSpace(query)
-			limit := args.IntBounded("limit", 10, 1, 20)
-			statusFilter := args.String("status", "")
+		Args:        &searchTasksArgs{},
+		Execute: func(ctx context.Context, env infra.ToolEnv, args any) tools.Result {
+			a := args.(*searchTasksArgs)
+			query := strings.TrimSpace(a.Query)
+			limit := taskClamp(a.Limit, 10, 1, 20)
+			statusFilter := a.Status
 
 			var tasks []task.Task
 			var err error
 			if query == "" {
-				// List open root-level tasks (same as OPEN TODO LIST ROOTS in prompt).
 				tasks, err = task.GetOpenRootTasks(ctx, env, limit*2)
 				if err != nil {
 					return tools.Fail("Error listing tasks: %v", err)

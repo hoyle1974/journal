@@ -113,35 +113,21 @@ func TestResultHelpers(t *testing.T) {
 	}
 }
 
-func TestParamHelpers(t *testing.T) {
-	// Test CountParam
-	countParam := CountParam()
-	if countParam.Name != "count" {
-		t.Errorf("CountParam().Name = %q, want 'count'", countParam.Name)
+func TestStructToGenaiSchema(t *testing.T) {
+	type ExampleArgs struct {
+		Query   string `json:"query" description:"Search query" required:"true"`
+		Limit   int    `json:"limit" description:"Max results" default:"10"`
+		Action  string `json:"action" description:"Action" required:"true" enum:"a,b,c"`
 	}
-	if countParam.Type != genai.TypeInteger {
-		t.Error("CountParam().Type should be TypeInteger")
+	schema := StructToGenaiSchema(&ExampleArgs{})
+	if schema.Type != genai.TypeObject {
+		t.Errorf("schema.Type = %v, want TypeObject", schema.Type)
 	}
-	if countParam.Required {
-		t.Error("CountParam() should not be required")
+	if len(schema.Properties) != 3 {
+		t.Errorf("schema.Properties has %d keys, want 3", len(schema.Properties))
 	}
-
-	// Test RequiredStringParam
-	reqParam := RequiredStringParam("query", "Search query")
-	if reqParam.Name != "query" {
-		t.Errorf("RequiredStringParam().Name = %q, want 'query'", reqParam.Name)
-	}
-	if !reqParam.Required {
-		t.Error("RequiredStringParam() should be required")
-	}
-	if reqParam.Type != genai.TypeString {
-		t.Error("RequiredStringParam().Type should be TypeString")
-	}
-
-	// Test EnumParam
-	enumParam := EnumParam("action", "Action to perform", true, []string{"save", "delete"})
-	if len(enumParam.Enum) != 2 {
-		t.Errorf("EnumParam().Enum has %d values, want 2", len(enumParam.Enum))
+	if len(schema.Required) != 2 {
+		t.Errorf("schema.Required has %d items, want 2 (query, action)", len(schema.Required))
 	}
 }
 

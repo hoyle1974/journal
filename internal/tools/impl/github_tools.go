@@ -12,10 +12,16 @@ import (
 	"strings"
 	"time"
 
-	"google.golang.org/genai"
 	"github.com/jackstrohm/jot/internal/infra"
 	"github.com/jackstrohm/jot/tools"
 )
+
+type githubReadArgs struct {
+	Action string `json:"action" description:"Action: 'repo_info', 'file_content', 'list_issues', 'list_prs', 'readme'" required:"true" enum:"repo_info,file_content,list_issues,list_prs,readme"`
+	Repo   string `json:"repo" description:"Repository as owner/name (e.g. octocat/Hello-World)" required:"true"`
+	Path   string `json:"path" description:"File path in repo (required for file_content, e.g. README.md or src/main.go)"`
+	Limit  int    `json:"limit" description:"Max items for list_issues/list_prs (default 10, max 30)" default:"10"`
+}
 
 const githubAPIBase = "https://api.github.com"
 
@@ -23,56 +29,53 @@ func init() {
 	registerGitHubTools()
 }
 
+func githubClamp(limit, def, min, max int) int {
+	if limit == 0 {
+		limit = def
+	}
+	if limit < min {
+		return min
+	}
+	if limit > max {
+		return max
+	}
+	return limit
+}
+
 func registerGitHubTools() {
 	tools.Register(&tools.Tool{
 		Name:        "github_read",
 		Description: "Read-only GitHub operations: get repo info, file contents, open issues, open PRs, or README. Use for public repos; set GITHUB_TOKEN for private repos or higher rate limits.",
 		Category:    "web",
-		Params: []tools.Param{
-			tools.EnumParam("action", "Action: 'repo_info', 'file_content', 'list_issues', 'list_prs', 'readme'", true, []string{"repo_info", "file_content", "list_issues", "list_prs", "readme"}),
-			tools.RequiredStringParam("repo", "Repository as owner/name (e.g. octocat/Hello-World)"),
-			tools.OptionalStringParam("path", "File path in repo (required for file_content, e.g. README.md or src/main.go)"),
-			{
-				Name:        "limit",
-				Description: "Max items for list_issues/list_prs (default 10, max 30)",
-				Type:        genai.TypeInteger,
-				Required:    false,
-				Default:     10,
-				Min:         intPtr(1),
-				Max:         intPtr(30),
-			},
-		},
-		Execute: executeGitHubRead,
+		Args:        &githubReadArgs{},
+		Execute:     executeGitHubRead,
 	})
 }
 
-func intPtr(n int) *int { return &n }
-
-func executeGitHubRead(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
+func executeGitHubRead(ctx context.Context, env infra.ToolEnv, args any) tools.Result {
 	ctx, span := infra.StartSpan(ctx, "tool.github_read")
 	defer span.End()
 
-	action, ok := args.RequiredString("action")
-	if !ok {
+	a := args.(*githubReadArgs)
+	if a.Action == "" {
 		return tools.MissingParam("action")
 	}
-	repo, ok := args.RequiredString("repo")
-	if !ok {
+	if a.Repo == "" {
 		return tools.MissingParam("repo")
 	}
-	repo = strings.TrimSpace(repo)
+	repo := strings.TrimSpace(a.Repo)
 	parts := strings.SplitN(repo, "/", 2)
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 		return tools.Fail("repo must be owner/name (e.g. octocat/Hello-World)")
 	}
 	owner, repoName := parts[0], parts[1]
 
-	path := args.String("path", "")
-	limit := args.IntBounded("limit", 10, 1, 30)
+	path := a.Path
+	limit := githubClamp(a.Limit, 10, 1, 30)
 
-	span.SetAttributes(map[string]string{"action": action, "repo": repo})
+	span.SetAttributes(map[string]string{"action": a.Action, "repo": repo})
 
-	switch action {
+	switch a.Action {
 	case "repo_info":
 		return githubRepoInfo(ctx, owner, repoName)
 	case "file_content":
@@ -87,7 +90,7 @@ func executeGitHubRead(ctx context.Context, env infra.ToolEnv, args *tools.Args)
 	case "readme":
 		return githubReadme(ctx, owner, repoName)
 	default:
-		return tools.Fail("unknown action: %s", action)
+		return tools.Fail("unknown action: %s", a.Action)
 	}
 }
 

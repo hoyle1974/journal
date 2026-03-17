@@ -29,8 +29,8 @@ func registerDreamTools() {
 		Name:        "get_latest_dream",
 		Description: "Get the latest dream narrative: the personal 'morning readout' from the last nightly Dreamer run. Use when the user wants to discuss what the system learned overnight, what themes were noticed, what was committed to memory, open loops, or any tool/friction the Cognitive Engineer reported. Enables conversation about last night's consolidation.",
 		Category:    "knowledge",
-		Params:      nil,
-		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
+		Args:        &tools.NoArgs{},
+		Execute: func(ctx context.Context, env infra.ToolEnv, args any) tools.Result {
 			latest, err := system.GetLatestDream(ctx, firestoreProviderFromEnv{env})
 			if err != nil {
 				return tools.Fail("Error getting Firestore: %v", err)
