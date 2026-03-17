@@ -168,6 +168,12 @@ func handleProcessTelegramQuery(s *Server, w http.ResponseWriter, r *http.Reques
 			return map[string]string{"status": "ok"}, nil
 		}
 		// Image with generated caption: return the caption to the user and confirm log (skip FOH).
+		// Save a query log so the image event appears in the recent conversation context for future queries.
+		if fsClient, fsErr := s.App.Firestore(ctx); fsErr == nil {
+			if _, saveErr := journal.SaveQuery(ctx, fsClient, "[Photo]", data.Body, "telegram", false); saveErr != nil {
+				infra.LoggerFrom(ctx).Warn("process-telegram-query: save query log for image failed", "chat_id", data.ChatID, "error", saveErr)
+			}
+		}
 		response := data.Body + "\n\nLogged."
 		if err := s.Telegram.SendMessage(ctx, data.ChatID, response); err != nil {
 			infra.LoggerFrom(ctx).Error("process-telegram-query: send reply failed", "chat_id", data.ChatID, "error", err)
