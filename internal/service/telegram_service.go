@@ -64,3 +64,8 @@ func (s *TelegramService) ProcessIncomingTelegram(ctx context.Context, app *infr
 func (s *TelegramService) SendMessage(ctx context.Context, chatID int64, body string) error {
 	return telegram.SendMessage(ctx, s.cfg(), chatID, body, infra.LoggerFrom(ctx))
 }
+
+// SendPhoto sends a photo to a Telegram chat via the Bot API.
+func (s *TelegramService) SendPhoto(ctx context.Context, chatID int64, caption string, imageBytes []byte, mimeType string) error {
+	return telegram.SendPhoto(ctx, s.cfg(), chatID, caption, imageBytes, mimeType, infra.LoggerFrom(ctx))
+}

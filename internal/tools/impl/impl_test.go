@@ -60,6 +60,7 @@ func TestToolDefinitionsComplete(t *testing.T) {
 		"update_task_status",
 		"search_tasks",
 		"discovery_search",
+		"retrieve_image",
 	}
 
 	toolDefs := tools.GetDefinitions()

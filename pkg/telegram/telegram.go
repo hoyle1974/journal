@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -269,6 +270,73 @@ func detectImageMIME(data []byte) string {
 		return "image/gif"
 	}
 	return "image/jpeg"
+}
+
+// SendPhoto sends a photo to a Telegram chat via the Bot API using multipart upload.
+// caption is optional (max 1024 bytes). imageBytes must be non-empty.
+func SendPhoto(ctx context.Context, cfg *config.Config, chatID int64, caption string, imageBytes []byte, mimeType string, log Logger) error {
+	if cfg == nil || cfg.TelegramBotToken == "" {
+		return fmt.Errorf("telegram bot token not configured")
+	}
+	if len(imageBytes) == 0 {
+		return fmt.Errorf("image bytes are empty")
+	}
+
+	apiURL := telegramAPIBase + cfg.TelegramBotToken + "/sendPhoto"
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+
+	if err := mw.WriteField("chat_id", strconv.FormatInt(chatID, 10)); err != nil {
+		return fmt.Errorf("write chat_id field: %w", err)
+	}
+	if caption != "" {
+		if err := mw.WriteField("caption", truncateToMaxBytes(caption, 1024)); err != nil {
+			return fmt.Errorf("write caption field: %w", err)
+		}
+	}
+
+	filename := "photo.jpg"
+	switch mimeType {
+	case "image/png":
+		filename = "photo.png"
+	case "image/webp":
+		filename = "photo.webp"
+	case "image/gif":
+		filename = "photo.gif"
+	}
+	fw, err := mw.CreateFormFile("photo", filename)
+	if err != nil {
+		return fmt.Errorf("create form file: %w", err)
+	}
+	if _, err := io.Copy(fw, bytes.NewReader(imageBytes)); err != nil {
+		return fmt.Errorf("write photo bytes: %w", err)
+	}
+	if err := mw.Close(); err != nil {
+		return fmt.Errorf("close multipart writer: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, &buf)
+	if err != nil {
+		return fmt.Errorf("create sendPhoto request: %w", err)
+	}
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("send photo: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("telegram sendPhoto API error: status=%d body=%s", resp.StatusCode, string(respBody))
+	}
+	if log != nil {
+		log.Info("Telegram photo sent", "chat_id", chatID, "bytes", len(imageBytes))
+	}
+	return nil
 }
 
 // SendMessage sends a text message to a Telegram chat via the Bot API.

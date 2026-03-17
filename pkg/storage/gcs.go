@@ -3,7 +3,9 @@ package storage
 import (
 	"context"
 	"fmt"
+	"io"
 	"path"
+	"strings"
 
 	"cloud.google.com/go/storage"
 	"github.com/google/uuid"
@@ -77,6 +79,35 @@ func contentTypeFromBytes(data []byte) string {
 	return "application/octet-stream"
 }
 
+// DownloadImage fetches image bytes from a gs:// URI previously returned by UploadImage.
+func (g *GCSImageStorage) DownloadImage(ctx context.Context, uri string) ([]byte, string, error) {
+	if g.client == nil || g.bucket == "" {
+		return nil, "", fmt.Errorf("image download not configured: GCS client or bucket missing")
+	}
+	if !strings.HasPrefix(uri, "gs://") {
+		return nil, "", fmt.Errorf("invalid GCS URI: %q", uri)
+	}
+	rest := uri[len("gs://"):]
+	slashIdx := strings.Index(rest, "/")
+	if slashIdx < 0 {
+		return nil, "", fmt.Errorf("invalid GCS URI (no object path): %q", uri)
+	}
+	bucket := rest[:slashIdx]
+	objName := rest[slashIdx+1:]
+
+	r, err := g.client.Bucket(bucket).Object(objName).NewReader(ctx)
+	if err != nil {
+		return nil, "", fmt.Errorf("open GCS object %q: %w", uri, err)
+	}
+	defer r.Close()
+
+	data, err := io.ReadAll(io.LimitReader(r, gcsMaxSize))
+	if err != nil {
+		return nil, "", fmt.Errorf("read GCS object %q: %w", uri, err)
+	}
+	return data, contentTypeFromBytes(data), nil
+}
+
 // noopImageStorage implements ImageStorage but does nothing; used when bucket is not set.
 type noopImageStorage struct{}
 
@@ -84,6 +115,11 @@ func (n *noopImageStorage) UploadImage(ctx context.Context, data []byte) (string
 	_ = ctx
 	_ = data
 	return "", fmt.Errorf("image upload not configured: set JOT_IMAGES_BUCKET to enable")
+}
+
+func (n *noopImageStorage) DownloadImage(ctx context.Context, uri string) ([]byte, string, error) {
+	_, _ = ctx, uri
+	return nil, "", fmt.Errorf("image download not configured: set JOT_IMAGES_BUCKET to enable")
 }
 
 // NoopImageStorage returns an ImageStorage that always returns a "not configured" error.
