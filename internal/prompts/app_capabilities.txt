@@ -38,7 +38,7 @@ Jot is a personal journaling and memory system. It ingests journal entries, extr
 - **context**: list_contexts, create_context, touch_context, delete_context, get_system_health_audit, get_project_timeline, update_project_status.
 - **task**: create_task, get_task, update_task, update_task_status, search_tasks.
 - **query**: get_recent_queries, search_queries, get_queries_by_date.
-- **web**: fetch_url, define_word, wikipedia, web_search, bookmark, countdown, github_read.
+- **web**: fetch_url, define_word, wikipedia, web_search, bookmark, countdown, github_read, get_weather (current conditions + daily forecast for any city; no API key; uses Open-Meteo; default unit: fahrenheit).
 - **utility**: calculate, date_calc, text_stats, convert_units, random, timezone_convert, encode_decode.
 - **specialist**: consult_anthropologist, consult_architect, consult_executive, consult_philosopher (and any other consult_*).
 - **bootstrap**: discovery_search (intent → tool schemas). When using compact tools, invoke discovered tools via key/value lines only: TOOL: name, then ARGS: with param_name | value per line; no JSON, no code fences.

@@ -17,6 +17,7 @@ var onboardingQuestions = []struct {
 	Kind     string
 }{
 	{"What is your name?", "onboarding"},
+	{"What city and country do you live in?", "onboarding"},
 	{"Describe your family.", "onboarding"},
 	{"Who do you work for?", "onboarding"},
 	{"What is your job or role?", "onboarding"},
