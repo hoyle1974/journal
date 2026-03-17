@@ -57,56 +57,68 @@ func registerWeatherTools() {
 }
 
 // geocodeLocation resolves a location name to lat/lng using Open-Meteo's geocoding API.
+// Open-Meteo only understands city names, so if the full string (e.g. "San Francisco, CA")
+// returns no results, we retry with just the part before the first comma.
 func geocodeLocation(ctx context.Context, location string) (lat, lng float64, resolvedName string, err error) {
-	apiURL := "https://geocoding-api.open-meteo.com/v1/search?name=" + url.QueryEscape(location) + "&count=1&language=en&format=json"
+	candidates := []string{location}
+	if idx := strings.Index(location, ","); idx > 0 {
+		candidates = append(candidates, strings.TrimSpace(location[:idx]))
+	}
 
 	client := &http.Client{Timeout: 10 * time.Second}
-	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
-	if err != nil {
-		return 0, 0, "", fmt.Errorf("geocode request: %w", err)
-	}
-	req.Header.Set("User-Agent", "JotPersonalAssistant/1.0")
 
-	resp, err := client.Do(req)
-	if err != nil {
-		return 0, 0, "", fmt.Errorf("geocode fetch: %w", err)
+	type geoResult struct {
+		Name      string  `json:"name"`
+		Country   string  `json:"country"`
+		Admin1    string  `json:"admin1"`
+		Latitude  float64 `json:"latitude"`
+		Longitude float64 `json:"longitude"`
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return 0, 0, "", fmt.Errorf("geocode HTTP %d", resp.StatusCode)
+	type geoResponse struct {
+		Results []geoResult `json:"results"`
 	}
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
-	if err != nil {
-		return 0, 0, "", fmt.Errorf("geocode read: %w", err)
+	for _, query := range candidates {
+		apiURL := "https://geocoding-api.open-meteo.com/v1/search?name=" + url.QueryEscape(query) + "&count=1&language=en&format=json"
+		req, reqErr := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
+		if reqErr != nil {
+			return 0, 0, "", fmt.Errorf("geocode request: %w", reqErr)
+		}
+		req.Header.Set("User-Agent", "JotPersonalAssistant/1.0")
+
+		resp, doErr := client.Do(req)
+		if doErr != nil {
+			return 0, 0, "", fmt.Errorf("geocode fetch: %w", doErr)
+		}
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+		resp.Body.Close()
+		if readErr != nil {
+			return 0, 0, "", fmt.Errorf("geocode read: %w", readErr)
+		}
+		if resp.StatusCode != http.StatusOK {
+			return 0, 0, "", fmt.Errorf("geocode HTTP %d", resp.StatusCode)
+		}
+
+		var geo geoResponse
+		if jsonErr := json.Unmarshal(body, &geo); jsonErr != nil {
+			return 0, 0, "", fmt.Errorf("geocode parse: %w", jsonErr)
+		}
+		if len(geo.Results) == 0 {
+			continue // try next candidate
+		}
+
+		r := geo.Results[0]
+		parts := []string{r.Name}
+		if r.Admin1 != "" {
+			parts = append(parts, r.Admin1)
+		}
+		if r.Country != "" {
+			parts = append(parts, r.Country)
+		}
+		return r.Latitude, r.Longitude, strings.Join(parts, ", "), nil
 	}
 
-	var geo struct {
-		Results []struct {
-			Name      string  `json:"name"`
-			Country   string  `json:"country"`
-			Admin1    string  `json:"admin1"`
-			Latitude  float64 `json:"latitude"`
-			Longitude float64 `json:"longitude"`
-		} `json:"results"`
-	}
-	if err := json.Unmarshal(body, &geo); err != nil {
-		return 0, 0, "", fmt.Errorf("geocode parse: %w", err)
-	}
-	if len(geo.Results) == 0 {
-		return 0, 0, "", fmt.Errorf("location not found: %q", location)
-	}
-
-	r := geo.Results[0]
-	parts := []string{r.Name}
-	if r.Admin1 != "" {
-		parts = append(parts, r.Admin1)
-	}
-	if r.Country != "" {
-		parts = append(parts, r.Country)
-	}
-	return r.Latitude, r.Longitude, strings.Join(parts, ", "), nil
+	return 0, 0, "", fmt.Errorf("location not found: %q", location)
 }
 
 // wmoDescription maps WMO weather interpretation codes to human-readable strings.
