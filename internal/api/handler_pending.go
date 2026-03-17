@@ -9,21 +9,12 @@ import (
 	"github.com/jackstrohm/jot/internal/persona"
 )
 
-func handlePendingQuestions(s *Server, w http.ResponseWriter, r *http.Request) {
+func handlePendingQuestions(s *Server, w http.ResponseWriter, r *http.Request) (any, error) {
 	ctx := r.Context()
-	path := pathForLog(r.URL.Path)
-	LogHandlerRequest(ctx, r.Method, path)
-	if r.Method != http.MethodGet {
-		LogHandlerResponse(ctx, r.Method, path, http.StatusMethodNotAllowed, "error", "Method not allowed")
-		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
-		return
-	}
 	questions, err := s.Memory.GetUnresolvedPendingQuestions(ctx, 20)
 	if err != nil {
 		infra.LoggerFrom(ctx).Error("pending questions list failed", "error", err)
-		LogHandlerResponse(ctx, r.Method, path, http.StatusInternalServerError, "error", err.Error())
-		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
+		return nil, err
 	}
 	if app, ok := s.App.(*infra.App); ok {
 		for i := range questions {
@@ -32,34 +23,23 @@ func handlePendingQuestions(s *Server, w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	LogHandlerResponse(ctx, r.Method, path, http.StatusOK, "count", len(questions))
-	WriteJSON(w, http.StatusOK, map[string]interface{}{"questions": questions, "count": len(questions)})
+	return map[string]interface{}{"questions": questions, "count": len(questions)}, nil
 }
 
-func handlePendingQuestionResolve(s *Server, w http.ResponseWriter, r *http.Request) {
+func handlePendingQuestionResolve(s *Server, w http.ResponseWriter, r *http.Request) (any, error) {
 	questionID := chi.URLParam(r, "id")
 	ctx := r.Context()
 	path := pathForLog(r.URL.Path)
 	LogHandlerRequest(ctx, r.Method, path, "question_id", questionID)
-	if r.Method != http.MethodPost {
-		LogHandlerResponse(ctx, r.Method, path, http.StatusMethodNotAllowed, "error", "Method not allowed")
-		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
-		return
-	}
 	var body struct {
 		Answer string `json:"answer" validate:"required"`
 	}
 	if err := DecodeAndValidate(r, &body, s.Validator); err != nil {
-		LogHandlerResponse(ctx, r.Method, path, http.StatusBadRequest, "error", err.Error())
-		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-		return
+		return nil, handlerError(http.StatusBadRequest, err.Error())
 	}
 	if err := s.Memory.ResolvePendingQuestion(ctx, questionID, strings.TrimSpace(body.Answer)); err != nil {
 		infra.LoggerFrom(ctx).Error("resolve pending question failed", "id", questionID, "error", err)
-		LogHandlerResponse(ctx, r.Method, path, http.StatusInternalServerError, "error", err.Error())
-		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
+		return nil, err
 	}
-	LogHandlerResponse(ctx, r.Method, path, http.StatusOK, "success", true, "id", questionID)
-	WriteJSON(w, http.StatusOK, map[string]string{"status": "ok", "id": questionID})
+	return map[string]string{"status": "ok", "id": questionID}, nil
 }

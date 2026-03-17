@@ -279,49 +279,31 @@ func syncApplyBatchUpdate(docsService *docs.Service, documentID string, requests
 	return err
 }
 
-func handleSync(s *Server, w http.ResponseWriter, r *http.Request) {
+func handleSync(s *Server, w http.ResponseWriter, r *http.Request) (any, error) {
 	startTime := time.Now()
 	ctx := r.Context()
-	path := pathForLog(r.URL.Path)
-	LogHandlerRequest(ctx, r.Method, path)
 	ctx = infra.WithSyncInProgress(ctx)
 
 	ctx, span := infra.StartSpan(ctx, "sync.gdoc")
 	defer span.End()
 
-	if r.Method != http.MethodPost {
-		LogHandlerResponse(ctx, r.Method, path, http.StatusMethodNotAllowed, "error", "Method not allowed")
-		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
-		return
-	}
-
 	if s.Config.DocumentID == "" {
-		LogHandlerResponse(ctx, r.Method, path, http.StatusInternalServerError, "error", "DOCUMENT_ID not configured")
-		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "DOCUMENT_ID not configured"})
-		return
+		return nil, handlerError(http.StatusInternalServerError, "DOCUMENT_ID not configured")
 	}
 	documentID := strings.TrimSpace(s.Config.DocumentID)
 	if !googleDocIDRe.MatchString(documentID) {
 		infra.LoggerFrom(ctx).Error("sync failed", "stage", "Config", "reason", "invalid DOCUMENT_ID format")
-		LogHandlerResponse(ctx, r.Method, path, http.StatusBadRequest, "error", "invalid DOCUMENT_ID format")
-		WriteJSON(w, http.StatusBadRequest, map[string]string{
-			"error": "DOCUMENT_ID must be the document ID only (e.g. from docs.google.com/document/d/ID/edit), not a full URL or path.",
-		})
-		return
+		return nil, handlerError(http.StatusBadRequest, "DOCUMENT_ID must be the document ID only (e.g. from docs.google.com/document/d/ID/edit), not a full URL or path.")
 	}
 
 	lockAcquired, lockErr := s.System.AcquireSyncLock(ctx)
 	if lockErr != nil {
 		infra.LoggerFrom(ctx).Error("failed to check sync lock", "error", lockErr)
-		LogHandlerResponse(ctx, r.Method, path, http.StatusInternalServerError, "error", "Failed to check sync lock")
-		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to check sync lock"})
-		return
+		return nil, handlerError(http.StatusInternalServerError, "Failed to check sync lock")
 	}
 	if !lockAcquired {
 		infra.LoggerFrom(ctx).Info("sync skipped", "reason", "already in progress")
-		LogHandlerResponse(ctx, r.Method, path, http.StatusConflict, "error", "sync already in progress")
-		WriteJSON(w, http.StatusConflict, map[string]string{"error": "Another sync is already in progress. Please wait and try again."})
-		return
+		return nil, handlerError(http.StatusConflict, "Another sync is already in progress. Please wait and try again.")
 	}
 	defer s.System.ReleaseSyncLock(ctx)
 
@@ -329,9 +311,7 @@ func handleSync(s *Server, w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		span.RecordError(err)
 		infra.LoggerFrom(ctx).Error("sync failed", "stage", "DocsService", "error", err)
-		LogHandlerResponse(ctx, r.Method, path, http.StatusInternalServerError, "error", err.Error())
-		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("Failed to create Docs service: %v", err)})
-		return
+		return nil, fmt.Errorf("Failed to create Docs service: %w", err)
 	}
 
 	docFetchStart := time.Now()
@@ -345,9 +325,7 @@ func handleSync(s *Server, w http.ResponseWriter, r *http.Request) {
 			infra.LoggerFrom(ctx).Info("sync fetch hint", "hint", hint)
 			msg = hint
 		}
-		LogHandlerResponse(ctx, r.Method, path, http.StatusInternalServerError, "error", msg)
-		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": msg})
-		return
+		return nil, handlerError(http.StatusInternalServerError, msg)
 	}
 	infra.LoggerFrom(ctx).Debug("doc fetched", "duration_ms", time.Since(docFetchStart).Milliseconds(),
 		"body_elements", len(doc.Body.Content))
@@ -364,24 +342,14 @@ func handleSync(s *Server, w http.ResponseWriter, r *http.Request) {
 
 	if doc.Body == nil || len(doc.Body.Content) == 0 {
 		infra.LoggerFrom(ctx).Info("sync skipped", "reason", "document has no body")
-		LogHandlerResponse(ctx, r.Method, path, http.StatusOK, "processed", 0, "reason", "no body")
-		WriteJSON(w, http.StatusOK, map[string]interface{}{
-			"message":   "Document has no body",
-			"processed": 0,
-		})
-		return
+		return map[string]interface{}{"message": "Document has no body", "processed": 0}, nil
 	}
 
 	doneElem, doneStartIndex, doneEndIndex := findSyncDoneTrigger(ctx, doc)
 	if doneElem == nil {
 		infra.LoggerFrom(ctx).Debug("sync trigger scan complete", "found", false)
 		infra.LoggerFrom(ctx).Info("sync skipped", "reason", "no done. trigger")
-		LogHandlerResponse(ctx, r.Method, path, http.StatusOK, "processed", 0, "reason", "no done trigger")
-		WriteJSON(w, http.StatusOK, map[string]interface{}{
-			"message":   "No 'done.' trigger found",
-			"processed": 0,
-		})
-		return
+		return map[string]interface{}{"message": "No 'done.' trigger found", "processed": 0}, nil
 	}
 
 	infra.LoggerFrom(ctx).Debug("sync trigger scan complete", "found", true, "start_index", doneStartIndex, "end_index", doneEndIndex)
@@ -412,9 +380,7 @@ func handleSync(s *Server, w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			infra.LoggerFrom(ctx).Error("doc update failed", "error", err)
 			span.RecordError(err)
-			LogHandlerResponse(ctx, r.Method, path, http.StatusInternalServerError, "error", err.Error())
-			WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("Failed to update document: %v", err)})
-			return
+			return nil, fmt.Errorf("Failed to update document: %w", err)
 		}
 		infra.LoggerFrom(ctx).Debug("doc updated", "duration_ms", time.Since(updateStart).Milliseconds())
 		if blockToProcess != nil && strings.TrimSpace(blockToProcess.text) != "" {
@@ -426,27 +392,24 @@ func handleSync(s *Server, w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	totalTime := time.Since(startTime)
 	totalProcessed := entriesAdded + questionsAnswered + actionsExecuted
-	LogHandlerResponse(ctx, r.Method, path, http.StatusOK,
-		"success", true,
+	infra.LoggerFrom(ctx).Info("sync completed",
 		"entries_added", entriesAdded,
 		"questions_answered", questionsAnswered,
 		"actions_executed", actionsExecuted,
 		"total_processed", totalProcessed,
-		"duration_ms", totalTime.Milliseconds(),
+		"duration_ms", time.Since(startTime).Milliseconds(),
 	)
-
-	WriteJSON(w, http.StatusOK, map[string]interface{}{
+	return map[string]interface{}{
 		"success":            true,
 		"entries_added":      entriesAdded,
 		"questions_answered": questionsAnswered,
 		"actions_executed":   actionsExecuted,
 		"total_processed":    totalProcessed,
-	})
+	}, nil
 }
 
-func handleWebhook(s *Server, w http.ResponseWriter, r *http.Request) {
+func handleWebhook(s *Server, w http.ResponseWriter, r *http.Request) (any, error) {
 	startTime := time.Now()
 	ctx := r.Context()
 	path := pathForLog(r.URL.Path)
@@ -455,30 +418,22 @@ func handleWebhook(s *Server, w http.ResponseWriter, r *http.Request) {
 	ctx, span := infra.StartSpan(ctx, "webhook.gdrive")
 	defer span.End()
 	if resourceState == "sync" {
-		LogHandlerResponse(ctx, r.Method, path, http.StatusOK, "status", "sync acknowledged")
-		WriteJSON(w, http.StatusOK, map[string]string{"status": "sync acknowledged"})
-		return
+		return map[string]string{"status": "sync acknowledged"}, nil
 	}
 	span.SetAttributes(map[string]string{"resource_state": resourceState})
 	if resourceState != "change" && resourceState != "update" {
 		infra.LoggerFrom(ctx).Info("webhook ignored", "resource_state", resourceState)
-		LogHandlerResponse(ctx, r.Method, path, http.StatusOK, "status", "ignored", "reason", "resource_state")
-		WriteJSON(w, http.StatusOK, map[string]interface{}{
+		return map[string]interface{}{
 			"status": "ignored", "reason": fmt.Sprintf("resource_state=%s", resourceState),
-		})
-		return
+		}, nil
 	}
 	if s.Config.SyncGDocURL == "" {
-		LogHandlerResponse(ctx, r.Method, path, http.StatusInternalServerError, "error", "SYNC_GDOC_URL not configured")
-		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "SYNC_GDOC_URL not configured"})
-		return
+		return nil, handlerError(http.StatusInternalServerError, "SYNC_GDOC_URL not configured")
 	}
 	debounceSeconds := 5
 	tasksClient, err := cloudtasks.NewClient(ctx)
 	if err != nil {
-		LogHandlerResponse(ctx, r.Method, path, http.StatusInternalServerError, "error", err.Error())
-		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("Failed to create Tasks client: %v", err)})
-		return
+		return nil, fmt.Errorf("Failed to create Tasks client: %w", err)
 	}
 	defer tasksClient.Close()
 	parent := fmt.Sprintf("projects/%s/locations/%s/queues/%s", s.Config.GoogleCloudProject, s.Config.CloudTasksLocation, s.Config.CloudTasksQueue)
@@ -508,20 +463,17 @@ func handleWebhook(s *Server, w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		span.RecordError(err)
 		infra.LoggerFrom(ctx).Error("webhook failed to schedule sync", "error", err)
-		LogHandlerResponse(ctx, r.Method, path, http.StatusInternalServerError, "error", err.Error())
-		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("Failed to create task: %v", err)})
-		return
+		return nil, fmt.Errorf("Failed to create task: %w", err)
 	}
 	infra.LoggerFrom(ctx).Info("webhook", "event", "Drive change, sync scheduled", "delay_seconds", debounceSeconds, "task_id", taskID)
-	LogHandlerResponse(ctx, r.Method, path, http.StatusOK, "status", "scheduled", "task_id", taskID, "delay_seconds", debounceSeconds)
 	s.App.SubmitAsync(func() {
 		if err := s.System.SetDebounceState(context.Background(), taskName, scheduleTime); err != nil {
 			infra.LoggerFrom(ctx).Warn("failed to store debounce state", "error", err)
 		}
 	})
 	infra.LoggerFrom(ctx).Debug("webhook completed", "duration_ms", time.Since(startTime).Milliseconds())
-	WriteJSON(w, http.StatusOK, map[string]interface{}{
+	return map[string]interface{}{
 		"status": "scheduled", "message": fmt.Sprintf("Sync scheduled for %d seconds from now", debounceSeconds),
 		"scheduled_time": scheduleTime.Format(time.RFC3339),
-	})
+	}, nil
 }

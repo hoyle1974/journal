@@ -11,35 +11,26 @@ import (
 // EntryUUIDRegex matches /entries/{uuid} for path parsing. Exported for tests.
 var EntryUUIDRegex = regexp.MustCompile(`^/entries/([a-f0-9-]+)$`)
 
-func handleEntries(s *Server, w http.ResponseWriter, r *http.Request, path string) {
+func handleEntries(s *Server, w http.ResponseWriter, r *http.Request) (any, error) {
 	ctx := r.Context()
-	pathForLogVal := pathForLog(r.URL.Path)
-	LogHandlerRequest(ctx, r.Method, pathForLogVal)
-	match := EntryUUIDRegex.FindStringSubmatch(path)
+	path := pathForLog(r.URL.Path)
+	match := EntryUUIDRegex.FindStringSubmatch(r.URL.Path)
 	switch r.Method {
 	case http.MethodGet:
 		if match != nil {
 			entry, err := s.Journal.GetEntry(ctx, match[1])
 			if err != nil {
-				LogHandlerResponse(ctx, r.Method, pathForLogVal, http.StatusNotFound, "error", "Entry not found")
-				WriteJSON(w, http.StatusNotFound, map[string]string{"error": "Entry not found"})
-				return
+				return nil, handlerError(http.StatusNotFound, "Entry not found")
 			}
-			LogHandlerResponse(ctx, r.Method, pathForLogVal, http.StatusOK, "entry_uuid", match[1])
-			WriteJSON(w, http.StatusOK, entry)
-			return
+			return entry, nil
 		}
 		entryUUID := r.URL.Query().Get("uuid")
 		if entryUUID != "" {
 			entry, err := s.Journal.GetEntry(ctx, entryUUID)
 			if err != nil {
-				LogHandlerResponse(ctx, r.Method, pathForLogVal, http.StatusNotFound, "error", "Entry not found")
-				WriteJSON(w, http.StatusNotFound, map[string]string{"error": "Entry not found"})
-				return
+				return nil, handlerError(http.StatusNotFound, "Entry not found")
 			}
-			LogHandlerResponse(ctx, r.Method, pathForLogVal, http.StatusOK, "entry_uuid", entryUUID)
-			WriteJSON(w, http.StatusOK, entry)
-			return
+			return entry, nil
 		}
 		limit := 10
 		if l := r.URL.Query().Get("limit"); l != "" {
@@ -47,48 +38,38 @@ func handleEntries(s *Server, w http.ResponseWriter, r *http.Request, path strin
 				limit = parsed
 			}
 		}
-		LogHandlerRequest(ctx, r.Method, pathForLogVal, "limit", limit)
+		LogHandlerRequest(ctx, r.Method, path, "limit", limit)
 		entries, err := s.Journal.GetEntries(ctx, limit)
 		if err != nil {
-			LogHandlerResponse(ctx, r.Method, pathForLogVal, http.StatusInternalServerError, "error", err.Error())
-			WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
+			return nil, err
 		}
-		LogHandlerResponse(ctx, r.Method, pathForLogVal, http.StatusOK, "count", len(entries))
-		WriteJSON(w, http.StatusOK, map[string]interface{}{"entries": entries, "count": len(entries)})
+		return map[string]interface{}{"entries": entries, "count": len(entries)}, nil
+
 	case http.MethodPatch:
 		var data struct {
 			UUID    string `json:"uuid"`
 			Content string `json:"content" validate:"required"`
 		}
 		if err := DecodeAndValidate(r, &data, s.Validator); err != nil {
-			LogHandlerResponse(ctx, r.Method, pathForLogVal, http.StatusBadRequest, "error", err.Error())
-			WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-			return
+			return nil, handlerError(http.StatusBadRequest, err.Error())
 		}
 		entryUUID := data.UUID
 		if match != nil {
 			entryUUID = match[1]
 		}
 		if entryUUID == "" {
-			LogHandlerResponse(ctx, r.Method, pathForLogVal, http.StatusBadRequest, "error", "uuid is required (in body or path)")
-			WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "uuid is required (in body or path)"})
-			return
+			return nil, handlerError(http.StatusBadRequest, "uuid is required (in body or path)")
 		}
 		newContent := strings.TrimSpace(data.Content)
 		if newContent == "" {
-			LogHandlerResponse(ctx, r.Method, pathForLogVal, http.StatusBadRequest, "error", "content cannot be only whitespace")
-			WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "content cannot be only whitespace"})
-			return
+			return nil, handlerError(http.StatusBadRequest, "content cannot be only whitespace")
 		}
-		LogHandlerRequest(ctx, r.Method, pathForLogVal, "uuid", entryUUID, "content_length", len(newContent))
+		LogHandlerRequest(ctx, r.Method, path, "uuid", entryUUID, "content_length", len(newContent))
 		if err := s.Journal.UpdateEntry(ctx, entryUUID, newContent); err != nil {
-			LogHandlerResponse(ctx, r.Method, pathForLogVal, http.StatusInternalServerError, "error", err.Error())
-			WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
+			return nil, err
 		}
-		LogHandlerResponse(ctx, r.Method, pathForLogVal, http.StatusOK, "success", true, "uuid", entryUUID)
-		WriteJSON(w, http.StatusOK, map[string]interface{}{"success": true, "message": "Entry updated"})
+		return map[string]interface{}{"success": true, "message": "Entry updated"}, nil
+
 	case http.MethodDelete:
 		var uuids []string
 		if match != nil {
@@ -98,9 +79,7 @@ func handleEntries(s *Server, w http.ResponseWriter, r *http.Request, path strin
 				UUIDs interface{} `json:"uuids"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
-				LogHandlerResponse(ctx, r.Method, pathForLogVal, http.StatusBadRequest, "error", "Invalid JSON")
-				WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON"})
-				return
+				return nil, handlerError(http.StatusBadRequest, "Invalid JSON")
 			}
 			switch v := data.UUIDs.(type) {
 			case string:
@@ -114,20 +93,15 @@ func handleEntries(s *Server, w http.ResponseWriter, r *http.Request, path strin
 			}
 		}
 		if len(uuids) == 0 {
-			LogHandlerResponse(ctx, r.Method, pathForLogVal, http.StatusBadRequest, "error", "uuids is required")
-			WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "uuids is required"})
-			return
+			return nil, handlerError(http.StatusBadRequest, "uuids is required")
 		}
-		LogHandlerRequest(ctx, r.Method, pathForLogVal, "uuid_count", len(uuids))
+		LogHandlerRequest(ctx, r.Method, path, "uuid_count", len(uuids))
 		if err := s.Journal.DeleteEntries(ctx, uuids); err != nil {
-			LogHandlerResponse(ctx, r.Method, pathForLogVal, http.StatusInternalServerError, "error", err.Error())
-			WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
+			return nil, err
 		}
-		LogHandlerResponse(ctx, r.Method, pathForLogVal, http.StatusOK, "success", true, "deleted", len(uuids))
-		WriteJSON(w, http.StatusOK, map[string]interface{}{"success": true, "deleted": len(uuids)})
+		return map[string]interface{}{"success": true, "deleted": len(uuids)}, nil
+
 	default:
-		LogHandlerResponse(ctx, r.Method, pathForLogVal, http.StatusMethodNotAllowed, "error", "Method not allowed")
-		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
+		return nil, handlerError(http.StatusMethodNotAllowed, "Method not allowed")
 	}
 }

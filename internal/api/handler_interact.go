@@ -12,24 +12,16 @@ import (
 
 const logMultipartMaxBytes = 10 << 20 // 10MB
 
-func handleLog(s *Server, w http.ResponseWriter, r *http.Request) {
+func handleLog(s *Server, w http.ResponseWriter, r *http.Request) (any, error) {
 	ctx := r.Context()
 	path := pathForLog(r.URL.Path)
-	LogHandlerRequest(ctx, r.Method, path)
-	if r.Method != http.MethodPost {
-		LogHandlerResponse(ctx, r.Method, path, http.StatusMethodNotAllowed, "error", "Method not allowed")
-		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
-		return
-	}
 	var content, source string
 	var timestamp *string
 	var imageBytes []byte
 	if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
 		if err := r.ParseMultipartForm(logMultipartMaxBytes); err != nil {
 			infra.LoggerFrom(ctx).Warn("log multipart parse error", "error", err)
-			LogHandlerResponse(ctx, r.Method, path, http.StatusBadRequest, "error", "invalid multipart form")
-			WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid multipart form"})
-			return
+			return nil, handlerError(http.StatusBadRequest, "invalid multipart form")
 		}
 		content = strings.TrimSpace(r.FormValue("content"))
 		if content == "" {
@@ -51,18 +43,14 @@ func handleLog(s *Server, w http.ResponseWriter, r *http.Request) {
 		}
 		if err := DecodeAndValidate(r, &data, s.Validator); err != nil {
 			infra.LoggerFrom(ctx).Warn("log request decode/validate error", "error", err)
-			LogHandlerResponse(ctx, r.Method, path, http.StatusBadRequest, "error", err.Error())
-			WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-			return
+			return nil, handlerError(http.StatusBadRequest, err.Error())
 		}
 		content = strings.TrimSpace(data.Content)
 		source = data.Source
 		timestamp = data.Timestamp
 	}
 	if content == "" {
-		LogHandlerResponse(ctx, r.Method, path, http.StatusBadRequest, "error", "content cannot be only whitespace")
-		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "content cannot be only whitespace"})
-		return
+		return nil, handlerError(http.StatusBadRequest, "content cannot be only whitespace")
 	}
 	if source == "" {
 		source = "api"
@@ -73,33 +61,22 @@ func handleLog(s *Server, w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		infra.ErrorsTotal.Inc()
 		infra.LoggerFrom(ctx).Error("entry failed", "error", err)
-		LogHandlerResponse(ctx, r.Method, path, http.StatusInternalServerError, "error", err.Error())
-		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
+		return nil, err
 	}
-	LogHandlerResponse(ctx, r.Method, path, http.StatusOK, "success", true, "uuid", entryUUID)
-	WriteJSON(w, http.StatusOK, map[string]interface{}{"success": true, "uuid": entryUUID, "message": "Entry logged successfully"})
+	return map[string]interface{}{"success": true, "uuid": entryUUID, "message": "Entry logged successfully"}, nil
 }
 
 // handleQuery runs the FOH and delivers the answer to the API client as JSON.
 // SMS callers use a Cloud Task (process-sms-query) which runs FOH and delivers the answer via SendSMS.
-func handleQuery(s *Server, w http.ResponseWriter, r *http.Request) {
+func handleQuery(s *Server, w http.ResponseWriter, r *http.Request) (any, error) {
 	ctx := r.Context()
 	path := pathForLog(r.URL.Path)
-	LogHandlerRequest(ctx, r.Method, path)
-	if r.Method != http.MethodPost {
-		LogHandlerResponse(ctx, r.Method, path, http.StatusMethodNotAllowed, "error", "Method not allowed")
-		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
-		return
-	}
 	var data struct {
 		Question string `json:"question" validate:"required"`
 		Source   string `json:"source"`
 	}
 	if err := DecodeAndValidate(r, &data, s.Validator); err != nil {
-		LogHandlerResponse(ctx, r.Method, path, http.StatusBadRequest, "error", err.Error())
-		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-		return
+		return nil, handlerError(http.StatusBadRequest, err.Error())
 	}
 	question := strings.TrimSpace(data.Question)
 	source := data.Source
@@ -113,28 +90,21 @@ func handleQuery(s *Server, w http.ResponseWriter, r *http.Request) {
 			result.Answer = persona.Apply(ctx, app, result.Answer, question)
 		}
 	}
-	LogHandlerResponse(ctx, r.Method, path, http.StatusOK,
-		"error", result.Error, "iterations", result.Iterations, "tool_call_count", len(result.ToolCalls),
+	infra.LoggerFrom(ctx).Info("query completed",
+		"error", result.Error, "iterations", result.Iterations,
+		"tool_call_count", len(result.ToolCalls),
 		"answer_preview", utils.TruncateString(result.Answer, 120))
-	WriteJSON(w, http.StatusOK, result)
+	return result, nil
 }
 
-func handlePlan(s *Server, w http.ResponseWriter, r *http.Request) {
+func handlePlan(s *Server, w http.ResponseWriter, r *http.Request) (any, error) {
 	ctx := r.Context()
 	path := pathForLog(r.URL.Path)
-	LogHandlerRequest(ctx, r.Method, path)
-	if r.Method != http.MethodPost {
-		LogHandlerResponse(ctx, r.Method, path, http.StatusMethodNotAllowed, "error", "Method not allowed")
-		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
-		return
-	}
 	var data struct {
 		Goal string `json:"goal" validate:"required"`
 	}
 	if err := DecodeAndValidate(r, &data, s.Validator); err != nil {
-		LogHandlerResponse(ctx, r.Method, path, http.StatusBadRequest, "error", err.Error())
-		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-		return
+		return nil, handlerError(http.StatusBadRequest, err.Error())
 	}
 	goal := strings.TrimSpace(data.Goal)
 	LogHandlerRequest(ctx, r.Method, path, "goal_preview", utils.TruncateString(goal, 80))
@@ -148,10 +118,7 @@ func handlePlan(s *Server, w http.ResponseWriter, r *http.Request) {
 		} else if infra.IsLLMPermissionOrBillingDenied(err) {
 			code = http.StatusForbidden
 		}
-		LogHandlerResponse(ctx, r.Method, path, code, "error", err.Error())
-		WriteJSON(w, code, map[string]string{"error": err.Error()})
-		return
+		return nil, handlerError(code, err.Error())
 	}
-	LogHandlerResponse(ctx, r.Method, path, http.StatusOK, "success", true, "plan_length", len(result))
-	WriteJSON(w, http.StatusOK, map[string]interface{}{"success": true, "plan": result})
+	return map[string]interface{}{"success": true, "plan": result}, nil
 }

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -13,15 +14,9 @@ import (
 	"github.com/jackstrohm/jot/pkg/utils"
 )
 
-func handleProcessEntry(s *Server, w http.ResponseWriter, r *http.Request) {
+func handleProcessEntry(s *Server, w http.ResponseWriter, r *http.Request) (any, error) {
 	ctx := r.Context()
 	path := pathForLog(r.URL.Path)
-	LogHandlerRequest(ctx, r.Method, path)
-	if r.Method != http.MethodPost {
-		LogHandlerResponse(ctx, r.Method, path, http.StatusMethodNotAllowed, "error", "Method not allowed")
-		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
-		return
-	}
 	var data struct {
 		UUID          string `json:"uuid" validate:"required"`
 		Content       string `json:"content" validate:"required"`
@@ -31,9 +26,7 @@ func handleProcessEntry(s *Server, w http.ResponseWriter, r *http.Request) {
 		ParentTraceID string `json:"parent_trace_id"`
 	}
 	if err := DecodeAndValidate(r, &data, s.Validator); err != nil {
-		LogHandlerResponse(ctx, r.Method, path, http.StatusBadRequest, "error", err.Error())
-		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-		return
+		return nil, handlerError(http.StatusBadRequest, err.Error())
 	}
 	if data.TaskID != "" || data.ParentTraceID != "" {
 		ctx = infra.WithCorrelation(ctx, data.TaskID, data.ParentTraceID)
@@ -46,25 +39,16 @@ func handleProcessEntry(s *Server, w http.ResponseWriter, r *http.Request) {
 		setter.SetLatencyBreakdown(breakdown)
 	}
 	if err != nil {
-		LogHandlerResponse(ctx, r.Method, path, http.StatusInternalServerError, "error", err.Error())
-		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
+		return nil, err
 	}
-	LogHandlerResponse(ctx, r.Method, path, http.StatusOK, "status", "ok", "uuid", data.UUID)
-	WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	return map[string]string{"status": "ok"}, nil
 }
 
 // handleProcessSMSQuery runs the query for an incoming SMS (FOH) and sends the reply via Twilio.
 // Invoked by a Cloud Task enqueued from the SMS webhook so the work runs in a request-scoped context (Cloud Run keeps the request alive until done).
-func handleProcessSMSQuery(s *Server, w http.ResponseWriter, r *http.Request) {
+func handleProcessSMSQuery(s *Server, w http.ResponseWriter, r *http.Request) (any, error) {
 	ctx := r.Context()
 	path := pathForLog(r.URL.Path)
-	LogHandlerRequest(ctx, r.Method, path)
-	if r.Method != http.MethodPost {
-		LogHandlerResponse(ctx, r.Method, path, http.StatusMethodNotAllowed, "error", "Method not allowed")
-		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
-		return
-	}
 	var data struct {
 		From          string `json:"from" validate:"required"`
 		Body          string `json:"body" validate:"required"`
@@ -73,9 +57,7 @@ func handleProcessSMSQuery(s *Server, w http.ResponseWriter, r *http.Request) {
 		ParentTraceID string `json:"parent_trace_id"`
 	}
 	if err := DecodeAndValidate(r, &data, s.Validator); err != nil {
-		LogHandlerResponse(ctx, r.Method, path, http.StatusBadRequest, "error", err.Error())
-		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-		return
+		return nil, handlerError(http.StatusBadRequest, err.Error())
 	}
 	if data.TaskID != "" || data.ParentTraceID != "" {
 		ctx = infra.WithCorrelation(ctx, data.TaskID, data.ParentTraceID)
@@ -95,25 +77,16 @@ func handleProcessSMSQuery(s *Server, w http.ResponseWriter, r *http.Request) {
 	}
 	if err := s.SMS.SendSMS(ctx, data.From, response); err != nil {
 		infra.LoggerFrom(ctx).Error("process-sms-query: send reply failed", "to", data.From, "error", err)
-		LogHandlerResponse(ctx, r.Method, path, http.StatusInternalServerError, "error", err.Error())
-		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to send SMS reply"})
-		return
+		return nil, fmt.Errorf("failed to send SMS reply: %w", err)
 	}
 	infra.LoggerFrom(ctx).Info("process-sms-query: reply sent", "to", data.From, "preview", utils.TruncateString(response, 60))
-	LogHandlerResponse(ctx, r.Method, path, http.StatusOK, "status", "ok", "to", data.From)
-	WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	return map[string]string{"status": "ok"}, nil
 }
 
 // handleProcessTelegramQuery runs the query for an incoming Telegram message (FOH) and sends the reply via Telegram.
-func handleProcessTelegramQuery(s *Server, w http.ResponseWriter, r *http.Request) {
+func handleProcessTelegramQuery(s *Server, w http.ResponseWriter, r *http.Request) (any, error) {
 	ctx := r.Context()
 	path := pathForLog(r.URL.Path)
-	LogHandlerRequest(ctx, r.Method, path)
-	if r.Method != http.MethodPost {
-		LogHandlerResponse(ctx, r.Method, path, http.StatusMethodNotAllowed, "error", "Method not allowed")
-		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
-		return
-	}
 	var data struct {
 		ChatID        int64  `json:"chat_id" validate:"required"`
 		UserID        int64  `json:"user_id"`
@@ -125,16 +98,12 @@ func handleProcessTelegramQuery(s *Server, w http.ResponseWriter, r *http.Reques
 		ParentTraceID string `json:"parent_trace_id"`
 	}
 	if err := DecodeAndValidate(r, &data, s.Validator); err != nil {
-		LogHandlerResponse(ctx, r.Method, path, http.StatusBadRequest, "error", err.Error())
-		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-		return
+		return nil, handlerError(http.StatusBadRequest, err.Error())
 	}
 	if data.Body == "" && data.ImageFileID == "" {
 		infra.LoggerFrom(ctx).Info("process-telegram-query: empty body and no image, sending hint", "chat_id", data.ChatID)
 		_ = s.Telegram.SendMessage(ctx, data.ChatID, "I didn't receive any text or image. Send a message or photo to log something.")
-		LogHandlerResponse(ctx, r.Method, path, http.StatusOK, "status", "ok")
-		WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-		return
+		return map[string]string{"status": "ok"}, nil
 	}
 	if data.Body == "" && data.ImageFileID != "" {
 		data.Body = "Photo"
@@ -186,25 +155,19 @@ func handleProcessTelegramQuery(s *Server, w http.ResponseWriter, r *http.Reques
 			response := "Photo logged."
 			if err := s.Telegram.SendMessage(ctx, data.ChatID, response); err != nil {
 				infra.LoggerFrom(ctx).Error("process-telegram-query: send reply failed", "chat_id", data.ChatID, "error", err)
-				WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to send Telegram reply"})
-				return
+				return nil, fmt.Errorf("failed to send Telegram reply: %w", err)
 			}
 			infra.LoggerFrom(ctx).Info("process-telegram-query: reply sent", "chat_id", data.ChatID, "preview", response)
-			LogHandlerResponse(ctx, r.Method, path, http.StatusOK, "status", "ok", "chat_id", data.ChatID)
-			WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-			return
+			return map[string]string{"status": "ok"}, nil
 		}
 		// Image with generated caption: return the caption to the user and confirm log (skip FOH).
 		response := data.Body + "\n\nLogged."
 		if err := s.Telegram.SendMessage(ctx, data.ChatID, response); err != nil {
 			infra.LoggerFrom(ctx).Error("process-telegram-query: send reply failed", "chat_id", data.ChatID, "error", err)
-			WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to send Telegram reply"})
-			return
+			return nil, fmt.Errorf("failed to send Telegram reply: %w", err)
 		}
 		infra.LoggerFrom(ctx).Info("process-telegram-query: reply sent (caption)", "chat_id", data.ChatID, "preview", utils.TruncateString(response, 60))
-		LogHandlerResponse(ctx, r.Method, path, http.StatusOK, "status", "ok", "chat_id", data.ChatID)
-		WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-		return
+		return map[string]string{"status": "ok"}, nil
 	}
 	msg := &telegram.IncomingMessage{
 		UpdateID:    data.UpdateID,
@@ -223,24 +186,15 @@ func handleProcessTelegramQuery(s *Server, w http.ResponseWriter, r *http.Reques
 	}
 	if err := s.Telegram.SendMessage(ctx, data.ChatID, response); err != nil {
 		infra.LoggerFrom(ctx).Error("process-telegram-query: send reply failed", "chat_id", data.ChatID, "error", err)
-		LogHandlerResponse(ctx, r.Method, path, http.StatusInternalServerError, "error", err.Error())
-		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to send Telegram reply"})
-		return
+		return nil, fmt.Errorf("failed to send Telegram reply: %w", err)
 	}
 	infra.LoggerFrom(ctx).Info("process-telegram-query: reply sent", "chat_id", data.ChatID, "preview", utils.TruncateString(response, 60))
-	LogHandlerResponse(ctx, r.Method, path, http.StatusOK, "status", "ok", "chat_id", data.ChatID)
-	WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	return map[string]string{"status": "ok"}, nil
 }
 
-func handleSaveQuery(s *Server, w http.ResponseWriter, r *http.Request) {
+func handleSaveQuery(s *Server, w http.ResponseWriter, r *http.Request) (any, error) {
 	ctx := r.Context()
 	path := pathForLog(r.URL.Path)
-	LogHandlerRequest(ctx, r.Method, path)
-	if r.Method != http.MethodPost {
-		LogHandlerResponse(ctx, r.Method, path, http.StatusMethodNotAllowed, "error", "Method not allowed")
-		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
-		return
-	}
 	var data struct {
 		Question      string `json:"question" validate:"required"`
 		Answer        string `json:"answer"`
@@ -250,9 +204,7 @@ func handleSaveQuery(s *Server, w http.ResponseWriter, r *http.Request) {
 		ParentTraceID string `json:"parent_trace_id"`
 	}
 	if err := DecodeAndValidate(r, &data, s.Validator); err != nil {
-		LogHandlerResponse(ctx, r.Method, path, http.StatusBadRequest, "error", err.Error())
-		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-		return
+		return nil, handlerError(http.StatusBadRequest, err.Error())
 	}
 	if data.TaskID != "" || data.ParentTraceID != "" {
 		ctx = infra.WithCorrelation(ctx, data.TaskID, data.ParentTraceID)
@@ -260,23 +212,14 @@ func handleSaveQuery(s *Server, w http.ResponseWriter, r *http.Request) {
 	LogHandlerRequest(ctx, r.Method, path, "question_preview", utils.TruncateString(data.Question, 60), "source", data.Source, "is_gap", data.IsGap, "task_id", data.TaskID, "parent_trace_id", data.ParentTraceID)
 	if _, err := s.Journal.SaveQuery(ctx, data.Question, data.Answer, data.Source, data.IsGap); err != nil {
 		infra.LoggerFrom(ctx).Error("save-query failed", "error", err)
-		LogHandlerResponse(ctx, r.Method, path, http.StatusInternalServerError, "error", err.Error())
-		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
+		return nil, err
 	}
-	LogHandlerResponse(ctx, r.Method, path, http.StatusOK, "status", "ok", "source", data.Source)
-	WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	return map[string]string{"status": "ok"}, nil
 }
 
-func handleBackfillEmbeddings(s *Server, w http.ResponseWriter, r *http.Request) {
+func handleBackfillEmbeddings(s *Server, w http.ResponseWriter, r *http.Request) (any, error) {
 	ctx := r.Context()
 	path := pathForLog(r.URL.Path)
-	LogHandlerRequest(ctx, r.Method, path)
-	if r.Method != http.MethodPost {
-		LogHandlerResponse(ctx, r.Method, path, http.StatusMethodNotAllowed, "error", "Method not allowed")
-		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
-		return
-	}
 	limit := 20
 	if l := r.URL.Query().Get("limit"); l != "" {
 		if n, err := strconv.Atoi(l); err == nil && n > 0 && n <= 50 {
@@ -288,10 +231,8 @@ func handleBackfillEmbeddings(s *Server, w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		infra.ErrorsTotal.Inc()
 		infra.LoggerFrom(ctx).Error("backfill-embeddings failed", "error", err)
-		LogHandlerResponse(ctx, r.Method, path, http.StatusInternalServerError, "error", err.Error())
-		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
+		return nil, err
 	}
-	LogHandlerResponse(ctx, r.Method, path, http.StatusOK, "success", true, "processed", processed)
-	WriteJSON(w, http.StatusOK, map[string]interface{}{"success": true, "processed": processed})
+	infra.LoggerFrom(ctx).Info("backfill-embeddings completed", "processed", processed)
+	return map[string]interface{}{"success": true, "processed": processed}, nil
 }

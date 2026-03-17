@@ -26,12 +26,12 @@ func NewRouter(s *Server) *chi.Mux {
 
 	// Public routes (no auth)
 	r.Group(func(r chi.Router) {
-		r.Get("/", wrap(handleHealth))
-		r.Get("/health", wrap(handleHealth))
+		r.Get("/", wrapAPI(handleHealth))
+		r.Get("/health", wrapAPI(handleHealth))
 		r.Get("/metrics", wrap(handleMetrics))
 		r.Get("/privacy-policy", wrap(handlePrivacyPolicy))
 		r.Get("/terms-and-conditions", wrap(handleTermsAndConditions))
-		r.Post("/webhook", wrap(handleWebhook))
+		r.Post("/webhook", wrapAPI(handleWebhook))
 		r.Post("/sms", wrap(handleSMS))
 		r.Post("/telegram", wrap(handleTelegram))
 	})
@@ -39,30 +39,30 @@ func NewRouter(s *Server) *chi.Mux {
 	// Protected routes (auth + per-route rate limits)
 	r.Group(func(r chi.Router) {
 		r.Use(authMiddleware(s))
-		r.With(RateLimitMiddleware(60)).Post("/log", wrap(handleLog))
-		r.With(RateLimitMiddleware(30)).Post("/query", wrap(handleQuery))
-		r.With(RateLimitMiddleware(10)).Post("/plan", wrap(handlePlan))
-		r.With(RateLimitMiddleware(60)).Get("/entries", wrapWithPath(handleEntries))
-		r.With(RateLimitMiddleware(60)).Get("/entries/{uuid}", wrapWithPath(handleEntries))
-		r.With(RateLimitMiddleware(60)).Patch("/entries", wrapWithPath(handleEntries))
-		r.With(RateLimitMiddleware(60)).Patch("/entries/{uuid}", wrapWithPath(handleEntries))
-		r.With(RateLimitMiddleware(60)).Delete("/entries", wrapWithPath(handleEntries))
-		r.With(RateLimitMiddleware(60)).Delete("/entries/{uuid}", wrapWithPath(handleEntries))
-		r.With(RateLimitMiddleware(5)).Post("/sync", wrap(handleSync))
-		r.With(RateLimitMiddleware(60)).Get("/dream/latest", wrap(handleDreamLatest))
-		r.With(RateLimitMiddleware(60)).Get("/dream/status", wrap(handleDreamStatus))
-		r.With(RateLimitMiddleware(2)).Post("/dream", wrap(handleDream))
-		r.With(RateLimitMiddleware(1)).Post("/janitor", wrap(handleJanitor))
-		r.With(RateLimitMiddleware(2)).Post("/rollup", wrap(handleRollup))
-		r.With(RateLimitMiddleware(60)).Get("/pending-questions", wrap(handlePendingQuestions))
-		r.With(RateLimitMiddleware(60)).Post("/pending-questions/{id}/resolve", wrap(handlePendingQuestionResolve))
-		r.With(RateLimitMiddleware(5)).Post("/decay-contexts", wrap(handleDecayContexts))
-		r.With(RateLimitMiddleware(2)).Post("/backfill-embeddings", wrap(handleBackfillEmbeddings))
-		r.With(RateLimitMiddleware(120)).Post("/internal/process-entry", wrap(handleProcessEntry))
-		r.With(RateLimitMiddleware(120)).Post("/internal/process-sms-query", wrap(handleProcessSMSQuery))
-		r.With(RateLimitMiddleware(120)).Post("/internal/process-telegram-query", wrap(handleProcessTelegramQuery))
-		r.With(RateLimitMiddleware(120)).Post("/internal/save-query", wrap(handleSaveQuery))
-		r.With(RateLimitMiddleware(120)).Post("/internal/dream-run", wrap(handleDreamRun))
+		r.With(RateLimitMiddleware(60)).Post("/log", wrapAPI(handleLog))
+		r.With(RateLimitMiddleware(30)).Post("/query", wrapAPI(handleQuery))
+		r.With(RateLimitMiddleware(10)).Post("/plan", wrapAPI(handlePlan))
+		r.With(RateLimitMiddleware(60)).Get("/entries", wrapAPI(handleEntries))
+		r.With(RateLimitMiddleware(60)).Get("/entries/{uuid}", wrapAPI(handleEntries))
+		r.With(RateLimitMiddleware(60)).Patch("/entries", wrapAPI(handleEntries))
+		r.With(RateLimitMiddleware(60)).Patch("/entries/{uuid}", wrapAPI(handleEntries))
+		r.With(RateLimitMiddleware(60)).Delete("/entries", wrapAPI(handleEntries))
+		r.With(RateLimitMiddleware(60)).Delete("/entries/{uuid}", wrapAPI(handleEntries))
+		r.With(RateLimitMiddleware(5)).Post("/sync", wrapAPI(handleSync))
+		r.With(RateLimitMiddleware(60)).Get("/dream/latest", wrapAPI(handleDreamLatest))
+		r.With(RateLimitMiddleware(60)).Get("/dream/status", wrapAPI(handleDreamStatus))
+		r.With(RateLimitMiddleware(2)).Post("/dream", wrapAPI(handleDream))
+		r.With(RateLimitMiddleware(1)).Post("/janitor", wrapAPI(handleJanitor))
+		r.With(RateLimitMiddleware(2)).Post("/rollup", wrapAPI(handleRollup))
+		r.With(RateLimitMiddleware(60)).Get("/pending-questions", wrapAPI(handlePendingQuestions))
+		r.With(RateLimitMiddleware(60)).Post("/pending-questions/{id}/resolve", wrapAPI(handlePendingQuestionResolve))
+		r.With(RateLimitMiddleware(5)).Post("/decay-contexts", wrapAPI(handleDecayContexts))
+		r.With(RateLimitMiddleware(2)).Post("/backfill-embeddings", wrapAPI(handleBackfillEmbeddings))
+		r.With(RateLimitMiddleware(120)).Post("/internal/process-entry", wrapAPI(handleProcessEntry))
+		r.With(RateLimitMiddleware(120)).Post("/internal/process-sms-query", wrapAPI(handleProcessSMSQuery))
+		r.With(RateLimitMiddleware(120)).Post("/internal/process-telegram-query", wrapAPI(handleProcessTelegramQuery))
+		r.With(RateLimitMiddleware(120)).Post("/internal/save-query", wrapAPI(handleSaveQuery))
+		r.With(RateLimitMiddleware(120)).Post("/internal/dream-run", wrapAPI(handleDreamRun))
 	})
 
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
@@ -96,17 +96,6 @@ func wrap(f func(*Server, http.ResponseWriter, *http.Request)) http.HandlerFunc 
 	}
 }
 
-// wrapWithPath converts a handler that takes (s *Server, w, r, path) into an http.HandlerFunc, passing r.URL.Path.
-func wrapWithPath(f func(*Server, http.ResponseWriter, *http.Request, string)) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		s := ServerFromContext(r.Context())
-		if s == nil {
-			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-			return
-		}
-		f(s, w, r, r.URL.Path)
-	}
-}
 
 func serverCtxMiddleware(s *Server) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
