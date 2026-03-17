@@ -28,7 +28,7 @@ func RateLimitMiddleware(reqsPerMin int) func(http.Handler) http.Handler {
 				return
 			}
 			if context.Reached {
-				WriteJSON(w, http.StatusTooManyRequests, map[string]string{"error": "Rate limit exceeded. Please try again later."})
+				WriteJSON(w, http.StatusTooManyRequests, map[string]string{"error": "Rate limit exceeded (too many requests per minute to this server). Wait a minute and try again."})
 				return
 			}
 			next.ServeHTTP(w, r)

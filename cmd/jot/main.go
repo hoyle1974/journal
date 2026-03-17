@@ -299,6 +299,22 @@ func apiPostLog(ctx context.Context, content, source, attachPath string, timeout
 	return result, resp.Header.Clone(), nil
 }
 
+// printRateLimitHelp prints a clear explanation when the error is 429 or rate-limit related.
+func printRateLimitHelp(err error) {
+	if err == nil {
+		return
+	}
+	s := strings.ToLower(err.Error())
+	if !strings.Contains(s, "429") && !strings.Contains(s, "rate limit") && !strings.Contains(s, "quota") && !strings.Contains(s, "resource_exhausted") {
+		return
+	}
+	fmt.Println()
+	fmt.Println("Reason: The request was rate-limited (HTTP 429). This usually means either:")
+	fmt.Println("  • Too many requests to the Jot server in a short time — wait a minute and try again.")
+	fmt.Println("  • Google's Gemini API quota or rate limit was exceeded — check aistudio.google.com for quota and try again later.")
+	fmt.Println("If it keeps happening, verify billing and quotas at aistudio.google.com or Cloud Console.")
+}
+
 // =============================================================================
 // COMMANDS
 // =============================================================================
@@ -530,9 +546,7 @@ func cmdDream() {
 	result, headers, err := api.Do(context.Background(), "POST", "/dream", nil, 30*time.Second)
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
-		if strings.Contains(err.Error(), "429") || strings.Contains(err.Error(), "Rate limit") || strings.Contains(err.Error(), "quota") {
-			fmt.Println("Tip: You may have hit a billing or rate limit. Check Google AI Studio (aistudio.google.com) or try again later.")
-		}
+		printRateLimitHelp(err)
 		if strings.Contains(err.Error(), "504") || strings.Contains(err.Error(), "upstream request timeout") || strings.Contains(err.Error(), "request failed (status 504)") {
 			fmt.Println("Tip: The server timed out. Dream runs async now; try again or poll GET /dream/status.")
 		}
@@ -690,9 +704,7 @@ func cmdJanitor() {
 	result, headers, err := api.Do(context.Background(), "POST", "/janitor", nil, time.Duration(timeout.QuerySeconds)*time.Second)
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
-		if strings.Contains(err.Error(), "429") || strings.Contains(err.Error(), "Rate limit") || strings.Contains(err.Error(), "quota") {
-			fmt.Println("Tip: You may have hit a billing or rate limit. Check Google AI Studio (aistudio.google.com) or try again later.")
-		}
+		printRateLimitHelp(err)
 		os.Exit(1)
 	}
 	if result == nil {
@@ -725,6 +737,7 @@ func cmdPlan(goal string) {
 			fmt.Println("Error: Cannot generate plans while offline. Requires cloud connection.")
 		} else {
 			fmt.Printf("Error: %v\n", err)
+			printRateLimitHelp(err)
 		}
 		os.Exit(1)
 	}
