@@ -11,6 +11,10 @@ import (
 	"github.com/jackstrohm/jot/tools"
 )
 
+type specialistArgs struct {
+	Query string `json:"query" description:"The question or topic to ask this specialist about" required:"true"`
+}
+
 func init() {
 	registerSpecialistTools()
 }
@@ -31,12 +35,10 @@ func registerSpecialistTools() {
 			Name:        name,
 			Description: desc,
 			Category:    "specialist",
-			Params: []tools.Param{
-				tools.RequiredStringParam("query", "The question or topic to ask this specialist about"),
-			},
-			Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
-				query, ok := args.RequiredString("query")
-				if !ok {
+			Args:        &specialistArgs{},
+			Execute: func(ctx context.Context, env infra.ToolEnv, args any) tools.Result {
+				a := args.(*specialistArgs)
+				if a.Query == "" {
 					return tools.MissingParam("query")
 				}
 				journalCtx := ""
@@ -51,7 +53,7 @@ func registerSpecialistTools() {
 					}
 				}
 				out, err := agent.RunSpecialist(ctx, env, dom, &agent.SpecialistInput{
-					UserMessage: query,
+					UserMessage: a.Query,
 					Context:     "Answer based on your domain expertise and the journal context.",
 					Journal:     journalCtx,
 				}, "")

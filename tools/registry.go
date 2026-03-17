@@ -62,9 +62,18 @@ func Execute(ctx context.Context, env infra.ToolEnv, name string, arguments map[
 	if !exists {
 		return Fail("Unknown tool: %s", name)
 	}
+	if arguments == nil {
+		arguments = make(map[string]interface{})
+	}
 
-	args := NewArgs(arguments)
-	return tool.Execute(ctx, env, args)
+	typedArgs, err := MapToTypedArgs(tool, arguments)
+	if err != nil {
+		return Fail("Invalid arguments: %v", err)
+	}
+	if typedArgs != nil {
+		ApplyDefaults(typedArgs)
+	}
+	return tool.Execute(ctx, env, typedArgs)
 }
 
 // GetTool returns a tool by name (for testing).
@@ -200,14 +209,7 @@ func SearchRegistry(query string, limit int) []ToolSummary {
 	}
 	out := make([]ToolSummary, 0, len(scoredList))
 	for _, s := range scoredList {
-		paramNames := make([]string, 0, len(s.t.Params))
-		for _, p := range s.t.Params {
-			name := p.Name
-			if !p.Required {
-				name = name + "?"
-			}
-			paramNames = append(paramNames, name)
-		}
+		paramNames := ParamNamesFromArgs(s.t.Args)
 		out = append(out, ToolSummary{
 			Name:        s.t.Name,
 			Description: firstSentence(s.t.Description, 80),
@@ -283,7 +285,7 @@ func FormatDiscoveryResultFull(tools []*Tool) string {
 	for _, t := range tools {
 		lines = append(lines, "")
 		lines = append(lines, fmt.Sprintf("**%s**: %s", t.Name, firstSentence(t.Description, 120)))
-		for _, p := range t.Params {
+		for _, p := range ParamInfosFromArgs(t.Args) {
 			req := "optional"
 			if p.Required {
 				req = "required"
@@ -352,26 +354,9 @@ func firstSentence(s string, maxLen int) string {
 	return s
 }
 
-// toolToDeclaration converts a Tool to a genai.FunctionDeclaration.
+// toolToDeclaration converts a Tool to a genai.FunctionDeclaration using reflection on Tool.Args.
 func toolToDeclaration(tool *Tool) *genai.FunctionDeclaration {
-	properties := make(map[string]*genai.Schema)
-	var required []string
-
-	for _, param := range tool.Params {
-		schema := &genai.Schema{
-			Type:        param.Type,
-			Description: param.Description,
-		}
-		if len(param.Enum) > 0 {
-			schema.Enum = param.Enum
-		}
-		properties[param.Name] = schema
-
-		if param.Required {
-			required = append(required, param.Name)
-		}
-	}
-
+	paramsSchema := StructToGenaiSchema(tool.Args)
 	desc := tool.Description
 	if tool.DocURL != "" {
 		desc = desc + "\nDocs: " + tool.DocURL
@@ -379,10 +364,6 @@ func toolToDeclaration(tool *Tool) *genai.FunctionDeclaration {
 	return &genai.FunctionDeclaration{
 		Name:        tool.Name,
 		Description: desc,
-		Parameters: &genai.Schema{
-			Type:       genai.TypeObject,
-			Properties: properties,
-			Required:   required,
-		},
+		Parameters:  paramsSchema,
 	}
 }

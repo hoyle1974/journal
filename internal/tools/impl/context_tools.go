@@ -14,6 +14,47 @@ import (
 	"github.com/jackstrohm/jot/tools"
 )
 
+type listContextsArgs struct {
+	Limit int `json:"limit" description:"Maximum number of contexts (default 10, max 20)" default:"10"`
+}
+
+type createContextArgs struct {
+	Name        string `json:"name" description:"Short snake_case name for the context (e.g., 'party_planning', 'job_search')" required:"true"`
+	Description string `json:"description" description:"Description of what this context is about" required:"true"`
+	ContextType string `json:"context_type" description:"Type of context: 'permanent' (never decays) or 'auto' (decays over time)" enum:"permanent,auto"`
+}
+
+type touchContextArgs struct {
+	Name  string  `json:"name" description:"Name of the context to touch" required:"true"`
+	Boost float64 `json:"boost" description:"Relevance boost amount (0.0-0.5, default 0.1)" default:"0.1"`
+}
+
+type deleteContextArgs struct {
+	ContextID string `json:"context_id" description:"The UUID of the context to delete" required:"true"`
+}
+
+type getProjectTimelineArgs struct {
+	ProjectName string `json:"project_name" description:"Name of the project or goal (e.g. 'jot app', 'party planning')" required:"true"`
+}
+
+type updateProjectStatusArgs struct {
+	ProjectName string `json:"project_name" description:"Name of the project/goal to update" required:"true"`
+	Status      string `json:"status" description:"New status for the project" required:"true" enum:"active,blocked,completed,archived"`
+}
+
+func contextClamp(limit, def, min, max int) int {
+	if limit == 0 {
+		limit = def
+	}
+	if limit < min {
+		return min
+	}
+	if limit > max {
+		return max
+	}
+	return limit
+}
+
 func init() {
 	registerContextTools()
 	registerSystemEvolutionTools()
@@ -25,11 +66,10 @@ func registerContextTools() {
 		Name:        "list_contexts",
 		Description: "List active contexts (ongoing projects, plans, and topics). Shows context name, type, relevance, and description.",
 		Category:    "context",
-		Params: []tools.Param{
-			tools.LimitParam(10, 20),
-		},
-		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
-			limit := args.IntBounded("limit", 10, 1, 20)
+		Args:        &listContextsArgs{},
+		Execute: func(ctx context.Context, env infra.ToolEnv, args any) tools.Result {
+			a := args.(*listContextsArgs)
+			limit := contextClamp(a.Limit, 10, 1, 20)
 			contexts, metas, err := memory.GetActiveContexts(ctx, env, limit)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
@@ -46,36 +86,34 @@ func registerContextTools() {
 		Name:        "create_context",
 		Description: "Manually create a new context for tracking an ongoing project, plan, or topic. Use this when the user explicitly wants to track something.",
 		Category:    "context",
-		Params: []tools.Param{
-			tools.RequiredStringParam("name", "Short snake_case name for the context (e.g., 'party_planning', 'job_search')"),
-			tools.RequiredStringParam("description", "Description of what this context is about"),
-			tools.EnumParam("context_type", "Type of context: 'permanent' (never decays) or 'auto' (decays over time)", false, []string{"permanent", "auto"}),
-		},
-		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
-			name, ok := args.RequiredString("name")
-			if !ok {
+		Args:        &createContextArgs{},
+		Execute: func(ctx context.Context, env infra.ToolEnv, args any) tools.Result {
+			a := args.(*createContextArgs)
+			if a.Name == "" {
 				return tools.MissingParam("name")
 			}
-			description, ok := args.RequiredString("description")
-			if !ok {
+			if a.Description == "" {
 				return tools.MissingParam("description")
 			}
-			contextType := args.String("context_type", "auto")
+			contextType := a.ContextType
+			if contextType == "" {
+				contextType = "auto"
+			}
 
-			existing, _, err := memory.FindContextByName(ctx, env, name)
+			existing, _, err := memory.FindContextByName(ctx, env, a.Name)
 			if err == nil && existing != nil {
-				return tools.Fail("Context '%s' already exists.", name)
+				return tools.Fail("Context '%s' already exists.", a.Name)
 			}
 
 			var sourceEntries []string
 			if cur := agent.CurrentEntryUUIDFrom(ctx); cur != "" {
 				sourceEntries = []string{cur}
 			}
-			uuid, err := memory.CreateContext(ctx, env, name, description, contextType, nil, sourceEntries)
+			uuid, err := memory.CreateContext(ctx, env, a.Name, a.Description, contextType, nil, sourceEntries)
 			if err != nil {
 				return tools.Fail("Error creating context: %v", err)
 			}
-			return tools.OK("Context '%s' created successfully (ID: %s)", name, uuid)
+			return tools.OK("Context '%s' created successfully (ID: %s)", a.Name, uuid)
 		},
 	})
 
@@ -83,26 +121,26 @@ func registerContextTools() {
 		Name:        "touch_context",
 		Description: "Update a context's relevance to mark it as recently active. Use when the user mentions an existing context.",
 		Category:    "context",
-		Params: []tools.Param{
-			tools.RequiredStringParam("name", "Name of the context to touch"),
-			tools.NumberParam("boost", "Relevance boost amount (0.0-0.5, default 0.1)", false),
-		},
-		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
-			name, ok := args.RequiredString("name")
-			if !ok {
+		Args:        &touchContextArgs{},
+		Execute: func(ctx context.Context, env infra.ToolEnv, args any) tools.Result {
+			a := args.(*touchContextArgs)
+			if a.Name == "" {
 				return tools.MissingParam("name")
 			}
-			boost := args.Float("boost", 0.1)
+			boost := a.Boost
 			if boost < 0 {
 				boost = 0
 			}
 			if boost > 0.5 {
 				boost = 0.5
 			}
+			if boost == 0 {
+				boost = 0.1
+			}
 
-			node, meta, err := memory.FindContextByName(ctx, env, name)
+			node, meta, err := memory.FindContextByName(ctx, env, a.Name)
 			if err != nil || node == nil {
-				return tools.Fail("Context '%s' not found.", name)
+				return tools.Fail("Context '%s' not found.", a.Name)
 			}
 
 			var newSourceEntry *string
@@ -117,7 +155,7 @@ func registerContextTools() {
 			if newRelevance > 1.0 {
 				newRelevance = 1.0
 			}
-			return tools.OK("Context '%s' updated (new relevance: %.0f%%)", name, newRelevance*100)
+			return tools.OK("Context '%s' updated (new relevance: %.0f%%)", a.Name, newRelevance*100)
 		},
 	})
 
@@ -125,16 +163,14 @@ func registerContextTools() {
 		Name:        "delete_context",
 		Description: "Delete a context by its UUID. Use to clean up duplicate or unwanted contexts.",
 		Category:    "context",
-		Params: []tools.Param{
-			tools.RequiredStringParam("context_id", "The UUID of the context to delete"),
-		},
-		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
-			contextID, ok := args.RequiredString("context_id")
-			if !ok {
+		Args:        &deleteContextArgs{},
+		Execute: func(ctx context.Context, env infra.ToolEnv, args any) tools.Result {
+			a := args.(*deleteContextArgs)
+			if a.ContextID == "" {
 				return tools.MissingParam("context_id")
 			}
 
-			err := memory.DeleteContext(ctx, env, contextID)
+			err := memory.DeleteContext(ctx, env, a.ContextID)
 			if err != nil {
 				return tools.Fail("Error deleting context: %v", err)
 			}
@@ -148,8 +184,8 @@ func registerSystemEvolutionTools() {
 		Name:        "get_system_health_audit",
 		Description: "Get the latest system evolution audit: recommended tool changes, knowledge gaps, and architectural suggestions from the Cognitive Engineer (nightly). Use when the user asks what to change, what's wrong with the system, or for improvement suggestions.",
 		Category:    "context",
-		Params:      nil,
-		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
+		Args:        &tools.NoArgs{},
+		Execute: func(ctx context.Context, env infra.ToolEnv, args any) tools.Result {
 			node, _, err := memory.FindContextByName(ctx, env, "system_evolution")
 			if err != nil {
 				return tools.Fail("Error finding system_evolution context: %v", err)
@@ -175,18 +211,16 @@ func registerProjectStatusTools() {
 		Name:        "get_project_timeline",
 		Description: "Get a unified timeline for a project: current status from knowledge, briefing content, and recent journal activity mentioning the project. Use when the user asks 'what's the status of X?', 'how's the jot app going?', or for a project summary with recent momentum. Limitation: 'recent activity' is the last calendar month only, not a rolling 30-day window.",
 		Category:    "context",
-		Params: []tools.Param{
-			tools.RequiredStringParam("project_name", "Name of the project or goal (e.g. 'jot app', 'party planning')"),
-		},
-		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
-			projectName, ok := args.RequiredString("project_name")
-			if !ok {
+		Args:        &getProjectTimelineArgs{},
+		Execute: func(ctx context.Context, env infra.ToolEnv, args any) tools.Result {
+			a := args.(*getProjectTimelineArgs)
+			if a.ProjectName == "" {
 				return tools.MissingParam("project_name")
 			}
 			if env == nil || env.Config() == nil {
 				return tools.Fail("Error: no app in context")
 			}
-			vec, err := infra.GenerateEmbedding(ctx, env.Config().GoogleCloudProject, "Project: "+projectName)
+			vec, err := infra.GenerateEmbedding(ctx, env.Config().GoogleCloudProject, "Project: "+a.ProjectName)
 			if err != nil {
 				return tools.Fail("Error finding project: %v", err)
 			}
@@ -213,7 +247,7 @@ func registerProjectStatusTools() {
 			if err != nil {
 				return tools.Fail("Error fetching journal entries: %v", err)
 			}
-			projectLower := strings.ToLower(projectName)
+			projectLower := strings.ToLower(a.ProjectName)
 			var activityLines []string
 			for _, ew := range withAnalyses {
 				if ew.Analysis == nil {
@@ -256,7 +290,7 @@ func registerProjectStatusTools() {
 				briefing = "(No knowledge node for this project.)"
 			}
 			var b strings.Builder
-			b.WriteString(fmt.Sprintf("Project: %s\n", projectName))
+			b.WriteString(fmt.Sprintf("Project: %s\n", a.ProjectName))
 			b.WriteString(fmt.Sprintf("Current Status: %s\n", status))
 			b.WriteString("Knowledge Briefing: ")
 			b.WriteString(briefing)
@@ -270,34 +304,30 @@ func registerProjectStatusTools() {
 		},
 	})
 
-		tools.Register(&tools.Tool{
+	tools.Register(&tools.Tool{
 		Name:        "update_project_status",
 		Description: "Update the status of an ongoing goal or project (e.g. 'active', 'blocked', 'completed', 'archived'). Use this when the user indicates a project phase is done or finished.",
 		Category:    "context",
-		Params: []tools.Param{
-			tools.RequiredStringParam("project_name", "Name of the project/goal to update"),
-			tools.EnumParam("status", "New status for the project", true, []string{"active", "blocked", "completed", "archived"}),
-		},
-		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
-			projectName, ok := args.RequiredString("project_name")
-			if !ok {
+		Args:        &updateProjectStatusArgs{},
+		Execute: func(ctx context.Context, env infra.ToolEnv, args any) tools.Result {
+			a := args.(*updateProjectStatusArgs)
+			if a.ProjectName == "" {
 				return tools.MissingParam("project_name")
 			}
-			status := args.String("status", "")
-			if status == "" {
+			if a.Status == "" {
 				return tools.MissingParam("status")
 			}
-			node, err := memory.FindProjectOrGoalByName(ctx, env, projectName)
+			node, err := memory.FindProjectOrGoalByName(ctx, env, a.ProjectName)
 			if err != nil {
 				return tools.Fail("Error finding project: %v", err)
 			}
 			if node == nil {
-				return tools.Fail("Project '%s' not found.", projectName)
+				return tools.Fail("Project '%s' not found.", a.ProjectName)
 			}
-			if err := memory.UpdateProjectStatus(ctx, env, node.UUID, status); err != nil {
+			if err := memory.UpdateProjectStatus(ctx, env, node.UUID, a.Status); err != nil {
 				return tools.Fail("Failed to update status: %v", err)
 			}
-			return tools.OK("Project '%s' is now marked as %s.", projectName, status)
+			return tools.OK("Project '%s' is now marked as %s.", a.ProjectName, a.Status)
 		},
 	})
 }

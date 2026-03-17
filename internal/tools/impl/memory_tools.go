@@ -6,18 +6,61 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/jackstrohm/jot/internal/service"
 	"github.com/jackstrohm/jot/internal/agent"
 	"github.com/jackstrohm/jot/internal/infra"
+	"github.com/jackstrohm/jot/internal/service"
 	"github.com/jackstrohm/jot/pkg/journal"
 	"github.com/jackstrohm/jot/pkg/memory"
 	"github.com/jackstrohm/jot/pkg/utils"
 	"github.com/jackstrohm/jot/tools"
 )
 
+type upsertKnowledgeArgs struct {
+	Content  string `json:"content" description:"The fact or information to store (e.g., 'Alice works at Google')" required:"true"`
+	NodeType string `json:"node_type" description:"Type of knowledge node" required:"true"`
+	Metadata string `json:"metadata" description:"Optional JSON metadata. For project/goal use status one of: active, blocked, done, planning, pending, completed (e.g. {\"status\": \"active\"}). For person: relationship, occupation, etc."`
+}
+
+type semanticSearchArgs struct {
+	Query      string `json:"query" description:"The natural language query to search for" required:"true"`
+	Limit      int    `json:"limit" description:"Maximum number of results (default 10, max 20)" default:"10"`
+	SourceText string `json:"source_text" description:"For debugging: the raw input used to build the query (set by code, not by assistant)"`
+	Template   string `json:"template" description:"For debugging: the template used to build the query (e.g. 'Permanent facts about: {{.Input}}')"`
+}
+
+type listKnowledgeArgs struct {
+	NodeType string `json:"node_type" description:"Filter by node type (leave empty for all types)"`
+	Limit    int    `json:"limit" description:"Maximum number of results (default 20, max 50)" default:"20"`
+}
+
+type getEntityNetworkArgs struct {
+	EntityName string `json:"entity_name" description:"Name or role of the person (e.g. 'wife', 'Gloria', 'Sarah')" required:"true"`
+}
+
+type generatePlanArgs struct {
+	Goal string `json:"goal" description:"The goal to plan for" required:"true"`
+}
+
+type checkProactiveSignalsArgs struct {
+	Limit int `json:"limit" description:"Maximum number of signals (default 5, max 10)" default:"5"`
+}
+
 func init() {
 	registerKnowledgeTools()
 	registerSignalTools()
+}
+
+func clampLimit(limit, def, min, max int) int {
+	if limit == 0 {
+		limit = def
+	}
+	if limit < min {
+		return min
+	}
+	if limit > max {
+		return max
+	}
+	return limit
 }
 
 func registerKnowledgeTools() {
@@ -25,26 +68,24 @@ func registerKnowledgeTools() {
 		Name:        "upsert_knowledge",
 		Description: "Add or update a piece of knowledge in the knowledge graph. Use ONLY for NEW facts in the CURRENT user input. NEVER upsert information from RECENT CONVERSATION - that data is already saved. Node types: 'person', 'project', 'fact', 'preference', 'list_item', 'goal', 'user_identity'. For node_type 'project' or 'goal', metadata.status must be exactly one of: active, blocked, done, planning, pending, completed (e.g. {\"status\": \"active\"}). Use node_type 'user_identity' for self-referential statements about your core identity (e.g. your name, role, values, traits); these are stored with high priority and are easily retrievable.",
 		Category:    "knowledge",
-		Params: []tools.Param{
-			tools.RequiredStringParam("content", "The fact or information to store (e.g., 'Alice works at Google')"),
-			tools.RequiredStringParam("node_type", "Type of knowledge node"),
-			tools.OptionalStringParam("metadata", "Optional JSON metadata. For project/goal use status one of: active, blocked, done, planning, pending, completed (e.g. {\"status\": \"active\"}). For person: relationship, occupation, etc."),
-		},
-		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
-			content, ok := args.RequiredString("content")
-			if !ok {
+		Args:        &upsertKnowledgeArgs{},
+		Execute: func(ctx context.Context, env infra.ToolEnv, args any) tools.Result {
+			a := args.(*upsertKnowledgeArgs)
+			if a.Content == "" {
 				return tools.MissingParam("content")
 			}
-			nodeType, ok := args.RequiredString("node_type")
-			if !ok {
+			if a.NodeType == "" {
 				return tools.MissingParam("node_type")
 			}
-			metadata := args.String("metadata", "{}")
+			metadata := a.Metadata
+			if metadata == "" {
+				metadata = "{}"
+			}
 			var entryIDs []string
 			if cur := agent.CurrentEntryUUIDFrom(ctx); cur != "" {
 				entryIDs = []string{cur}
 			}
-			id, err := memory.UpsertKnowledge(ctx, env, content, nodeType, metadata, entryIDs)
+			id, err := memory.UpsertKnowledge(ctx, env, a.Content, a.NodeType, metadata, entryIDs)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
@@ -56,26 +97,19 @@ func registerKnowledgeTools() {
 		Name:        "semantic_search",
 		Description: "Search the knowledge graph and journal entries using semantic similarity. Use this FIRST for questions about people, facts, preferences, or past journal content (who is X, where is X, what did I write about Y). When answering, include the source date when results show one (e.g. 'Buy ice [Source: 2026-02-15]').",
 		Category:    "knowledge",
-		Params: []tools.Param{
-			tools.RequiredStringParam("query", "The natural language query to search for"),
-			tools.LimitParam(10, 20),
-			tools.OptionalStringParam("source_text", "For debugging: the raw input used to build the query (set by code, not by assistant)"),
-			tools.OptionalStringParam("template", "For debugging: the template used to build the query (e.g. 'Permanent facts about: {{.Input}}')"),
-		},
-		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
-			query, ok := args.RequiredString("query")
-			if !ok {
+		Args:        &semanticSearchArgs{},
+		Execute: func(ctx context.Context, env infra.ToolEnv, args any) tools.Result {
+			a := args.(*semanticSearchArgs)
+			if a.Query == "" {
 				return tools.MissingParam("query")
 			}
-			limit := args.IntBounded("limit", 10, 1, 20)
-			sourceText := args.String("source_text", "")
-			template := args.String("template", "")
-			logArgs := []interface{}{"query_preview", query, "limit", limit, "reason", "vector+keyword search over knowledge and entries"}
-			if sourceText != "" {
-				logArgs = append(logArgs, "source_text", sourceText)
+			limit := clampLimit(a.Limit, 10, 1, 20)
+			logArgs := []interface{}{"query_preview", a.Query, "limit", limit, "reason", "vector+keyword search over knowledge and entries"}
+			if a.SourceText != "" {
+				logArgs = append(logArgs, "source_text", a.SourceText)
 			}
-			if template != "" {
-				logArgs = append(logArgs, "template", template)
+			if a.Template != "" {
+				logArgs = append(logArgs, "template", a.Template)
 			}
 			infra.LoggerFrom(ctx).Debug("semantic_search: starting", logArgs...)
 			if env == nil || env.Config() == nil {
@@ -85,7 +119,7 @@ func registerKnowledgeTools() {
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
-			queryVec, err := infra.GenerateEmbedding(ctx, env.Config().GoogleCloudProject, query)
+			queryVec, err := infra.GenerateEmbedding(ctx, env.Config().GoogleCloudProject, a.Query)
 			if err != nil {
 				return tools.Fail("Error generating embedding: %v", err)
 			}
@@ -109,7 +143,7 @@ func registerKnowledgeTools() {
 			}()
 			go func() {
 				defer wg.Done()
-				keywordNodes, nodeKwErr = memory.SearchKnowledgeNodes(ctx, env, query, nodeCandidateLimit)
+				keywordNodes, nodeKwErr = memory.SearchKnowledgeNodes(ctx, env, a.Query, nodeCandidateLimit)
 			}()
 			go func() {
 				defer wg.Done()
@@ -117,7 +151,7 @@ func registerKnowledgeTools() {
 			}()
 			go func() {
 				defer wg.Done()
-				keywordEntries, entryKwErr = journal.SearchEntries(ctx, client, query, entryCandidateLimit)
+				keywordEntries, entryKwErr = journal.SearchEntries(ctx, client, a.Query, entryCandidateLimit)
 			}()
 			wg.Wait()
 
@@ -143,11 +177,11 @@ func registerKnowledgeTools() {
 			}
 
 			fusedNodes := memory.FuseKnowledgeNodes(vectorNodes, keywordNodes, fusedNodeTopN)
-			nodes, _ := memory.RerankNodes(ctx, env, query, fusedNodes, nodeLimit)
+			nodes, _ := memory.RerankNodes(ctx, env, a.Query, fusedNodes, nodeLimit)
 			entries := memory.FuseEntries(vectorEntries, keywordEntries, entryLimit)
 
 			if len(nodes) == 0 && len(entries) == 0 {
-				return tools.OK("No semantic matches found for '%s'.", query)
+				return tools.OK("No semantic matches found for '%s'.", a.Query)
 			}
 			var parts []string
 			if len(nodes) > 0 {
@@ -157,7 +191,7 @@ func registerKnowledgeTools() {
 				parts = append(parts, "Journal entries:\n"+formatEntries(entries))
 			}
 			total := len(nodes) + len(entries)
-			return tools.OK("Found %d semantic matches for '%s':\n%s", total, query, strings.Join(parts, "\n\n"))
+			return tools.OK("Found %d semantic matches for '%s':\n%s", total, a.Query, strings.Join(parts, "\n\n"))
 		},
 	})
 
@@ -165,13 +199,11 @@ func registerKnowledgeTools() {
 		Name:        "list_knowledge",
 		Description: "List knowledge nodes by type (person, project, fact, preference, user_identity, etc.).",
 		Category:    "knowledge",
-		Params: []tools.Param{
-			tools.OptionalStringParam("node_type", "Filter by node type (leave empty for all types)"),
-			tools.LimitParam(20, 50),
-		},
-		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
-			nodeType := args.String("node_type", "")
-			limit := args.IntBounded("limit", 20, 1, 50)
+		Args:        &listKnowledgeArgs{},
+		Execute: func(ctx context.Context, env infra.ToolEnv, args any) tools.Result {
+			a := args.(*listKnowledgeArgs)
+			nodeType := a.NodeType
+			limit := clampLimit(a.Limit, 20, 1, 50)
 			queryStr := "knowledge information facts"
 			if nodeType != "" {
 				queryStr = nodeType + " information"
@@ -218,15 +250,10 @@ func registerKnowledgeTools() {
 		Name:        "get_entity_network",
 		Description: "Get the entity profile and related knowledge. Dynamically discovers facts about the person even if not explicitly linked. Use for high-level questions like 'Who influenced me?', 'What are my wife's favorites?'.",
 		Category:    "knowledge",
-		Params: []tools.Param{
-			tools.RequiredStringParam("entity_name", "Name or role of the person (e.g. 'wife', 'Gloria', 'Sarah')"),
-		},
-		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
-			entityName, ok := args.RequiredString("entity_name")
-			if !ok {
-				return tools.MissingParam("entity_name")
-			}
-			entityName = strings.TrimSpace(entityName)
+		Args:        &getEntityNetworkArgs{},
+		Execute: func(ctx context.Context, env infra.ToolEnv, args any) tools.Result {
+			a := args.(*getEntityNetworkArgs)
+			entityName := strings.TrimSpace(a.EntityName)
 			if entityName == "" {
 				return tools.Fail("entity_name cannot be empty")
 			}
@@ -250,7 +277,7 @@ func registerKnowledgeTools() {
 			wg.Add(2)
 			go func() {
 				defer wg.Done()
-				discovered, _ = memory.DiscoverRelatedNodes(ctx, env, entityName, 10)
+				discovered, _ = memory.DiscoverRelatedNodes(ctx, env, a.EntityName, 10)
 			}()
 			go func() {
 				defer wg.Done()
@@ -314,9 +341,9 @@ func registerKnowledgeTools() {
 			summary, err := infra.GenerateContentSimple(ctx, env, synthesisPrompt, userPrompt, env.Config(), &infra.GenConfig{MaxOutputTokens: 512})
 			if err != nil {
 				infra.LoggerFrom(ctx).Debug("get_entity_network synthesis failed, returning raw data", "error", err)
-				return tools.OK("Entity: %s\n\n%s", entityName, allInfo)
+				return tools.OK("Entity: %s\n\n%s", a.EntityName, allInfo)
 			}
-			return tools.OK("Entity profile: %s\n\n%s", entityName, summary)
+			return tools.OK("Entity profile: %s\n\n%s", a.EntityName, summary)
 		},
 	})
 
@@ -324,18 +351,16 @@ func registerKnowledgeTools() {
 		Name:        "generate_plan",
 		Description: "Generate a structured plan to achieve a goal. ONLY use when user explicitly says 'plan', 'help me plan', or 'create a plan for'. Breaks down the goal into phases and saves to knowledge graph.",
 		Category:    "knowledge",
-		Params: []tools.Param{
-			tools.RequiredStringParam("goal", "The goal to plan for"),
-		},
-		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
-			goal, ok := args.RequiredString("goal")
-			if !ok {
+		Args:        &generatePlanArgs{},
+		Execute: func(ctx context.Context, env infra.ToolEnv, args any) tools.Result {
+			a := args.(*generatePlanArgs)
+			if a.Goal == "" {
 				return tools.MissingParam("goal")
 			}
 			if env == nil {
 				return tools.Fail("No app in context")
 			}
-			result, err := service.CreateAndSavePlan(ctx, env, goal)
+			result, err := service.CreateAndSavePlan(ctx, env, a.Goal)
 			if err != nil {
 				return tools.Fail("Error generating plan: %v", err)
 			}
@@ -349,9 +374,10 @@ func registerSignalTools() {
 		Name:        "check_proactive_signals",
 		Description: "Check for background signals regarding stale goals, relationship health, or recurring user patterns. Use this if the user asks 'what should I focus on' or 'what am I forgetting'.",
 		Category:    "knowledge",
-		Params:      []tools.Param{tools.LimitParam(5, 10)},
-		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
-			limit := args.IntBounded("limit", 5, 1, 10)
+		Args:        &checkProactiveSignalsArgs{},
+		Execute: func(ctx context.Context, env infra.ToolEnv, args any) tools.Result {
+			a := args.(*checkProactiveSignalsArgs)
+			limit := clampLimit(a.Limit, 5, 1, 10)
 			signals, err := memory.GetActiveSignals(ctx, env, limit)
 			if err != nil {
 				return tools.Fail("Error fetching signals: %v", err)

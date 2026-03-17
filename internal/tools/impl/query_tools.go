@@ -8,8 +8,36 @@ import (
 	"github.com/jackstrohm/jot/tools"
 )
 
+type getRecentQueriesArgs struct {
+	Count int `json:"count" description:"Number of items to retrieve (default 10, max 50)" default:"10"`
+}
+
+type searchQueriesArgs struct {
+	Query string `json:"query" description:"Search term to find in questions or answers" required:"true"`
+	Limit int    `json:"limit" description:"Maximum number of results to return (default 10, max 50)" default:"10"`
+}
+
+type getQueriesByDateArgs struct {
+	StartDate string `json:"start_date" description:"Start date (YYYY-MM-DD or natural: yesterday, last week, since Tuesday)" required:"true"`
+	EndDate   string `json:"end_date" description:"End date (YYYY-MM-DD or natural: today, yesterday)" required:"true"`
+	Limit     int    `json:"limit" description:"Maximum number of results (default 20, max 50)" default:"20"`
+}
+
 func init() {
 	registerQueryTools()
+}
+
+func clampCount(c, def, min, max int) int {
+	if c == 0 {
+		c = def
+	}
+	if c < min {
+		return min
+	}
+	if c > max {
+		return max
+	}
+	return c
 }
 
 func registerQueryTools() {
@@ -17,13 +45,14 @@ func registerQueryTools() {
 		Name:        "get_recent_queries",
 		Description: "Get recent queries/questions and their answers from the query history.",
 		Category:    "query",
-		Params:      []tools.Param{tools.CountParam()},
-		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
+		Args:        &getRecentQueriesArgs{},
+		Execute: func(ctx context.Context, env infra.ToolEnv, args any) tools.Result {
+			a := args.(*getRecentQueriesArgs)
 			client, err := env.Firestore(ctx)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
-			count := args.IntBounded("count", 10, 1, 50)
+			count := clampCount(a.Count, 10, 1, 50)
 			queries, err := journal.GetRecentQueries(ctx, client, count)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
@@ -40,29 +69,26 @@ func registerQueryTools() {
 		Name:        "search_queries",
 		Description: "Search query history for matching questions or answers.",
 		Category:    "query",
-		Params: []tools.Param{
-			tools.RequiredStringParam("query", "Search term to find in questions or answers"),
-			tools.LimitParam(10, 50),
-		},
-		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
+		Args:        &searchQueriesArgs{},
+		Execute: func(ctx context.Context, env infra.ToolEnv, args any) tools.Result {
+			a := args.(*searchQueriesArgs)
+			if a.Query == "" {
+				return tools.MissingParam("query")
+			}
 			client, err := env.Firestore(ctx)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
-			query, ok := args.RequiredString("query")
-			if !ok {
-				return tools.MissingParam("query")
-			}
-			limit := args.IntBounded("limit", 10, 1, 50)
-			queries, err := journal.SearchQueries(ctx, client, query, limit)
+			limit := clampCount(a.Limit, 10, 1, 50)
+			queries, err := journal.SearchQueries(ctx, client, a.Query, limit)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
 			if len(queries) == 0 {
-				return tools.OK("No queries matching '%s' found.", query)
+				return tools.OK("No queries matching '%s' found.", a.Query)
 			}
 			result := formatQueriesForContext(queries)
-			return tools.OK("Found %d queries matching '%s':\n%s", len(queries), query, result)
+			return tools.OK("Found %d queries matching '%s':\n%s", len(queries), a.Query, result)
 		},
 	})
 
@@ -70,21 +96,16 @@ func registerQueryTools() {
 		Name:        "get_queries_by_date",
 		Description: "Get queries within a date range. Accepts YYYY-MM-DD or natural language (e.g. yesterday, last week, since Tuesday).",
 		Category:    "query",
-		Params: []tools.Param{
-			tools.RequiredStringParam("start_date", "Start date (YYYY-MM-DD or natural: yesterday, last week, since Tuesday)"),
-			tools.RequiredStringParam("end_date", "End date (YYYY-MM-DD or natural: today, yesterday)"),
-			tools.LimitParam(20, 50),
-		},
-		Execute: func(ctx context.Context, env infra.ToolEnv, args *tools.Args) tools.Result {
-			startDate, ok := args.RequiredString("start_date")
-			if !ok {
+		Args:        &getQueriesByDateArgs{},
+		Execute: func(ctx context.Context, env infra.ToolEnv, args any) tools.Result {
+			a := args.(*getQueriesByDateArgs)
+			if a.StartDate == "" {
 				return tools.MissingParam("start_date")
 			}
-			endDate, ok := args.RequiredString("end_date")
-			if !ok {
+			if a.EndDate == "" {
 				return tools.MissingParam("end_date")
 			}
-			startStr, endStr, err := resolveToolDateRange(startDate, endDate)
+			startStr, endStr, err := resolveToolDateRange(a.StartDate, a.EndDate)
 			if err != nil {
 				return tools.Fail("Date range error: %v", err)
 			}
@@ -92,7 +113,7 @@ func registerQueryTools() {
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
-			limit := args.IntBounded("limit", 20, 1, 50)
+			limit := clampCount(a.Limit, 20, 1, 50)
 			queries, err := journal.GetQueriesByDateRange(ctx, client, startStr, endStr, limit)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
