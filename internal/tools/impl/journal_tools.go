@@ -84,9 +84,12 @@ func registerJournalTools() {
 			count := clampInt(a.Count, 10, 1, 50)
 			limit := count
 			if a.HasImage {
-				limit = count * 5
-				if limit > 100 {
-					limit = 100
+				limit = count * 10
+				if limit < 50 {
+					limit = 50
+				}
+				if limit > 200 {
+					limit = 200
 				}
 			}
 			entries, err := journal.GetEntries(ctx, client, limit)

@@ -41,6 +41,9 @@ func FormatEntriesForContext(entries []Entry, maxChars int) string {
 			} else {
 				line += "\n[Attached image]"
 			}
+			if e.UUID != "" {
+				line += fmt.Sprintf("\n[Entry UUID: %s]", e.UUID)
+			}
 		}
 		lineRunes := utf8.RuneCountInString(line)
 		if totalRunes+lineRunes+1 > maxChars {

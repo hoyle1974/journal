@@ -41,5 +41,11 @@ func processQueryTelegram(ctx context.Context, app *infra.App, query string, cha
 		infra.LoggerFrom(ctx).Error("telegram query failed", "answer", result.Answer)
 		return "Sorry, I couldn't process your query. Please try again."
 	}
+	// Skip persona rewriting when the answer contains an image sentinel — the
+	// sentinel token must be passed through verbatim so sendTelegramResponse can
+	// detect it and call sendPhoto. Rewriting would replace it with plain text.
+	if strings.Contains(result.Answer, "[SEND_IMAGE:") {
+		return result.Answer
+	}
 	return persona.Apply(ctx, app, result.Answer, query)
 }

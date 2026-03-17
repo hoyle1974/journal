@@ -138,10 +138,19 @@ type ToolSummary struct {
 
 const discoverySearchName = "discovery_search"
 
-// CoreToolNames are the 3 tools always loaded in "Map vs Manual" mode (semantic_search, upsert_knowledge, discovery_search).
-var CoreToolNames = []string{"semantic_search", "upsert_knowledge", discoverySearchName}
+// CoreToolNames are the tools always loaded in "Map vs Manual" mode (compact tools).
+// These are available as direct function calls without going through discovery_search.
+// Keep this set small (~5–8 tools) to avoid bloating the prompt; everything else is discoverable.
+var CoreToolNames = []string{
+	"semantic_search",
+	"upsert_knowledge",
+	discoverySearchName,
+	"get_recent_entries",
+	"retrieve_image",
+}
 
-// GetDefinitionsForCore returns FunctionDeclarations for the core tools only (~300 tokens). Used when UseCompactTools: agent gets the Map + these 3; everything else via discovery_search.
+// GetDefinitionsForCore returns FunctionDeclarations for the core tools only.
+// Used when UseCompactTools: agent gets these tools directly; everything else via discovery_search.
 func GetDefinitionsForCore() []*genai.FunctionDeclaration {
 	registryLock.RLock()
 	defer registryLock.RUnlock()

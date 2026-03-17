@@ -113,6 +113,9 @@ case "$MODE" in
     if [ -n "${ALLOWED_TELEGRAM_USER_ID:-}" ]; then
       ENV_VARS="$ENV_VARS,ALLOWED_TELEGRAM_USER_ID=$ALLOWED_TELEGRAM_USER_ID"
     fi
+    if [ -n "${JOT_IMAGES_BUCKET:-}" ]; then
+      ENV_VARS="$ENV_VARS,JOT_IMAGES_BUCKET=$JOT_IMAGES_BUCKET"
+    fi
 
     # Build env block for YAML (Prometheus sidecar deploy)
     ENV_BLOCK_FILE="$REPO_ROOT/scripts/.env-block.yaml"

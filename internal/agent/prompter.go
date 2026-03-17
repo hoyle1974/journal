@@ -141,7 +141,7 @@ func BuildSystemPrompt(ctx context.Context, env infra.ToolEnv) (string, error) {
 
 	// Map vs Manual: compressed manifest + 3 core tools (semantic_search, upsert_knowledge, discovery_search). Everything else via discovery_search(intent) → JIT schema injection.
 	if env != nil && env.Config() != nil && env.Config().UseCompactTools {
-		prompt += "\n\n---\n## TOOLS (Map)\nWhen you lack information to answer (e.g. current time, calculation, definition), you MUST call discovery_search first — never respond \"I do not have access\" without calling it. You have: semantic_search, upsert_knowledge, discovery_search. For any other action or missing info, call discovery_search(intent=\"your_reasoning\") to get tool schemas; then invoke that tool with key/value lines only: TOOL: tool_name then ARGS: then one line per argument as param_name | value. No JSON, no markdown, no code fences. Do not output any other text when making a tool call."
+		prompt += "\n\n---\n## TOOLS (Map)\nWhen you lack information to answer (e.g. current time, calculation, definition), you MUST call discovery_search first — never respond \"I do not have access\" without calling it. You have direct access to: semantic_search, upsert_knowledge, discovery_search, get_recent_entries, retrieve_image. For any other action or missing info, call discovery_search(intent=\"your_reasoning\") to get tool schemas; then invoke that tool with key/value lines only: TOOL: tool_name then ARGS: then one line per argument as param_name | value. No JSON, no markdown, no code fences. Do not output any other text when making a tool call."
 		infra.LoggerFrom(ctx).Debug("system prompt: Map vs Manual (core tools + discovery)", "reason", "JOT_USE_COMPACT_TOOLS=true")
 	}
 
