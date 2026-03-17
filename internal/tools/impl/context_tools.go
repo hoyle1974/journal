@@ -42,19 +42,6 @@ type updateProjectStatusArgs struct {
 	Status      string `json:"status" description:"New status for the project" required:"true" enum:"active,blocked,completed,archived"`
 }
 
-func contextClamp(limit, def, min, max int) int {
-	if limit == 0 {
-		limit = def
-	}
-	if limit < min {
-		return min
-	}
-	if limit > max {
-		return max
-	}
-	return limit
-}
-
 func init() {
 	registerContextTools()
 	registerSystemEvolutionTools()
@@ -69,7 +56,7 @@ func registerContextTools() {
 		Args:        &listContextsArgs{},
 		Execute: func(ctx context.Context, env infra.ToolEnv, args any) tools.Result {
 			a := args.(*listContextsArgs)
-			limit := contextClamp(a.Limit, 10, 1, 20)
+			limit := clampInt(a.Limit, 10, 1, 20)
 			contexts, metas, err := memory.GetActiveContexts(ctx, env, limit)
 			if err != nil {
 				return tools.Fail("Error: %v", err)

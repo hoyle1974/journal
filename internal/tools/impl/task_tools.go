@@ -57,19 +57,6 @@ func parseCommaSeparatedIDs(s string) []string {
 	return out
 }
 
-func taskClamp(limit, def, min, max int) int {
-	if limit == 0 {
-		limit = def
-	}
-	if limit < min {
-		return min
-	}
-	if limit > max {
-		return max
-	}
-	return limit
-}
-
 func init() {
 	registerTaskTools()
 }
@@ -219,7 +206,7 @@ func registerTaskTools() {
 		Execute: func(ctx context.Context, env infra.ToolEnv, args any) tools.Result {
 			a := args.(*searchTasksArgs)
 			query := strings.TrimSpace(a.Query)
-			limit := taskClamp(a.Limit, 10, 1, 20)
+			limit := clampInt(a.Limit, 10, 1, 20)
 			statusFilter := a.Status
 
 			var tasks []task.Task

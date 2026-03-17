@@ -65,19 +65,6 @@ type summarizeDailyActivitiesArgs struct {
 	Date string `json:"date" description:"Date to summarize: YYYY-MM-DD or natural language (e.g. yesterday, today, last Monday)" required:"true"`
 }
 
-func journalClamp(val, def, min, max int) int {
-	if val == 0 {
-		val = def
-	}
-	if val < min {
-		return min
-	}
-	if val > max {
-		return max
-	}
-	return val
-}
-
 func init() {
 	registerJournalTools()
 }
@@ -94,7 +81,7 @@ func registerJournalTools() {
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
-			count := journalClamp(a.Count, 10, 1, 50)
+			count := clampInt(a.Count, 10, 1, 50)
 			limit := count
 			if a.HasImage {
 				limit = count * 5
@@ -128,7 +115,7 @@ func registerJournalTools() {
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
-			count := journalClamp(a.Count, 10, 1, 50)
+			count := clampInt(a.Count, 10, 1, 50)
 			entries, err := journal.GetEntriesAsc(ctx, client, count)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
@@ -159,7 +146,7 @@ func registerJournalTools() {
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
-			limit := journalClamp(a.Limit, 50, 1, 200)
+			limit := clampInt(a.Limit, 50, 1, 200)
 			fetchLimit := limit
 			if a.HasImage {
 				fetchLimit = limit * 3
@@ -196,7 +183,7 @@ func registerJournalTools() {
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
-			limit := journalClamp(a.Limit, 20, 1, 50)
+			limit := clampInt(a.Limit, 20, 1, 50)
 			searchLimit := limit
 			if a.HasImage {
 				searchLimit = limit * 5
@@ -327,7 +314,7 @@ func registerJournalTools() {
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
-			count := journalClamp(a.Count, 10, 1, 50)
+			count := clampInt(a.Count, 10, 1, 50)
 			entries, err := journal.GetEntriesBySource(ctx, client, a.Source, count)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
@@ -431,7 +418,7 @@ func registerJournalTools() {
 			if err != nil {
 				return tools.Fail("Date range error: %v", err)
 			}
-			limit := journalClamp(a.Limit, 50, 1, 200)
+			limit := clampInt(a.Limit, 50, 1, 200)
 			withAnalyses, err := journal.GetEntriesWithAnalysisByDateRange(ctx, client, startStr, endStr, limit)
 			if err != nil {
 				return tools.Fail("Error: %v", err)

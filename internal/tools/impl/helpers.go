@@ -11,6 +11,21 @@ import (
 	"github.com/jackstrohm/jot/pkg/utils"
 )
 
+// clampInt returns val clamped to [min, max], substituting def when val is 0.
+// Used by tool implementations to normalise limit/count parameters.
+func clampInt(val, def, min, max int) int {
+	if val == 0 {
+		val = def
+	}
+	if val < min {
+		return min
+	}
+	if val > max {
+		return max
+	}
+	return val
+}
+
 // resolveToolDateRange resolves start_date and end_date (natural language or YYYY-MM-DD) to YYYY-MM-DD strings for tool/DB use.
 // Use this in all tools that accept date ranges (get_entries_by_date_range, get_queries_by_date, etc.) for consistent behavior.
 func resolveToolDateRange(startExpr, endExpr string) (startStr, endStr string, err error) {

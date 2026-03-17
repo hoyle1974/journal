@@ -73,6 +73,13 @@ type QueryResult struct {
 	DebugLogs        []string                 `json:"debug_logs,omitempty"`
 }
 
+// errQueryResult increments the error counter and returns a failed QueryResult.
+// span.RecordError must still be called at the site when a span is active.
+func errQueryResult(answer string, iteration int, debugLogs []string) *QueryResult {
+	infra.ErrorsTotal.Inc()
+	return &QueryResult{Answer: answer, Iterations: iteration, Error: true, DebugLogs: debugLogs}
+}
+
 // RunQuery runs a query against the journal using the agentic loop.
 func RunQuery(ctx context.Context, app FOHEnv, question, source string) *QueryResult {
 	return RunQueryWithDebug(ctx, app, question, source, true)
@@ -104,12 +111,7 @@ func RunQueryWithDebug(ctx context.Context, app FOHEnv, question, source string,
 	})
 
 	if app == nil {
-		infra.ErrorsTotal.Inc()
-		return &QueryResult{
-			Answer:     "Error: no app in context (GEMINI_API_KEY not configured?)",
-			Iterations: 0,
-			Error:      true,
-		}
+		return errQueryResult("Error: no app in context (GEMINI_API_KEY not configured?)", 0, nil)
 	}
 
 	var entryUUID string
@@ -123,14 +125,8 @@ func RunQueryWithDebug(ctx context.Context, app FOHEnv, question, source string,
 		entryUUID, err = AddEntryAndEnqueue(ctx, app.App(), question, source, nil, "")
 		if err != nil {
 			infra.LoggerFrom(ctx).Error("failed to log user input", "error", err)
-			infra.ErrorsTotal.Inc()
 			span.RecordError(err)
-			return &QueryResult{
-				Answer:     fmt.Sprintf("Error saving input: %v", err),
-				Iterations: 0,
-				Error:      true,
-				DebugLogs:  debugLogs,
-			}
+			return errQueryResult(fmt.Sprintf("Error saving input: %v", err), 0, debugLogs)
 		}
 		ctx = withCurrentEntryUUID(ctx, entryUUID)
 		infra.LoggerFrom(ctx).Debug("FOH: user input logged as entry", "query_run_id", queryRunID, "phase", "start", "event", "query_start", "question", question, "entry_uuid", entryUUID, "source", source)
@@ -140,14 +136,8 @@ func RunQueryWithDebug(ctx context.Context, app FOHEnv, question, source string,
 
 	systemPrompt, err := BuildSystemPrompt(ctx, app)
 	if err != nil {
-		infra.ErrorsTotal.Inc()
 		span.RecordError(err)
-		return &QueryResult{
-			Answer:     fmt.Sprintf("Error building system prompt: %v", err),
-			Iterations: 0,
-			Error:      true,
-			DebugLogs:  debugLogs,
-		}
+		return errQueryResult(fmt.Sprintf("Error building system prompt: %v", err), 0, debugLogs)
 	}
 	infra.LoggerFrom(ctx).Debug("FOH: system prompt built", "query_run_id", queryRunID, "phase", "start", "prompt_len", len(systemPrompt), "reason", "inject date, contexts, recent history")
 	logDebug("[prompt] %s", systemPrompt)
@@ -161,14 +151,8 @@ func RunQueryWithDebug(ctx context.Context, app FOHEnv, question, source string,
 	}
 	session, err := infra.NewChatSession(ctx, app.App(), systemPrompt, toolDefs)
 	if err != nil {
-		infra.ErrorsTotal.Inc()
 		span.RecordError(err)
-		return &QueryResult{
-			Answer:     fmt.Sprintf("Error creating chat session: %v", infra.WrapLLMError(err)),
-			Iterations: 0,
-			Error:      true,
-			DebugLogs:  debugLogs,
-		}
+		return errQueryResult(fmt.Sprintf("Error creating chat session: %v", infra.WrapLLMError(err)), 0, debugLogs)
 	}
 	logDebug("[init] Chat session created with %d tools (compact=%v)", len(toolDefs), useCompactTools)
 	infra.LoggerFrom(ctx).Debug("FOH: sending question to LLM", "query_run_id", queryRunID, "phase", "first_turn", "tool_count", len(toolDefs), "compact_tools", useCompactTools, "reason", "first turn")
@@ -185,14 +169,8 @@ func RunQueryWithDebug(ctx context.Context, app FOHEnv, question, source string,
 
 	resp, err := session.SendMessage(ctx, &genai.Part{Text: question})
 	if err != nil {
-		infra.ErrorsTotal.Inc()
 		span.RecordError(err)
-		return &QueryResult{
-			Answer:     fmt.Sprintf("Error calling Gemini API: %v", infra.WrapLLMError(err)),
-			Iterations: 1,
-			Error:      true,
-			DebugLogs:  debugLogs,
-		}
+		return errQueryResult(fmt.Sprintf("Error calling Gemini API: %v", infra.WrapLLMError(err)), 1, debugLogs)
 	}
 	iteration++
 	infra.GeminiCallsTotal.Inc()

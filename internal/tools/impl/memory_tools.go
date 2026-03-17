@@ -50,19 +50,6 @@ func init() {
 	registerSignalTools()
 }
 
-func clampLimit(limit, def, min, max int) int {
-	if limit == 0 {
-		limit = def
-	}
-	if limit < min {
-		return min
-	}
-	if limit > max {
-		return max
-	}
-	return limit
-}
-
 func registerKnowledgeTools() {
 	tools.Register(&tools.Tool{
 		Name:        "upsert_knowledge",
@@ -103,7 +90,7 @@ func registerKnowledgeTools() {
 			if a.Query == "" {
 				return tools.MissingParam("query")
 			}
-			limit := clampLimit(a.Limit, 10, 1, 20)
+			limit := clampInt(a.Limit, 10, 1, 20)
 			logArgs := []interface{}{"query_preview", a.Query, "limit", limit, "reason", "vector+keyword search over knowledge and entries"}
 			if a.SourceText != "" {
 				logArgs = append(logArgs, "source_text", a.SourceText)
@@ -203,7 +190,7 @@ func registerKnowledgeTools() {
 		Execute: func(ctx context.Context, env infra.ToolEnv, args any) tools.Result {
 			a := args.(*listKnowledgeArgs)
 			nodeType := a.NodeType
-			limit := clampLimit(a.Limit, 20, 1, 50)
+			limit := clampInt(a.Limit, 20, 1, 50)
 			queryStr := "knowledge information facts"
 			if nodeType != "" {
 				queryStr = nodeType + " information"
@@ -377,7 +364,7 @@ func registerSignalTools() {
 		Args:        &checkProactiveSignalsArgs{},
 		Execute: func(ctx context.Context, env infra.ToolEnv, args any) tools.Result {
 			a := args.(*checkProactiveSignalsArgs)
-			limit := clampLimit(a.Limit, 5, 1, 10)
+			limit := clampInt(a.Limit, 5, 1, 10)
 			signals, err := memory.GetActiveSignals(ctx, env, limit)
 			if err != nil {
 				return tools.Fail("Error fetching signals: %v", err)

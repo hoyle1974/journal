@@ -55,19 +55,6 @@ func init() {
 	registerWebTools()
 }
 
-func webClamp(val, def, min, max int) int {
-	if val == 0 {
-		val = def
-	}
-	if val < min {
-		return min
-	}
-	if val > max {
-		return max
-	}
-	return val
-}
-
 func registerWebTools() {
 	tools.Register(&tools.Tool{
 		Name:        "fetch_url",
@@ -138,7 +125,7 @@ func registerWebTools() {
 			if a.Query == "" {
 				return tools.MissingParam("query")
 			}
-			numResults := webClamp(a.NumResults, 5, 1, 10)
+			numResults := clampInt(a.NumResults, 5, 1, 10)
 			result, err := webSearch(ctx, a.Query, numResults)
 			if err != nil {
 				return tools.Fail("Web search error: %v", err)

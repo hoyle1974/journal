@@ -27,19 +27,6 @@ func init() {
 	registerQueryTools()
 }
 
-func clampCount(c, def, min, max int) int {
-	if c == 0 {
-		c = def
-	}
-	if c < min {
-		return min
-	}
-	if c > max {
-		return max
-	}
-	return c
-}
-
 func registerQueryTools() {
 	tools.Register(&tools.Tool{
 		Name:        "get_recent_queries",
@@ -52,7 +39,7 @@ func registerQueryTools() {
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
-			count := clampCount(a.Count, 10, 1, 50)
+			count := clampInt(a.Count, 10, 1, 50)
 			queries, err := journal.GetRecentQueries(ctx, client, count)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
@@ -79,7 +66,7 @@ func registerQueryTools() {
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
-			limit := clampCount(a.Limit, 10, 1, 50)
+			limit := clampInt(a.Limit, 10, 1, 50)
 			queries, err := journal.SearchQueries(ctx, client, a.Query, limit)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
@@ -113,7 +100,7 @@ func registerQueryTools() {
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
-			limit := clampCount(a.Limit, 20, 1, 50)
+			limit := clampInt(a.Limit, 20, 1, 50)
 			queries, err := journal.GetQueriesByDateRange(ctx, client, startStr, endStr, limit)
 			if err != nil {
 				return tools.Fail("Error: %v", err)

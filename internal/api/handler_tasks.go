@@ -14,23 +14,34 @@ import (
 	"github.com/jackstrohm/jot/pkg/utils"
 )
 
+// correlationFields is embedded in task handler request structs to carry Cloud Task tracing ids.
+// Call applyToCtx after DecodeAndValidate to propagate them into the context.
+type correlationFields struct {
+	TaskID        string `json:"task_id"`
+	ParentTraceID string `json:"parent_trace_id"`
+}
+
+func (c correlationFields) applyToCtx(ctx context.Context) context.Context {
+	if c.TaskID != "" || c.ParentTraceID != "" {
+		return infra.WithCorrelation(ctx, c.TaskID, c.ParentTraceID)
+	}
+	return ctx
+}
+
 func handleProcessEntry(s *Server, w http.ResponseWriter, r *http.Request) (any, error) {
 	ctx := r.Context()
 	path := pathForLog(r.URL.Path)
 	var data struct {
-		UUID          string `json:"uuid" validate:"required"`
-		Content       string `json:"content" validate:"required"`
-		Timestamp     string `json:"timestamp"`
-		Source        string `json:"source" validate:"required"`
-		TaskID        string `json:"task_id"`
-		ParentTraceID string `json:"parent_trace_id"`
+		UUID      string `json:"uuid" validate:"required"`
+		Content   string `json:"content" validate:"required"`
+		Timestamp string `json:"timestamp"`
+		Source    string `json:"source" validate:"required"`
+		correlationFields
 	}
 	if err := DecodeAndValidate(r, &data, s.Validator); err != nil {
 		return nil, handlerError(http.StatusBadRequest, err.Error())
 	}
-	if data.TaskID != "" || data.ParentTraceID != "" {
-		ctx = infra.WithCorrelation(ctx, data.TaskID, data.ParentTraceID)
-	}
+	ctx = data.correlationFields.applyToCtx(ctx)
 	LogHandlerRequest(ctx, r.Method, path, "uuid", data.UUID, "source", data.Source, "content_length", len(data.Content), "task_id", data.TaskID, "parent_trace_id", data.ParentTraceID)
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
@@ -50,18 +61,15 @@ func handleProcessSMSQuery(s *Server, w http.ResponseWriter, r *http.Request) (a
 	ctx := r.Context()
 	path := pathForLog(r.URL.Path)
 	var data struct {
-		From          string `json:"from" validate:"required"`
-		Body          string `json:"body" validate:"required"`
-		MessageSid    string `json:"message_sid"`
-		TaskID        string `json:"task_id"`
-		ParentTraceID string `json:"parent_trace_id"`
+		From       string `json:"from" validate:"required"`
+		Body       string `json:"body" validate:"required"`
+		MessageSid string `json:"message_sid"`
+		correlationFields
 	}
 	if err := DecodeAndValidate(r, &data, s.Validator); err != nil {
 		return nil, handlerError(http.StatusBadRequest, err.Error())
 	}
-	if data.TaskID != "" || data.ParentTraceID != "" {
-		ctx = infra.WithCorrelation(ctx, data.TaskID, data.ParentTraceID)
-	}
+	ctx = data.correlationFields.applyToCtx(ctx)
 	msg := &sms.TwilioWebhookRequest{
 		MessageSid: data.MessageSid,
 		From:       data.From,
@@ -88,14 +96,13 @@ func handleProcessTelegramQuery(s *Server, w http.ResponseWriter, r *http.Reques
 	ctx := r.Context()
 	path := pathForLog(r.URL.Path)
 	var data struct {
-		ChatID        int64  `json:"chat_id" validate:"required"`
-		UserID        int64  `json:"user_id"`
-		Body          string `json:"body"`
-		ImageFileID   string `json:"image_file_id"`
-		UpdateID      int64  `json:"update_id"`
-		MessageID     int64  `json:"message_id"`
-		TaskID        string `json:"task_id"`
-		ParentTraceID string `json:"parent_trace_id"`
+		ChatID      int64  `json:"chat_id" validate:"required"`
+		UserID      int64  `json:"user_id"`
+		Body        string `json:"body"`
+		ImageFileID string `json:"image_file_id"`
+		UpdateID    int64  `json:"update_id"`
+		MessageID   int64  `json:"message_id"`
+		correlationFields
 	}
 	if err := DecodeAndValidate(r, &data, s.Validator); err != nil {
 		return nil, handlerError(http.StatusBadRequest, err.Error())
@@ -108,9 +115,7 @@ func handleProcessTelegramQuery(s *Server, w http.ResponseWriter, r *http.Reques
 	if data.Body == "" && data.ImageFileID != "" {
 		data.Body = "Photo"
 	}
-	if data.TaskID != "" || data.ParentTraceID != "" {
-		ctx = infra.WithCorrelation(ctx, data.TaskID, data.ParentTraceID)
-	}
+	ctx = data.correlationFields.applyToCtx(ctx)
 	// When message has an image, download it, optionally generate a caption, then create a journal entry (upload to GCS) and pass entry UUID so FOH skips adding a duplicate.
 	var imageBytes []byte
 	if data.ImageFileID != "" {
@@ -196,19 +201,16 @@ func handleSaveQuery(s *Server, w http.ResponseWriter, r *http.Request) (any, er
 	ctx := r.Context()
 	path := pathForLog(r.URL.Path)
 	var data struct {
-		Question      string `json:"question" validate:"required"`
-		Answer        string `json:"answer"`
-		Source        string `json:"source" validate:"required"`
-		IsGap         bool   `json:"is_gap"`
-		TaskID        string `json:"task_id"`
-		ParentTraceID string `json:"parent_trace_id"`
+		Question string `json:"question" validate:"required"`
+		Answer   string `json:"answer"`
+		Source   string `json:"source" validate:"required"`
+		IsGap    bool   `json:"is_gap"`
+		correlationFields
 	}
 	if err := DecodeAndValidate(r, &data, s.Validator); err != nil {
 		return nil, handlerError(http.StatusBadRequest, err.Error())
 	}
-	if data.TaskID != "" || data.ParentTraceID != "" {
-		ctx = infra.WithCorrelation(ctx, data.TaskID, data.ParentTraceID)
-	}
+	ctx = data.correlationFields.applyToCtx(ctx)
 	LogHandlerRequest(ctx, r.Method, path, "question_preview", utils.TruncateString(data.Question, 60), "source", data.Source, "is_gap", data.IsGap, "task_id", data.TaskID, "parent_trace_id", data.ParentTraceID)
 	if _, err := s.Journal.SaveQuery(ctx, data.Question, data.Answer, data.Source, data.IsGap); err != nil {
 		infra.LoggerFrom(ctx).Error("save-query failed", "error", err)

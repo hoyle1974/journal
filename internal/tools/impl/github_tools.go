@@ -29,19 +29,6 @@ func init() {
 	registerGitHubTools()
 }
 
-func githubClamp(limit, def, min, max int) int {
-	if limit == 0 {
-		limit = def
-	}
-	if limit < min {
-		return min
-	}
-	if limit > max {
-		return max
-	}
-	return limit
-}
-
 func registerGitHubTools() {
 	tools.Register(&tools.Tool{
 		Name:        "github_read",
@@ -71,7 +58,7 @@ func executeGitHubRead(ctx context.Context, env infra.ToolEnv, args any) tools.R
 	owner, repoName := parts[0], parts[1]
 
 	path := a.Path
-	limit := githubClamp(a.Limit, 10, 1, 30)
+	limit := clampInt(a.Limit, 10, 1, 30)
 
 	span.SetAttributes(map[string]string{"action": a.Action, "repo": repo})
 
