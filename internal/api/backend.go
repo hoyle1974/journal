@@ -141,4 +141,5 @@ type TelegramService interface {
 	DownloadFileWithMIME(ctx context.Context, fileID string) ([]byte, string, error)
 	ProcessIncomingTelegram(ctx context.Context, app *infra.App, msg *telegram.IncomingMessage) string
 	SendMessage(ctx context.Context, chatID int64, body string) error
+	SendPhoto(ctx context.Context, chatID int64, caption string, imageBytes []byte, mimeType string) error
 }

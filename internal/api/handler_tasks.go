@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackstrohm/jot/internal/agent"
 	"github.com/jackstrohm/jot/internal/infra"
+	"github.com/jackstrohm/jot/pkg/journal"
 	"github.com/jackstrohm/jot/pkg/sms"
 	"github.com/jackstrohm/jot/pkg/telegram"
 	"github.com/jackstrohm/jot/pkg/utils"
@@ -189,12 +191,86 @@ func handleProcessTelegramQuery(s *Server, w http.ResponseWriter, r *http.Reques
 	if response == "" {
 		response = "I couldn't process that. Please try again."
 	}
-	if err := s.Telegram.SendMessage(ctx, data.ChatID, response); err != nil {
-		infra.LoggerFrom(ctx).Error("process-telegram-query: send reply failed", "chat_id", data.ChatID, "error", err)
-		return nil, fmt.Errorf("failed to send Telegram reply: %w", err)
+	if err := sendTelegramResponse(ctx, s, data.ChatID, response); err != nil {
+		return nil, err
 	}
-	infra.LoggerFrom(ctx).Info("process-telegram-query: reply sent", "chat_id", data.ChatID, "preview", utils.TruncateString(response, 60))
 	return map[string]string{"status": "ok"}, nil
+}
+
+// sendTelegramResponse delivers the FOH answer to the user. If the answer contains an
+// [SEND_IMAGE:<uuid>] sentinel, the image is fetched from GCS and sent via sendPhoto;
+// the remaining text (caption) is sent alongside it. Falls back to sendMessage on error.
+func sendTelegramResponse(ctx context.Context, s *Server, chatID int64, response string) error {
+	entryUUID, caption, hasImage := parseSentinel(response)
+	if !hasImage {
+		if err := s.Telegram.SendMessage(ctx, chatID, response); err != nil {
+			infra.LoggerFrom(ctx).Error("process-telegram-query: send reply failed", "chat_id", chatID, "error", err)
+			return fmt.Errorf("failed to send Telegram reply: %w", err)
+		}
+		infra.LoggerFrom(ctx).Info("process-telegram-query: reply sent", "chat_id", chatID, "preview", utils.TruncateString(response, 60))
+		return nil
+	}
+
+	// Fetch the entry's image_url from Firestore.
+	app := s.App.(*infra.App)
+	fsClient, err := app.Firestore(ctx)
+	if err != nil {
+		infra.LoggerFrom(ctx).Error("process-telegram-query: firestore unavailable for image retrieval", "chat_id", chatID, "error", err)
+		return sendFallback(ctx, s, chatID, caption)
+	}
+	entry, err := journal.GetEntry(ctx, fsClient, entryUUID)
+	if err != nil || entry == nil || entry.ImageURL == "" {
+		infra.LoggerFrom(ctx).Warn("process-telegram-query: image entry not found, falling back to text", "chat_id", chatID, "entry_uuid", entryUUID)
+		return sendFallback(ctx, s, chatID, caption)
+	}
+
+	// Download image bytes from GCS.
+	imageBytes, mimeType, err := app.ImageStorage().DownloadImage(ctx, entry.ImageURL)
+	if err != nil {
+		infra.LoggerFrom(ctx).Warn("process-telegram-query: GCS download failed, falling back to text", "chat_id", chatID, "image_url", entry.ImageURL, "error", err)
+		return sendFallback(ctx, s, chatID, caption)
+	}
+
+	// Send image via sendPhoto.
+	if err := s.Telegram.SendPhoto(ctx, chatID, caption, imageBytes, mimeType); err != nil {
+		infra.LoggerFrom(ctx).Warn("process-telegram-query: sendPhoto failed, falling back to text", "chat_id", chatID, "error", err)
+		return sendFallback(ctx, s, chatID, caption)
+	}
+	infra.LoggerFrom(ctx).Info("process-telegram-query: photo sent", "chat_id", chatID, "entry_uuid", entryUUID, "bytes", len(imageBytes))
+	return nil
+}
+
+// parseSentinel extracts an image sentinel [SEND_IMAGE:<uuid>] from a response string.
+// Returns the entry UUID, the remaining caption text (sentinel stripped), and whether a sentinel was found.
+func parseSentinel(response string) (entryUUID, caption string, ok bool) {
+	const prefix = "[SEND_IMAGE:"
+	start := strings.Index(response, prefix)
+	if start < 0 {
+		return "", "", false
+	}
+	end := strings.Index(response[start:], "]")
+	if end < 0 {
+		return "", "", false
+	}
+	end += start
+	entryUUID = strings.TrimSpace(response[start+len(prefix) : end])
+	if entryUUID == "" {
+		return "", "", false
+	}
+	caption = strings.TrimSpace(response[:start] + response[end+1:])
+	return entryUUID, caption, true
+}
+
+// sendFallback sends the caption as a plain text message (used when image delivery fails).
+func sendFallback(ctx context.Context, s *Server, chatID int64, caption string) error {
+	if caption == "" {
+		caption = "I found the image but couldn't send it at this time."
+	}
+	if err := s.Telegram.SendMessage(ctx, chatID, caption); err != nil {
+		infra.LoggerFrom(ctx).Error("process-telegram-query: fallback send failed", "chat_id", chatID, "error", err)
+		return fmt.Errorf("failed to send Telegram reply: %w", err)
+	}
+	return nil
 }
 
 func handleSaveQuery(s *Server, w http.ResponseWriter, r *http.Request) (any, error) {
