@@ -11,9 +11,9 @@ import (
 )
 
 // EvictStaleNodes performs janitor garbage collection: deletes low-significance nodes
-// that have not been recalled since the given stale cutoff. Nodes of type identity_anchor
-// or user_identity are never deleted. Content from nodes linked to completed projects
-// is appended to the project's archive_summary before deletion.
+// that have not been recalled since the given stale cutoff. Nodes of type identity_anchor,
+// user_identity, or log (episodic journal entries) are never deleted. Content from nodes
+// linked to completed projects is appended to the project's archive_summary before deletion.
 // weightThreshold is the upper bound for significance_weight (e.g. 0.2); staleDays is the age in days.
 func EvictStaleNodes(ctx context.Context, env infra.ToolEnv, weightThreshold float64, staleDays int) (int, error) {
 	if env == nil {
@@ -45,7 +45,8 @@ func EvictStaleNodes(ctx context.Context, env infra.ToolEnv, weightThreshold flo
 
 		data := doc.Data()
 		nodeType := infra.GetStringField(data, "node_type")
-		if nodeType == NodeTypeIdentity || nodeType == NodeTypeUserIdentity {
+		// Never delete protected node types: identity anchors, user identity, or raw log entries.
+		if nodeType == NodeTypeIdentity || nodeType == NodeTypeUserIdentity || nodeType == "log" {
 			continue
 		}
 		projectID := GetLinkedCompletedProjectID(ctx, env, data)

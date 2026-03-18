@@ -15,7 +15,9 @@ import (
 )
 
 // KnowledgeCollection is the Firestore collection name for knowledge nodes.
-const KnowledgeCollection = "knowledge_nodes"
+// Points to the unified "journal" collection shared with episodic log entries.
+// Knowledge nodes are distinguished from log entries by node_type != "log".
+const KnowledgeCollection = "journal"
 
 // KnowledgeNode represents an arbitrary piece of structured data (Person, Task, Goal, Fact).
 type KnowledgeNode struct {
@@ -125,7 +127,9 @@ func UpsertKnowledge(ctx context.Context, env infra.ToolEnv, content, nodeType, 
 	iter.Stop()
 
 	var nodeUUID string
-	if err == nil && doc != nil {
+	// Skip dedup if the nearest doc is a log entry (not a knowledge node).
+	isDupCandidate := err == nil && doc != nil && infra.GetStringField(doc.Data(), "node_type") != "log"
+	if isDupCandidate {
 		existingContent := infra.GetStringField(doc.Data(), "content")
 		action, collErr := infra.EvaluateFactCollision(ctx, env, env.Config(), content, existingContent)
 		if collErr != nil {
@@ -213,7 +217,9 @@ func UpsertSemanticMemory(ctx context.Context, env infra.ToolEnv, content, nodeT
 	}
 
 	var nodeUUID string
-	if err == nil && doc != nil {
+	// Skip dedup if the nearest doc is a log entry (not a knowledge node).
+	isDupCandidate := err == nil && doc != nil && infra.GetStringField(doc.Data(), "node_type") != "log"
+	if isDupCandidate {
 		existingContent := infra.GetStringField(doc.Data(), "content")
 		action, collErr := infra.EvaluateFactCollision(ctx, env, env.Config(), content, existingContent)
 		if collErr != nil {
@@ -372,6 +378,10 @@ func QuerySimilarNodes(ctx context.Context, env infra.ToolEnv, queryVector []flo
 			return nil, err
 		}
 		data := doc.Data()
+		// Exclude log entries — this collection now holds both logs and knowledge nodes.
+		if infra.GetStringField(data, "node_type") == "log" {
+			continue
+		}
 		n := KnowledgeNode{
 			UUID:            doc.Ref.ID,
 			Content:         infra.GetStringField(data, "content"),
@@ -382,6 +392,83 @@ func QuerySimilarNodes(ctx context.Context, env infra.ToolEnv, queryVector []flo
 		}
 		nodes = append(nodes, n)
 		// Cosine distance: 0 = identical, 2 = opposite. Score = 1 - distance, capped to [0, 1].
+		score := 0.0
+		if v, ok := data[distanceResultField]; ok {
+			var d float64
+			switch x := v.(type) {
+			case float64:
+				d = x
+			case float32:
+				d = float64(x)
+			default:
+				d = 0
+			}
+			score = 1 - d
+			if score < 0 {
+				score = 0
+			}
+			if score > 1 {
+				score = 1
+			}
+		}
+		scores = append(scores, score)
+		infra.LogFoundNode(ctx, n.UUID, score, n.Content)
+	}
+
+	infra.LogRAGQuality(ctx, limit, scores)
+	span.SetAttributes(map[string]string{"results_count": fmt.Sprintf("%d", len(nodes))})
+	return nodes, nil
+}
+
+// QuerySimilarSemanticNodes performs a KNN vector search filtered to significance_weight >= minSignificance.
+// Requires a composite index: significance_weight ASC + embedding VECTOR on the journal collection.
+func QuerySimilarSemanticNodes(ctx context.Context, env infra.ToolEnv, queryVector []float32, limit int, minSignificance float64) ([]KnowledgeNode, error) {
+	ctx, span := infra.StartSpan(ctx, "knowledge.query_similar_semantic")
+	defer span.End()
+
+	if env == nil {
+		return nil, fmt.Errorf("env required")
+	}
+	client, err := env.Firestore(ctx)
+	if err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+
+	const distanceResultField = "_vector_distance"
+	opts := &firestore.FindNearestOptions{DistanceResultField: distanceResultField}
+	vectorQuery := client.Collection(KnowledgeCollection).
+		Where("significance_weight", ">=", minSignificance).
+		FindNearest("embedding", firestore.Vector32(queryVector), limit, firestore.DistanceMeasureCosine, opts)
+	iter := vectorQuery.Documents(ctx)
+	defer iter.Stop()
+
+	var nodes []KnowledgeNode
+	var scores []float64
+	for {
+		doc, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			infra.LogVectorSearchFailed(ctx, KnowledgeCollection, err, 0)
+			span.RecordError(err)
+			return nil, err
+		}
+		data := doc.Data()
+		// Exclude log entries even if they somehow pass the significance filter.
+		if infra.GetStringField(data, "node_type") == "log" {
+			continue
+		}
+		n := KnowledgeNode{
+			UUID:            doc.Ref.ID,
+			Content:         infra.GetStringField(data, "content"),
+			NodeType:        infra.GetStringField(data, "node_type"),
+			Metadata:        infra.GetStringField(data, "metadata"),
+			Timestamp:       infra.GetStringField(data, "timestamp"),
+			JournalEntryIDs: infra.GetStringSliceField(data, "journal_entry_ids"),
+		}
+		nodes = append(nodes, n)
 		score := 0.0
 		if v, ok := data[distanceResultField]; ok {
 			var d float64
@@ -428,6 +515,10 @@ func SearchKnowledgeNodes(ctx context.Context, env infra.ToolEnv, keywords strin
 		Limit(500)
 	nodes, err := infra.QueryDocuments(ctx, query, func(doc *firestore.DocumentSnapshot) (KnowledgeNode, error) {
 		data := doc.Data()
+		// Exclude log entries — this collection now holds both logs and knowledge nodes.
+		if infra.GetStringField(data, "node_type") == "log" {
+			return KnowledgeNode{}, fmt.Errorf("skip")
+		}
 		content := infra.GetStringField(data, "content")
 		metadata := infra.GetStringField(data, "metadata")
 		contentLower := strings.ToLower(content)
@@ -847,6 +938,10 @@ func ListKnowledgeNodes(ctx context.Context, env infra.ToolEnv, limit int) ([]Kn
 			return nil, err
 		}
 		data := doc.Data()
+		// Exclude log entries from knowledge node listings.
+		if infra.GetStringField(data, "node_type") == "log" {
+			continue
+		}
 		var n KnowledgeNode
 		if err := doc.DataTo(&n); err != nil {
 			if content, ok := data["content"].(string); ok {

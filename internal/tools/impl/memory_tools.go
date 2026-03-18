@@ -82,7 +82,7 @@ func registerKnowledgeTools() {
 
 	tools.Register(&tools.Tool{
 		Name:        "semantic_search",
-		Description: "Search the knowledge graph and journal entries using semantic similarity. Use this FIRST for questions about people, facts, preferences, or past journal content (who is X, where is X, what did I write about Y). When answering, include the source date when results show one (e.g. 'Buy ice [Source: 2026-02-15]').",
+		Description: "Search semantic memory (high-significance facts) using vector similarity. Routes to knowledge nodes with significance_weight >= 0.7 — people, facts, preferences, projects, goals. Use this FIRST for factual questions (who is X, what do I prefer, what's the status of Y). For searching past events or log entries use search_entries instead. When answering, include the source date when results show one (e.g. 'Buy ice [Source: 2026-02-15]').",
 		Category:    "knowledge",
 		Args:        &semanticSearchArgs{},
 		Execute: func(ctx context.Context, env infra.ToolEnv, args any) tools.Result {
@@ -91,7 +91,7 @@ func registerKnowledgeTools() {
 				return tools.MissingParam("query")
 			}
 			limit := clampInt(a.Limit, 10, 1, 20)
-			logArgs := []interface{}{"query_preview", a.Query, "limit", limit, "reason", "vector+keyword search over knowledge and entries"}
+			logArgs := []interface{}{"query", a.Query, "limit", limit, "reason", "semantic search over unified journal (significance>=0.7)"}
 			if a.SourceText != "" {
 				logArgs = append(logArgs, "source_text", a.SourceText)
 			}
@@ -102,83 +102,37 @@ func registerKnowledgeTools() {
 			if env == nil || env.Config() == nil {
 				return tools.Fail("Error: no app in context")
 			}
-			client, err := env.Firestore(ctx)
-			if err != nil {
-				return tools.Fail("Error: %v", err)
-			}
 			queryVec, err := infra.GenerateEmbedding(ctx, env.Config().GoogleCloudProject, a.Query)
 			if err != nil {
 				return tools.Fail("Error generating embedding: %v", err)
 			}
-			nodeLimit := (limit + 1) / 2
-			entryLimit := limit / 2
-			if entryLimit < 1 {
-				entryLimit = 1
-			}
-			nodeCandidateLimit := nodeLimit * 3
-			entryCandidateLimit := entryLimit * 3
-			fusedNodeTopN := nodeLimit * 2
 
-			var vectorNodes, keywordNodes []memory.KnowledgeNode
-			var vectorEntries, keywordEntries []journal.Entry
-			var nodeVecErr, nodeKwErr, entryVecErr, entryKwErr error
-			var wg sync.WaitGroup
-			wg.Add(4)
-			go func() {
-				defer wg.Done()
-				vectorNodes, nodeVecErr = memory.QuerySimilarNodes(ctx, env, queryVec, nodeCandidateLimit)
-			}()
-			go func() {
-				defer wg.Done()
-				keywordNodes, nodeKwErr = memory.SearchKnowledgeNodes(ctx, env, a.Query, nodeCandidateLimit)
-			}()
-			go func() {
-				defer wg.Done()
-				vectorEntries, entryVecErr = journal.QuerySimilarEntries(ctx, client, queryVec, entryCandidateLimit)
-			}()
-			go func() {
-				defer wg.Done()
-				keywordEntries, entryKwErr = journal.SearchEntries(ctx, client, a.Query, entryCandidateLimit)
-			}()
-			wg.Wait()
-
-			if nodeVecErr != nil {
-				infra.LogVectorSearchFailed(ctx, "knowledge_nodes", nodeVecErr, 0)
+			candidateLimit := limit * 3
+			// Single-pass vector search: significance_weight >= 0.7 pre-filter routes directly to
+			// semantic knowledge (Gold), excluding low-value gravel and raw log entries.
+			const semanticMinSignificance = 0.7
+			vectorNodes, vecErr := memory.QuerySimilarSemanticNodes(ctx, env, queryVec, candidateLimit, semanticMinSignificance)
+			if vecErr != nil {
+				infra.LogVectorSearchFailed(ctx, "journal(semantic)", vecErr, 0)
 				vectorNodes = nil
 			}
-			if nodeKwErr != nil {
-				keywordNodes = nil
-			}
-			if nodeVecErr != nil && nodeKwErr != nil {
-				return tools.Fail("Error: knowledge search failed (vector: %v; keyword: %v)", nodeVecErr, nodeKwErr)
-			}
-			if entryVecErr != nil {
-				infra.LogVectorSearchFailed(ctx, "entries", entryVecErr, 0)
-				vectorEntries = nil
-			}
-			if entryKwErr != nil {
-				keywordEntries = nil
-			}
-			if entryVecErr != nil && entryKwErr != nil {
-				return tools.Fail("Error: entries search failed (vector: %v; keyword: %v)", entryVecErr, entryKwErr)
-			}
+			// Keyword fallback on the same unified collection for exact-match safety.
+			keywordNodes, _ := memory.SearchKnowledgeNodes(ctx, env, a.Query, candidateLimit)
 
-			fusedNodes := memory.FuseKnowledgeNodes(vectorNodes, keywordNodes, fusedNodeTopN)
-			nodes, _ := memory.RerankNodes(ctx, env, a.Query, fusedNodes, nodeLimit)
-			entries := memory.FuseEntries(vectorEntries, keywordEntries, entryLimit)
+			fusedNodes := memory.FuseKnowledgeNodes(vectorNodes, keywordNodes, limit*2)
+			nodes, _ := memory.RerankNodes(ctx, env, a.Query, fusedNodes, limit)
 
-			if len(nodes) == 0 && len(entries) == 0 {
+			if vecErr != nil && len(nodes) == 0 {
+				return tools.Fail("Error: semantic search failed (vector: %v)", vecErr)
+			}
+			if len(nodes) == 0 {
 				return tools.OK("No semantic matches found for '%s'.", a.Query)
 			}
-			var parts []string
-			if len(nodes) > 0 {
-				parts = append(parts, "Knowledge:\n"+formatKnowledgeNodes(ctx, client, nodes))
+			client, err := env.Firestore(ctx)
+			if err != nil {
+				return tools.Fail("Error: %v", err)
 			}
-			if len(entries) > 0 {
-				parts = append(parts, "Journal entries:\n"+formatEntries(entries))
-			}
-			total := len(nodes) + len(entries)
-			return tools.OK("Found %d semantic matches for '%s':\n%s", total, a.Query, strings.Join(parts, "\n\n"))
+			return tools.OK("Found %d semantic matches for '%s':\n%s", len(nodes), a.Query, formatKnowledgeNodes(ctx, client, nodes))
 		},
 	})
 

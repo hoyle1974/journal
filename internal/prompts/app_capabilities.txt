@@ -22,13 +22,17 @@ Jot is a personal journaling and memory system. It ingests journal entries, extr
 - **Specialists**: Domain extractors (relationship, work, task, thought, selfmodel) plus evolution (Cognitive Engineer). Consultable via tools (consult_anthropologist, consult_architect, etc.).
 - **Planner**: Generates step-by-step plans from a goal; stores phases in knowledge graph.
 
-## Memory
-- **Semantic memory**: Knowledge nodes (Firestore). Types: person, project, goal, preference, event, milestone, place, asset, tool, generic, weekly_summary, monthly_summary, identity_anchor, user_identity. For project/goal nodes, status must be one of: active, archived, blocked, done, planning, pending, completed. Recalled by embedding similarity; janitor evicts by last_recalled_at and significance_weight.
-- **Context nodes**: Named, typed (permanent/auto). Used for active projects, plans, living context. Touch updates relevance; some created by Dreamer context extractor.
-- **Reserved names**: user_profile (identity), system_evolution (audit/friction), latest_dream (narrative). Janitor must not delete identity_anchor / user_identity.
+## Storage Architecture
+- **Unified collection**: All documents (both episodic log entries and semantic knowledge nodes) live in the `journal` Firestore collection, distinguished by `node_type`.
+- **Episodic logs** (`node_type: "log"`): Raw journal entries. significance_weight=0.3; never deleted by janitor; queried by journal tools with `node_type == "log"` filter.
+- **Semantic memory** (`node_type: person|project|goal|preference|...`): Extracted knowledge facts. significance_weight ranges 0.5–0.95. Types: person, project, goal, preference, event, milestone, place, asset, tool, generic, weekly_summary, monthly_summary, identity_anchor, user_identity. For project/goal nodes, status must be one of: active, archived, blocked, done, planning, pending, completed. Recalled by semantic_search via significance_weight >= 0.7 pre-filter + vector similarity.
+- **Gold vs. Gravel routing**: Enforced at query level. semantic_search targets significance_weight >= 0.7 (Gold facts); journal tools target node_type == "log" (Gravel events).
+- **Janitor**: Evicts low-significance, rarely recalled knowledge nodes. Never deletes node_type: log, identity_anchor, or user_identity.
+- **Context nodes**: Named, typed (permanent/auto). Separate `contexts` collection. Used for active projects, plans, living context.
+- **Reserved names**: user_profile (identity), system_evolution (audit/friction), latest_dream (narrative).
 
 ## Journal
-- **Entries**: Timestamped, optional source (cli, sms, telegram, web, etc.). Optional image attachment: CLI `--attach <path>`, API multipart/form-data on POST /log (field `image`), Telegram photo messages; images stored in GCS, entry stores `image_url` (requires JOT_IMAGES_BUCKET). Stored in Firestore; can be analyzed (categories, entities). When processed, entries that mention person entities are linked to those person nodes (journal_entry_ids) so get_entity_network can surface them. Google Doc sync processes new entries and in-doc questions.
+- **Entries** (node_type: log in `journal` collection): Timestamped, optional source (cli, sms, telegram, web, etc.). Optional image attachment: CLI `--attach <path>`, API multipart/form-data on POST /log (field `image`), Telegram photo messages; images stored in GCS, entry stores `image_url` (requires JOT_IMAGES_BUCKET). Can be analyzed (categories, entities). When processed, entries that mention person entities are linked to those person nodes (journal_entry_ids) so get_entity_network can surface them. Google Doc sync processes new entries and in-doc questions.
 - **Queries**: Saved with question, answer, source, is_gap. Gap queries surface in knowledge-gap block for FOH.
 - **Pending questions**: Gaps/contradictions from Dreamer gap detection; user can clarify later.
 

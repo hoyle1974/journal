@@ -112,7 +112,11 @@ func ProcessEntry(ctx context.Context, app *infra.App, entryUUID, content, times
 		breakdown := buildBreakdown(start, llm, embeddingDur, firestoreWrite)
 		return breakdown, err
 	}
-	updates := []firestore.Update{{Path: "embedding", Value: firestore.Vector32(vector)}}
+	updates := []firestore.Update{
+		{Path: "embedding", Value: firestore.Vector32(vector)},
+		{Path: "node_type", Value: "log"},
+		{Path: "significance_weight", Value: 0.3},
+	}
 	if analysisJSON != "" {
 		updates = append(updates, firestore.Update{Path: "journal_analysis", Value: analysisJSON})
 	}
@@ -181,9 +185,11 @@ func updateEntryWithRetry(ctx context.Context, client *firestore.Client, entryUU
 	if status.Code(lastErr) == codes.NotFound {
 		infra.LoggerFrom(ctx).Warn("process-entry: entry doc missing after retries, creating from payload", "entry_uuid", entryUUID, "reason", "entry may not have been written before task ran")
 		merge := map[string]interface{}{
-			"content":   content,
-			"source":    source,
-			"timestamp": timestamp,
+			"content":             content,
+			"source":              source,
+			"timestamp":           timestamp,
+			"node_type":           "log",
+			"significance_weight": 0.3,
 		}
 		for _, u := range updates {
 			merge[u.Path] = u.Value

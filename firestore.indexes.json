@@ -92,6 +92,106 @@
       ]
     },
     {
+      "collectionGroup": "journal",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "embedding",
+          "vectorConfig": {
+            "dimension": 768,
+            "flat": {}
+          }
+        }
+      ]
+    },
+    {
+      "collectionGroup": "journal",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "node_type", "order": "ASCENDING" },
+        {
+          "fieldPath": "embedding",
+          "vectorConfig": {
+            "dimension": 768,
+            "flat": {}
+          }
+        }
+      ]
+    },
+    {
+      "collectionGroup": "journal",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "significance_weight", "order": "ASCENDING" },
+        {
+          "fieldPath": "embedding",
+          "vectorConfig": {
+            "dimension": 768,
+            "flat": {}
+          }
+        }
+      ]
+    },
+    {
+      "collectionGroup": "journal",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "node_type", "order": "ASCENDING" },
+        { "fieldPath": "timestamp", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "journal",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "node_type", "order": "ASCENDING" },
+        { "fieldPath": "timestamp", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "journal",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "significance_weight", "order": "ASCENDING" },
+        { "fieldPath": "last_recalled_at", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "journal",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "last_recalled_at", "order": "ASCENDING" },
+        { "fieldPath": "significance_weight", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "journal",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "domain", "order": "ASCENDING" },
+        { "fieldPath": "node_type", "order": "ASCENDING" },
+        { "fieldPath": "timestamp", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "journal",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "node_type", "order": "ASCENDING" },
+        { "fieldPath": "last_recalled_at", "order": "ASCENDING" },
+        { "fieldPath": "significance_weight", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "journal",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "node_type", "order": "ASCENDING" },
+        { "fieldPath": "significance_weight", "order": "ASCENDING" },
+        { "fieldPath": "last_recalled_at", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "queries",
       "queryScope": "COLLECTION",
       "fields": [

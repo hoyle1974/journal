@@ -12,8 +12,12 @@ import (
 	"google.golang.org/api/iterator"
 )
 
-// Collection name for Firestore.
-const EntriesCollection = "entries"
+// JournalCollection is the unified Firestore collection for all journal documents
+// (episodic log entries with node_type "log" and semantic knowledge nodes).
+const JournalCollection = "journal"
+
+// EntriesCollection is an alias for JournalCollection kept for call-site compatibility.
+const EntriesCollection = JournalCollection
 
 // Entry represents a journal entry.
 type Entry struct {
@@ -46,9 +50,11 @@ func AddEntry(ctx context.Context, client *firestore.Client, content, source str
 	}
 
 	doc := map[string]interface{}{
-		"content":   content,
-		"source":   source,
-		"timestamp": ts,
+		"content":             content,
+		"source":              source,
+		"timestamp":           ts,
+		"node_type":           "log",
+		"significance_weight": 0.3,
 	}
 	if imageURL != "" {
 		doc["image_url"] = imageURL
@@ -69,6 +75,7 @@ func GetEntries(ctx context.Context, client *firestore.Client, limit int) ([]Ent
 		return nil, fmt.Errorf("firestore client is required")
 	}
 	query := client.Collection(EntriesCollection).
+		Where("node_type", "==", "log").
 		OrderBy("timestamp", firestore.Desc).
 		Limit(limit)
 	return infra.QueryDocuments(ctx, query, func(doc *firestore.DocumentSnapshot) (Entry, error) {
@@ -87,6 +94,7 @@ func GetEntriesAsc(ctx context.Context, client *firestore.Client, limit int) ([]
 		return nil, fmt.Errorf("firestore client is required")
 	}
 	query := client.Collection(EntriesCollection).
+		Where("node_type", "==", "log").
 		OrderBy("timestamp", firestore.Asc).
 		Limit(limit)
 	return infra.QueryDocuments(ctx, query, func(doc *firestore.DocumentSnapshot) (Entry, error) {
@@ -111,6 +119,7 @@ func GetEntriesByDateRange(ctx context.Context, client *firestore.Client, startD
 		endDate = endDate + "T23:59:59"
 	}
 	query := client.Collection(EntriesCollection).
+		Where("node_type", "==", "log").
 		Where("timestamp", ">=", startDate).
 		Where("timestamp", "<=", endDate).
 		OrderBy("timestamp", firestore.Desc).
@@ -136,6 +145,7 @@ func SearchEntries(ctx context.Context, client *firestore.Client, keywords strin
 	}
 	keywordsLower := strings.Fields(strings.ToLower(keywords))
 	query := client.Collection(EntriesCollection).
+		Where("node_type", "==", "log").
 		OrderBy("timestamp", firestore.Desc).
 		Limit(500)
 	entries, err := infra.QueryDocuments(ctx, query, func(doc *firestore.DocumentSnapshot) (Entry, error) {
@@ -177,10 +187,12 @@ func CountEntries(ctx context.Context, client *firestore.Client, startDate, endD
 			end = end + "T23:59:59"
 		}
 		query = client.Collection(EntriesCollection).
+			Where("node_type", "==", "log").
 			Where("timestamp", ">=", start).
 			Where("timestamp", "<=", end)
 	} else {
-		query = client.Collection(EntriesCollection).Query
+		query = client.Collection(EntriesCollection).
+			Where("node_type", "==", "log")
 	}
 	iter := query.Documents(ctx)
 	defer iter.Stop()
@@ -203,7 +215,7 @@ func GetUniqueSources(ctx context.Context, client *firestore.Client) ([]string, 
 	if client == nil {
 		return nil, fmt.Errorf("firestore client is required")
 	}
-	iter := client.Collection(EntriesCollection).Limit(1000).Documents(ctx)
+	iter := client.Collection(EntriesCollection).Where("node_type", "==", "log").Limit(1000).Documents(ctx)
 	defer iter.Stop()
 	sources := make(map[string]bool)
 	for {
@@ -234,6 +246,7 @@ func GetEntriesBySource(ctx context.Context, client *firestore.Client, sourceFil
 	}
 	sourceFilterLower := strings.ToLower(sourceFilter)
 	query := client.Collection(EntriesCollection).
+		Where("node_type", "==", "log").
 		OrderBy("timestamp", firestore.Desc).
 		Limit(500)
 	entries, err := infra.QueryDocuments(ctx, query, func(doc *firestore.DocumentSnapshot) (Entry, error) {
@@ -346,6 +359,7 @@ func GetDatesWithEntries(ctx context.Context, client *firestore.Client) ([]strin
 		return nil, fmt.Errorf("firestore client is required")
 	}
 	iter := client.Collection(EntriesCollection).
+		Where("node_type", "==", "log").
 		OrderBy("timestamp", firestore.Asc).
 		Documents(ctx)
 	defer iter.Stop()
