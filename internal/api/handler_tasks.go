@@ -59,8 +59,7 @@ func handleProcessEntry(s *Server, w http.ResponseWriter, r *http.Request) (any,
 	}
 	app, hasApp := s.App.(*infra.App)
 	if s.Config != nil && s.Config.DebugReportEnabled && hasApp && entryReport != nil {
-		reportCtx := infra.WithSuppressGDocLog(ctx)
-		asyncCtx := context.WithoutCancel(reportCtx)
+		asyncCtx := context.WithoutCancel(ctx)
 		cfg := s.Config
 		report := entryReport
 		app.SubmitAsync(func() {

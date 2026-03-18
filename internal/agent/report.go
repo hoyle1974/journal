@@ -93,7 +93,7 @@ func GenerateProcessEntryReport(ctx context.Context, app infra.ToolEnv, r *Proce
 		return ""
 	}
 	prompt, err := prompts.BuildProcessEntryReport(prompts.ProcessEntryReportData{
-		Content:        utils.WrapAsUserData(r.Content),
+		Content:        r.Content,
 		Source:         r.Source,
 		Significance:   r.Significance,
 		Domain:         r.Domain,
@@ -110,7 +110,7 @@ func GenerateProcessEntryReport(ctx context.Context, app infra.ToolEnv, r *Proce
 	}
 
 	resp, err := app.Dispatch(ctx, &infra.LLMRequest{
-		Parts:     []*genai.Part{{Text: prompt}},
+		Parts:     []*genai.Part{{Text: utils.WrapAsUserData(prompt)}},
 		GenConfig: &infra.GenConfig{MaxOutputTokens: 400},
 	})
 	if err != nil {
