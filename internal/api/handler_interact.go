@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/jackstrohm/jot/internal/agent"
+	"github.com/jackstrohm/jot/internal/gdoc"
 	"github.com/jackstrohm/jot/internal/infra"
 	"github.com/jackstrohm/jot/internal/persona"
 	"github.com/jackstrohm/jot/pkg/utils"
@@ -85,15 +87,28 @@ func handleQuery(s *Server, w http.ResponseWriter, r *http.Request) (any, error)
 	}
 	LogHandlerRequest(ctx, r.Method, path, "question_preview", utils.TruncateString(question, 80), "source", source)
 	result := s.Agent.RunQuery(ctx, question, source)
-	if result.Answer != "" && !result.Error {
-		if app, ok := s.App.(*infra.App); ok {
-			result.Answer = persona.Apply(ctx, app, result.Answer, question)
-		}
+	app, hasApp := s.App.(*infra.App)
+	if result.Answer != "" && !result.Error && hasApp {
+		result.Answer = persona.Apply(ctx, app, result.Answer, question)
 	}
-	infra.LoggerFrom(ctx).Info("query completed",
-		"error", result.Error, "iterations", result.Iterations,
-		"tool_call_count", len(result.ToolCalls),
-		"answer_preview", utils.TruncateString(result.Answer, 120))
+
+	if s.Config != nil && s.Config.DebugReportEnabled && hasApp && !result.Error {
+		// Suppress normal gdoc log forwarding; the debug report replaces the normal entry.
+		reportCtx := infra.WithSuppressGDocLog(ctx)
+		infra.LoggerFrom(reportCtx).Info("query completed",
+			"error", result.Error, "iterations", result.Iterations,
+			"tool_call_count", len(result.ToolCalls),
+			"answer_preview", utils.TruncateString(result.Answer, 120))
+		narrative := agent.GenerateDebugReport(reportCtx, app, question, result.ToolCalls, result.DebugLogs, result.Answer)
+		if narrative != "" {
+			gdoc.WriteReport(reportCtx, s.Config, narrative)
+		}
+	} else {
+		infra.LoggerFrom(ctx).Info("query completed",
+			"error", result.Error, "iterations", result.Iterations,
+			"tool_call_count", len(result.ToolCalls),
+			"answer_preview", utils.TruncateString(result.Answer, 120))
+	}
 	return result, nil
 }
 

@@ -47,6 +47,10 @@ type Config struct {
 
 	// UseCompactTools when true uses an MCP-style tool protocol: only a short tool directory is sent in the prompt (no full parameter schemas). The model outputs structured tool calls (JSON); we parse, validate, and execute server-side. Reduces tool context from ~7k tokens to a few hundred. Default true; set JOT_USE_COMPACT_TOOLS=false to disable.
 	UseCompactTools bool
+
+	// DebugReportEnabled controls whether a first-person narrative debug report is generated after each query and
+	// written (bold) to the Google Doc in place of the normal log entry. Default true; set JOT_DEBUG_REPORT_DISABLED=true to disable.
+	DebugReportEnabled bool
 }
 
 // Load reads environment and Secret Manager into a Config. Call once at startup.
@@ -96,6 +100,14 @@ func Load() (*Config, error) {
 		cfg.UseCompactTools = false
 	default:
 		cfg.UseCompactTools = true
+	}
+
+	// Debug report: default ON; set JOT_DEBUG_REPORT_DISABLED=true or 1 to disable.
+	switch v := strings.ToLower(strings.TrimSpace(os.Getenv("JOT_DEBUG_REPORT_DISABLED"))); v {
+	case "true", "1":
+		cfg.DebugReportEnabled = false
+	default:
+		cfg.DebugReportEnabled = true
 	}
 
 	return cfg, nil

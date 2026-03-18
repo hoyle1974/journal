@@ -55,6 +55,22 @@ func isSyncInProgress(ctx context.Context) bool {
 	return ctx.Value(syncInProgressKey) != nil
 }
 
+// suppressGDocLogKey marks context so the gdoc forwarding handler skips writing this request's logs to the doc.
+// Used when the debug report will write its own entry, replacing the normal log entry.
+type suppressGDocLogKeyType struct{}
+
+var suppressGDocLogKey = &suppressGDocLogKeyType{}
+
+// WithSuppressGDocLog returns a context that prevents the gdoc forwarding handler from forwarding logs to the Google Doc.
+func WithSuppressGDocLog(ctx context.Context) context.Context {
+	return context.WithValue(ctx, suppressGDocLogKey, true)
+}
+
+// IsGDocLogSuppressed reports whether gdoc log forwarding is suppressed in ctx.
+func IsGDocLogSuppressed(ctx context.Context) bool {
+	return ctx.Value(suppressGDocLogKey) != nil
+}
+
 // Logger is the global structured logger (set by InitObservability).
 var Logger *slog.Logger
 
@@ -234,7 +250,7 @@ func (h *gdocForwardingHandler) Handle(ctx context.Context, r slog.Record) error
 	if err := h.inner.Handle(ctx, r); err != nil {
 		return err
 	}
-	if r.Level < slog.LevelInfo || isGDocLogging(ctx) || isSyncInProgress(ctx) {
+	if r.Level < slog.LevelInfo || isGDocLogging(ctx) || isSyncInProgress(ctx) || IsGDocLogSuppressed(ctx) {
 		return nil
 	}
 	if r.Message == "request completed" {

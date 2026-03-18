@@ -74,6 +74,9 @@ var dreamStoryTxt string
 //go:embed app_capabilities.txt
 var appCapabilitiesTxt string
 
+//go:embed debug_report_prompt.txt
+var debugReportPromptTxt string
+
 var (
 	systemPromptTmpl    = template.Must(template.New("system").Parse(systemPromptTxt))
 	contextAnalyzeTmpl  = template.Must(template.New("context").Parse(contextAnalyzeTxt))
@@ -82,6 +85,7 @@ var (
 	gapDetectorTmpl     = template.Must(template.New("gapDetector").Parse(gapDetectorTxt))
 	rollUpTmpl          = template.Must(template.New("rollUp").Parse(rollUpTxt))
 	activityHistoryTmpl = template.Must(template.New("activityHistory").Parse(activityHistoryTxt))
+	debugReportTmpl     = template.Must(template.New("debugReport").Parse(debugReportPromptTxt))
 )
 
 var (
@@ -253,4 +257,21 @@ func DreamStoryTemplate() string { return dreamStoryTxt }
 // Injected into gap-detection during dreaming so the model understands current capabilities. Keep app_capabilities.txt up to date when the codebase changes.
 func AppCapabilities() string {
 	return appCapabilitiesTxt
+}
+
+// DebugReportData holds all inputs for the first-person debug report narrative prompt.
+type DebugReportData struct {
+	Question         string
+	ToolCallsSummary string
+	FilteredLogs     string
+	Answer           string
+}
+
+// BuildDebugReport executes the debug-report prompt template with the given data.
+func BuildDebugReport(data DebugReportData) (string, error) {
+	var buf bytes.Buffer
+	if err := debugReportTmpl.Execute(&buf, data); err != nil {
+		return "", fmt.Errorf("execute debug report: %w", err)
+	}
+	return buf.String(), nil
 }
