@@ -579,9 +579,10 @@ func RunDreamer(ctx context.Context, app *infra.App, opts *RunDreamerOpts) (*Dre
 	const maxRoomPasses = 10 // up to 10 passes; specialists may reply DONE early
 
 	for pass := 1; pass <= maxRoomPasses; pass++ {
-		infra.LoggerFrom(ctx).Info("dreamer colloquium pass starting", "dreamer_run_id", dreamerRunID, "phase", "colloquium", "pass", pass)
+		infra.LoggerFrom(ctx).Info("dreamer colloquium pass starting", "dreamer_run_id", dreamerRunID, "phase", "colloquium", "pass", pass, "total_agents", len(domains))
 		var newMessages []string
 		allDone := true
+		waitingCount := 0
 
 		for _, domain := range domains {
 			msg, isDone, err := RunSpecialistDiscussion(ctx, app, domain, journalContext, roomTranscript, dreamerModel)
@@ -591,11 +592,14 @@ func RunDreamer(ctx context.Context, app *infra.App, opts *RunDreamerOpts) (*Dre
 			}
 			if !isDone {
 				allDone = false
+				waitingCount++
 				newMessages = append(newMessages, fmt.Sprintf("[%s]: %s", domain, msg))
 			} else {
 				infra.LoggerFrom(ctx).Debug("specialist is done", "domain", domain)
 			}
 		}
+
+		infra.LoggerFrom(ctx).Info("dreamer colloquium pass complete", "dreamer_run_id", dreamerRunID, "phase", "colloquium", "pass", pass, "waiting_agents", waitingCount, "total_agents", len(domains))
 
 		if len(newMessages) > 0 {
 			roomTranscript += fmt.Sprintf("\n--- Pass %d ---\n%s\n", pass, strings.Join(newMessages, "\n"))
