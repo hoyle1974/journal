@@ -75,7 +75,7 @@ func (a *AgentService) RunQuery(ctx context.Context, question, source string) *a
 }
 
 // ProcessEntry processes a single entry (embedding, analysis, etc.).
-func (a *AgentService) ProcessEntry(ctx context.Context, entryUUID, content, timestamp, source string) (*infra.LatencyBreakdown, error) {
+func (a *AgentService) ProcessEntry(ctx context.Context, entryUUID, content, timestamp, source string) (*infra.LatencyBreakdown, *agent.ProcessEntryReport, error) {
 	attrs := []any{"fn", "ProcessEntry", "uuid", entryUUID, "source", source, "content_length", len(content)}
 	if corr := infra.CorrelationFromContext(ctx); corr != nil {
 		if corr.TaskID != "" {
@@ -86,13 +86,13 @@ func (a *AgentService) ProcessEntry(ctx context.Context, entryUUID, content, tim
 		}
 	}
 	infra.LoggerFrom(ctx).Info("function call", attrs...)
-	breakdown, err := agent.ProcessEntry(ctx, a.app, entryUUID, content, timestamp, source)
+	breakdown, report, err := agent.ProcessEntry(ctx, a.app, entryUUID, content, timestamp, source)
 	if err != nil {
 		infra.LoggerFrom(ctx).Error("function result", "fn", "ProcessEntry", "uuid", entryUUID, "error", err.Error())
-		return breakdown, err
+		return breakdown, nil, err
 	}
 	infra.LoggerFrom(ctx).Info("function result", "fn", "ProcessEntry", "uuid", entryUUID)
-	return breakdown, nil
+	return breakdown, report, nil
 }
 
 // RunDreamer runs the dreamer pipeline.

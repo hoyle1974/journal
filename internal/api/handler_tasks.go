@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jackstrohm/jot/internal/agent"
+	"github.com/jackstrohm/jot/internal/gdoc"
 	"github.com/jackstrohm/jot/internal/infra"
 	"github.com/jackstrohm/jot/pkg/journal"
 	"github.com/jackstrohm/jot/pkg/sms"
@@ -49,12 +50,24 @@ func handleProcessEntry(s *Server, w http.ResponseWriter, r *http.Request) (any,
 	LogHandlerRequest(ctx, r.Method, path, "uuid", data.UUID, "source", data.Source, "content_length", len(data.Content), "task_id", data.TaskID, "parent_trace_id", data.ParentTraceID)
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
-	breakdown, err := s.Agent.ProcessEntry(ctx, data.UUID, data.Content, data.Timestamp, data.Source)
+	breakdown, entryReport, err := s.Agent.ProcessEntry(ctx, data.UUID, data.Content, data.Timestamp, data.Source)
 	if setter, ok := w.(interface{ SetLatencyBreakdown(*infra.LatencyBreakdown) }); ok && breakdown != nil {
 		setter.SetLatencyBreakdown(breakdown)
 	}
 	if err != nil {
 		return nil, err
+	}
+	app, hasApp := s.App.(*infra.App)
+	if s.Config != nil && s.Config.DebugReportEnabled && hasApp && entryReport != nil {
+		asyncCtx := context.WithoutCancel(ctx)
+		cfg := s.Config
+		r := entryReport
+		app.SubmitAsync(func() {
+			narrative := agent.GenerateProcessEntryReport(asyncCtx, app, r)
+			if narrative != "" {
+				gdoc.WriteReport(asyncCtx, cfg, narrative)
+			}
+		})
 	}
 	return map[string]string{"status": "ok"}, nil
 }

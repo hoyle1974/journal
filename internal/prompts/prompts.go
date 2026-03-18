@@ -7,6 +7,7 @@ import (
 	_ "embed"
 	"bytes"
 	"fmt"
+	"strings"
 	"sync"
 	"text/template"
 )
@@ -77,6 +78,9 @@ var appCapabilitiesTxt string
 //go:embed debug_report_prompt.txt
 var debugReportPromptTxt string
 
+//go:embed process_entry_report_prompt.txt
+var processEntryReportPromptTxt string
+
 var (
 	systemPromptTmpl    = template.Must(template.New("system").Parse(systemPromptTxt))
 	contextAnalyzeTmpl  = template.Must(template.New("context").Parse(contextAnalyzeTxt))
@@ -86,6 +90,9 @@ var (
 	rollUpTmpl          = template.Must(template.New("rollUp").Parse(rollUpTxt))
 	activityHistoryTmpl = template.Must(template.New("activityHistory").Parse(activityHistoryTxt))
 	debugReportTmpl     = template.Must(template.New("debugReport").Parse(debugReportPromptTxt))
+	processEntryReportTmpl = template.Must(template.New("processEntryReport").Funcs(template.FuncMap{
+		"join": strings.Join,
+	}).Parse(processEntryReportPromptTxt))
 )
 
 var (
@@ -272,6 +279,29 @@ func BuildDebugReport(data DebugReportData) (string, error) {
 	var buf bytes.Buffer
 	if err := debugReportTmpl.Execute(&buf, data); err != nil {
 		return "", fmt.Errorf("execute debug report: %w", err)
+	}
+	return buf.String(), nil
+}
+
+// ProcessEntryReportData holds all inputs for the process-entry narrative prompt.
+type ProcessEntryReportData struct {
+	Content        string
+	Source         string
+	Significance   float64
+	Domain         string
+	FactStored     string
+	TaskCreated    string
+	ContextsLinked int
+	Mood           string
+	Tags           []string
+	EntityNames    []string
+}
+
+// BuildProcessEntryReport executes the process-entry report template with the given data.
+func BuildProcessEntryReport(data ProcessEntryReportData) (string, error) {
+	var buf bytes.Buffer
+	if err := processEntryReportTmpl.Execute(&buf, data); err != nil {
+		return "", fmt.Errorf("process entry report template: %w", err)
 	}
 	return buf.String(), nil
 }

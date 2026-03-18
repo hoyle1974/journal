@@ -12,19 +12,34 @@ import (
 	"github.com/jackstrohm/jot/pkg/journal"
 	"github.com/jackstrohm/jot/pkg/memory"
 	"github.com/jackstrohm/jot/pkg/task"
+	"github.com/jackstrohm/jot/pkg/utils"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
+// ProcessEntryReport holds structured results from a ProcessEntry run for debug reporting.
+type ProcessEntryReport struct {
+	Content        string
+	Source         string
+	Significance   float64
+	Domain         string
+	FactStored     string
+	TaskCreated    string // commitment intent if an agency task was auto-created; empty if none
+	ContextsLinked int
+	Mood           string
+	Tags           []string
+	EntityNames    []string
+}
+
 // ProcessEntry runs evaluator, context detection, journal analysis, and embedding for an entry.
 // Returns a latency breakdown so callers can log where time was spent (llm, embedding, firestore_write, overhead).
-func ProcessEntry(ctx context.Context, app *infra.App, entryUUID, content, timestamp, source string) (*infra.LatencyBreakdown, error) {
+func ProcessEntry(ctx context.Context, app *infra.App, entryUUID, content, timestamp, source string) (*infra.LatencyBreakdown, *ProcessEntryReport, error) {
 	start := time.Now()
 	var llm, embeddingDur, firestoreWrite time.Duration
 
 	if app == nil || app.Config() == nil {
 		breakdown := buildBreakdown(start, llm, embeddingDur, firestoreWrite)
-		return breakdown, fmt.Errorf("no app config for process entry")
+		return breakdown, nil, fmt.Errorf("no app config for process entry")
 	}
 
 	startAttrs := []any{"event", "process_entry_start", "entry_uuid", entryUUID, "content", content, "timestamp", timestamp, "source", source}
@@ -55,8 +70,9 @@ func ProcessEntry(ctx context.Context, app *infra.App, entryUUID, content, times
 		infra.LoggerFrom(ctx).Warn("process-entry: evaluator failed", "entry_uuid", entryUUID, "error", err)
 	}
 	// Agency threshold: auto-create a task when the entry expresses a high future commitment.
+	var taskContent string
 	if parsed != nil && parsed.FutureCommitment >= AgencyTaskCommitmentThreshold && len(strings.TrimSpace(parsed.CommitmentIntent)) >= MinCommitmentIntentLen {
-		taskContent := strings.TrimSpace(parsed.CommitmentIntent)
+		taskContent = strings.TrimSpace(parsed.CommitmentIntent)
 		t := &task.Task{
 			Content:          taskContent,
 			Status:           task.StatusPending,
@@ -102,7 +118,7 @@ func ProcessEntry(ctx context.Context, app *infra.App, entryUUID, content, times
 	if err != nil {
 		infra.LoggerFrom(ctx).Warn("failed to generate entry embedding", "entry_uuid", entryUUID, "error", err)
 		breakdown := buildBreakdown(start, llm, embeddingDur, firestoreWrite)
-		return breakdown, fmt.Errorf("embedding: %w", err)
+		return breakdown, nil, fmt.Errorf("embedding: %w", err)
 	}
 	infra.LoggerFrom(ctx).Debug("process-entry embedding generated", "entry_uuid", entryUUID, "dimensions", len(vector), "reason", "for semantic search")
 
@@ -110,7 +126,7 @@ func ProcessEntry(ctx context.Context, app *infra.App, entryUUID, content, times
 	if err != nil {
 		infra.LoggerFrom(ctx).Warn("failed to get firestore for entry embedding", "error", err)
 		breakdown := buildBreakdown(start, llm, embeddingDur, firestoreWrite)
-		return breakdown, err
+		return breakdown, nil, err
 	}
 	updates := []firestore.Update{
 		{Path: "embedding", Value: firestore.Vector32(vector)},
@@ -127,7 +143,7 @@ func ProcessEntry(ctx context.Context, app *infra.App, entryUUID, content, times
 	if err != nil {
 		infra.LoggerFrom(ctx).Warn("failed to store entry embedding", "entry_uuid", entryUUID, "error", err)
 		breakdown := buildBreakdown(start, llm, embeddingDur, firestoreWrite)
-		return breakdown, err
+		return breakdown, nil, err
 	}
 	total := time.Since(start)
 	breakdown := buildBreakdown(start, llm, embeddingDur, firestoreWrite)
@@ -143,7 +159,28 @@ func ProcessEntry(ctx context.Context, app *infra.App, entryUUID, content, times
 	}
 	infra.LoggerFrom(ctx).Info("process-entry done", doneAttrs...)
 	infra.LoggerFrom(ctx).Debug("process-entry: done", "entry_uuid", entryUUID, "reason", "evaluator, context links, analysis, and embedding all completed")
-	return breakdown, nil
+	report := &ProcessEntryReport{
+		Content: utils.TruncateString(content, 500),
+		Source:  source,
+	}
+	if parsed != nil {
+		report.Significance = parsed.Significance
+		report.Domain = parsed.Domain
+		report.FactStored = parsed.FactToStore
+	}
+	if taskContent != "" {
+		report.TaskCreated = taskContent
+	}
+	report.ContextsLinked = contextCount
+	if analysis != nil {
+		report.Mood = analysis.Mood
+		report.Tags = analysis.Tags
+		report.EntityNames = make([]string, 0, len(analysis.Entities))
+		for _, e := range analysis.Entities {
+			report.EntityNames = append(report.EntityNames, e.Name)
+		}
+	}
+	return breakdown, report, nil
 }
 
 // updateEntryWithRetry runs Update on the entry doc, retrying on NotFound with backoff. If the doc is still

@@ -113,7 +113,7 @@ type MemoryService interface {
 type AgentService interface {
 	AddEntry(ctx context.Context, content, source string, timestamp *string, imageBytes []byte) (string, error)
 	RunQuery(ctx context.Context, question, source string) *QueryResult
-	ProcessEntry(ctx context.Context, entryUUID, content, timestamp, source string) (*infra.LatencyBreakdown, error)
+	ProcessEntry(ctx context.Context, entryUUID, content, timestamp, source string) (*infra.LatencyBreakdown, *agent.ProcessEntryReport, error)
 	RunDreamer(ctx context.Context) (*DreamerResult, error)
 	RunDreamerWithProgress(ctx context.Context, runID string, progress agent.DreamerProgress) (*DreamerResult, error)
 	RunPulseAudit(ctx context.Context) (*PulseResult, error)

@@ -83,6 +83,46 @@ func buildToolCallsSummary(toolCalls []map[string]interface{}) string {
 	return strings.TrimRight(sb.String(), "\n")
 }
 
+// GenerateProcessEntryReport generates a first-person narrative of what happened during process-entry.
+// On failure it returns an empty string so callers can degrade gracefully.
+func GenerateProcessEntryReport(ctx context.Context, app infra.ToolEnv, r *ProcessEntryReport) string {
+	ctx, span := infra.StartSpan(ctx, "agent.process_entry_report")
+	defer span.End()
+
+	if r == nil {
+		return ""
+	}
+	prompt, err := prompts.BuildProcessEntryReport(prompts.ProcessEntryReportData{
+		Content:        utils.WrapAsUserData(r.Content),
+		Source:         r.Source,
+		Significance:   r.Significance,
+		Domain:         r.Domain,
+		FactStored:     r.FactStored,
+		TaskCreated:    r.TaskCreated,
+		ContextsLinked: r.ContextsLinked,
+		Mood:           r.Mood,
+		Tags:           r.Tags,
+		EntityNames:    r.EntityNames,
+	})
+	if err != nil {
+		infra.LoggerFrom(ctx).Error("process entry report: prompt build failed", "error", err)
+		return ""
+	}
+
+	resp, err := app.Dispatch(ctx, &infra.LLMRequest{
+		Parts:     []*genai.Part{{Text: prompt}},
+		GenConfig: &infra.GenConfig{MaxOutputTokens: 400},
+	})
+	if err != nil {
+		infra.LoggerFrom(ctx).Error("process entry report: LLM call failed", "error", err)
+		return ""
+	}
+
+	narrative := strings.TrimSpace(infra.ExtractTextFromResponse(resp))
+	infra.LoggerFrom(ctx).Debug("process entry report generated", "length", len(narrative))
+	return narrative
+}
+
 // filterDecisionLogs keeps only lines containing a decision-point marker, capped at maxFilteredLogLines.
 func filterDecisionLogs(logs []string) string {
 	if len(logs) == 0 {

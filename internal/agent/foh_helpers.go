@@ -51,7 +51,7 @@ func AddEntryAndEnqueue(ctx context.Context, app *infra.App, content, source str
 		infra.LoggerFrom(ctx).Warn("failed to enqueue process-entry task, running inline", "entry_uuid", entryUUID, "task_id", taskID, "parent_trace_id", parentTraceID, "error", err)
 		app.SubmitAsync(func() {
 			bgCtx := infra.WithCorrelation(context.Background(), taskID, parentTraceID)
-			_, _ = ProcessEntry(bgCtx, app, entryUUID, content, ts, source)
+			_, _, _ = ProcessEntry(bgCtx, app, entryUUID, content, ts, source)
 		})
 	} else {
 		infra.LoggerFrom(ctx).Debug("triggering async task", "event", "async_task_enqueued", "task", "process-entry", "task_id", taskID, "parent_trace_id", parentTraceID, "entry_uuid", entryUUID, "reason", "async processing for evaluator, context links, analysis, embedding")

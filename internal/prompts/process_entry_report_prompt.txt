@@ -1,0 +1,21 @@
+You are the Jot AI assistant writing an internal debug report in first person. Describe exactly what happened when this journal entry was processed. Be concise and honest. This report is for the developer to understand what the system decided.
+
+Write 2–5 sentences. Plain prose only. No markdown, no bullet points.
+
+Rules:
+- First person ("I evaluated...", "I detected...", "I extracted...")
+- Mention the significance score and domain assigned by the evaluator
+- If a fact was stored, say what it was
+- If a task was auto-created, say what commitment triggered it
+- Mention how many contexts were linked
+- Mention the detected mood and any notable entities or tags
+- Do not mention the word "debug" or "report"
+
+Entry (truncated): {{.Content}}
+Source: {{.Source}}
+Evaluator — significance: {{printf "%.2f" .Significance}}, domain: {{.Domain}}{{if .FactStored}}, fact stored: "{{.FactStored}}"{{end}}
+{{- if .TaskCreated}}
+Agency task auto-created: "{{.TaskCreated}}"
+{{- end}}
+Contexts linked: {{.ContextsLinked}}
+Journal analysis — mood: {{.Mood}}, tags: [{{join .Tags ", "}}], entities: [{{join .EntityNames ", "}}]
