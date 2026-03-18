@@ -59,11 +59,12 @@ func handleProcessEntry(s *Server, w http.ResponseWriter, r *http.Request) (any,
 	}
 	app, hasApp := s.App.(*infra.App)
 	if s.Config != nil && s.Config.DebugReportEnabled && hasApp && entryReport != nil {
-		asyncCtx := context.WithoutCancel(ctx)
+		reportCtx := infra.WithSuppressGDocLog(ctx)
+		asyncCtx := context.WithoutCancel(reportCtx)
 		cfg := s.Config
-		r := entryReport
+		report := entryReport
 		app.SubmitAsync(func() {
-			narrative := agent.GenerateProcessEntryReport(asyncCtx, app, r)
+			narrative := agent.GenerateProcessEntryReport(asyncCtx, app, report)
 			if narrative != "" {
 				gdoc.WriteReport(asyncCtx, cfg, narrative)
 			}
