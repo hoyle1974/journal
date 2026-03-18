@@ -43,6 +43,12 @@ type TgPhotoSize struct {
 	FileSize int    `json:"file_size"`
 }
 
+// TgLocation represents a geographic location sent in a Telegram message.
+type TgLocation struct {
+	Longitude float64 `json:"longitude"`
+	Latitude  float64 `json:"latitude"`
+}
+
 // TgMsg is the message part of an Update (chat, from, text/caption, photo).
 type TgMsg struct {
 	MessageID int64         `json:"message_id"`
@@ -51,6 +57,7 @@ type TgMsg struct {
 	Text      string        `json:"text"`
 	Caption   string        `json:"caption"`
 	Photo     []TgPhotoSize `json:"photo"`
+	Location  *TgLocation   `json:"location"`
 }
 
 // TgChat has the chat id (required for replying).
@@ -67,13 +74,17 @@ type TgUser struct {
 
 // IncomingMessage normalizes an incoming webhook to a single message + chat + sender for processing.
 // When the message is a photo, Text is the caption and ImageFileID is the file_id of the largest photo.
+// When the message is a location pin, HasLocation is true and Latitude/Longitude are populated.
 type IncomingMessage struct {
 	UpdateID    int64
 	MessageID   int64
 	ChatID      int64
 	UserID      int64
 	Text        string
-	ImageFileID string // set when message has photo; use DownloadFile to get bytes
+	ImageFileID string  // set when message has photo; use DownloadFile to get bytes
+	HasLocation bool    // set when message is a location pin
+	Latitude    float64 // set when HasLocation is true
+	Longitude   float64 // set when HasLocation is true
 }
 
 // ValidateSecretToken checks the X-Telegram-Bot-Api-Secret-Token header when secret is configured.
@@ -132,6 +143,17 @@ func ParseWebhook(r *http.Request) (*WebhookUpdate, *IncomingMessage, error) {
 		}
 	}
 
+	hasLocation := false
+	var lat, lng float64
+	if msg.Location != nil {
+		hasLocation = true
+		lat = msg.Location.Latitude
+		lng = msg.Location.Longitude
+		if text == "" && imageFileID == "" {
+			text = "Shared location pin"
+		}
+	}
+
 	userID := int64(0)
 	if msg.From != nil {
 		userID = msg.From.ID
@@ -144,6 +166,9 @@ func ParseWebhook(r *http.Request) (*WebhookUpdate, *IncomingMessage, error) {
 		UserID:      userID,
 		Text:        text,
 		ImageFileID: imageFileID,
+		HasLocation: hasLocation,
+		Latitude:    lat,
+		Longitude:   lng,
 	}, nil
 }
 

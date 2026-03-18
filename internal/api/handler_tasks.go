@@ -2,7 +2,9 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -98,24 +100,32 @@ func handleProcessTelegramQuery(s *Server, w http.ResponseWriter, r *http.Reques
 	ctx := r.Context()
 	path := pathForLog(r.URL.Path)
 	var data struct {
-		ChatID      int64  `json:"chat_id" validate:"required"`
-		UserID      int64  `json:"user_id"`
-		Body        string `json:"body"`
-		ImageFileID string `json:"image_file_id"`
-		UpdateID    int64  `json:"update_id"`
-		MessageID   int64  `json:"message_id"`
+		ChatID      int64   `json:"chat_id" validate:"required"`
+		UserID      int64   `json:"user_id"`
+		Body        string  `json:"body"`
+		ImageFileID string  `json:"image_file_id"`
+		UpdateID    int64   `json:"update_id"`
+		MessageID   int64   `json:"message_id"`
+		HasLocation bool    `json:"has_location"`
+		Latitude    float64 `json:"latitude"`
+		Longitude   float64 `json:"longitude"`
 		correlationFields
 	}
 	if err := DecodeAndValidate(r, &data, s.Validator); err != nil {
 		return nil, handlerError(http.StatusBadRequest, err.Error())
 	}
-	if data.Body == "" && data.ImageFileID == "" {
-		infra.LoggerFrom(ctx).Info("process-telegram-query: empty body and no image, sending hint", "chat_id", data.ChatID)
+	if data.Body == "" && data.ImageFileID == "" && !data.HasLocation {
+		infra.LoggerFrom(ctx).Info("process-telegram-query: empty body, no image, and no location, sending hint", "chat_id", data.ChatID)
 		_ = s.Telegram.SendMessage(ctx, data.ChatID, "I didn't receive any text or image. Send a message or photo to log something.")
 		return map[string]string{"status": "ok"}, nil
 	}
 	if data.Body == "" && data.ImageFileID != "" {
 		data.Body = "Photo"
+	}
+	if data.HasLocation {
+		locationStr := reverseGeocode(ctx, data.Latitude, data.Longitude)
+		data.Body = strings.TrimSpace(data.Body + " " + locationStr)
+		infra.LoggerFrom(ctx).Info("process-telegram-query: location appended", "chat_id", data.ChatID, "location", locationStr)
 	}
 	ctx = data.correlationFields.applyToCtx(ctx)
 	// When message has an image, download it, optionally generate a caption, then create a journal entry (upload to GCS) and pass entry UUID so FOH skips adding a duplicate.
@@ -326,4 +336,58 @@ func handleBackfillEmbeddings(s *Server, w http.ResponseWriter, r *http.Request)
 	}
 	infra.LoggerFrom(ctx).Info("backfill-embeddings completed", "processed", processed)
 	return map[string]interface{}{"success": true, "processed": processed}, nil
+}
+
+// reverseGeocode calls BigDataCloud's free reverse-geocoding API and returns a formatted location
+// string like "[Location: 37.77, -122.41 (San Francisco, CA)]". On any failure it falls back to
+// "[Location: {lat}, {lng}]" so the journal entry is always saved with at least the raw coords.
+func reverseGeocode(ctx context.Context, lat, lng float64) string {
+	fallback := fmt.Sprintf("[Location: %.4f, %.4f]", lat, lng)
+
+	reqCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+
+	url := fmt.Sprintf("https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=%f&longitude=%f&localityLanguage=en", lat, lng)
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, url, nil)
+	if err != nil {
+		return fallback
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fallback
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fallback
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if err != nil {
+		return fallback
+	}
+
+	var result struct {
+		City                   string `json:"city"`
+		Locality               string `json:"locality"`
+		PrincipalSubdivision   string `json:"principalSubdivision"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return fallback
+	}
+
+	place := result.City
+	if place == "" {
+		place = result.Locality
+	}
+	if place == "" && result.PrincipalSubdivision == "" {
+		return fallback
+	}
+
+	if place != "" && result.PrincipalSubdivision != "" {
+		return fmt.Sprintf("[Location: %.4f, %.4f (%s, %s)]", lat, lng, place, result.PrincipalSubdivision)
+	}
+	if place != "" {
+		return fmt.Sprintf("[Location: %.4f, %.4f (%s)]", lat, lng, place)
+	}
+	return fmt.Sprintf("[Location: %.4f, %.4f (%s)]", lat, lng, result.PrincipalSubdivision)
 }
