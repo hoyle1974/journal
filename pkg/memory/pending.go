@@ -3,14 +3,21 @@ package memory
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	"cloud.google.com/go/firestore"
 	"github.com/jackstrohm/jot/internal/infra"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // PendingQuestionsCollection is the Firestore collection name for pending questions.
 const PendingQuestionsCollection = "pending_questions"
+
+// TelegramQuestionStateCollection tracks which pending question is currently being
+// asked to each Telegram chat. Documents are keyed by string(chat_id).
+const TelegramQuestionStateCollection = "telegram_question_state"
 
 // PendingQuestion is a gap or contradiction detected during Dreamer synthesis, to be clarified by the user.
 type PendingQuestion struct {
@@ -158,4 +165,66 @@ func ResolvePendingQuestion(ctx context.Context, env infra.ToolEnv, uuid, answer
 		}()
 	}
 	return nil
+}
+
+// GetTelegramActiveQuestion returns the pending question currently being asked to
+// the given Telegram chat, or nil if none is active or the question was already resolved.
+func GetTelegramActiveQuestion(ctx context.Context, env infra.ToolEnv, chatID int64) (*PendingQuestion, error) {
+	if env == nil {
+		return nil, fmt.Errorf("env required")
+	}
+	client, err := env.Firestore(ctx)
+	if err != nil {
+		return nil, err
+	}
+	doc, err := client.Collection(TelegramQuestionStateCollection).Doc(strconv.FormatInt(chatID, 10)).Get(ctx)
+	if err != nil {
+		if status.Code(err) == codes.NotFound {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get telegram question state: %w", err)
+	}
+	questionUUID := infra.GetStringField(doc.Data(), "question_uuid")
+	if questionUUID == "" {
+		return nil, nil
+	}
+	q, err := GetPendingQuestion(ctx, env, questionUUID)
+	if err != nil {
+		return nil, fmt.Errorf("get active question: %w", err)
+	}
+	// If it was already resolved by another client, treat as no active question.
+	if q.ResolvedAt != "" {
+		return nil, nil
+	}
+	return q, nil
+}
+
+// SetTelegramActiveQuestion records that questionUUID is the question currently
+// being asked to chatID. Overwrites any previous state.
+func SetTelegramActiveQuestion(ctx context.Context, env infra.ToolEnv, chatID int64, questionUUID string) error {
+	if env == nil {
+		return fmt.Errorf("env required")
+	}
+	client, err := env.Firestore(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = client.Collection(TelegramQuestionStateCollection).Doc(strconv.FormatInt(chatID, 10)).Set(ctx, map[string]any{
+		"question_uuid": questionUUID,
+		"set_at":        time.Now().Format(time.RFC3339),
+	})
+	return err
+}
+
+// ClearTelegramActiveQuestion removes the active question state for chatID.
+func ClearTelegramActiveQuestion(ctx context.Context, env infra.ToolEnv, chatID int64) error {
+	if env == nil {
+		return fmt.Errorf("env required")
+	}
+	client, err := env.Firestore(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = client.Collection(TelegramQuestionStateCollection).Doc(strconv.FormatInt(chatID, 10)).Delete(ctx)
+	return err
 }
