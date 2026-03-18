@@ -118,6 +118,17 @@ func handleDreamRun(s *Server, w http.ResponseWriter, r *http.Request) (any, err
 		return nil, handlerError(http.StatusBadRequest, err.Error())
 	}
 	runID := body.DreamRunID
+
+	// Guard against stale/duplicate Cloud Task deliveries. If the lock's current run_id no longer
+	// matches, this task was superseded (e.g. lock expired + new run started). Return 200 so Cloud
+	// Tasks stops retrying; do not run the dreamer again.
+	if state, stateErr := s.System.GetDreamRunState(ctx); stateErr == nil && state != nil {
+		if state.DreamRunID != runID {
+			infra.LoggerFrom(ctx).Warn("dream-run task is stale, skipping", "task_run_id", runID, "current_run_id", state.DreamRunID)
+			return map[string]interface{}{"success": true, "skipped": true, "reason": "stale task"}, nil
+		}
+	}
+
 	// Long timeout so the dream can complete (Cloud Run allows up to 60 min).
 	runCtx, cancel := context.WithTimeout(ctx, 55*time.Minute)
 	defer cancel()
