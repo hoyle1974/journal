@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/firestore"
+	"github.com/jackstrohm/jot/internal/gdoc"
 	"github.com/jackstrohm/jot/internal/infra"
 	"github.com/jackstrohm/jot/internal/prompts"
 	"github.com/jackstrohm/jot/pkg/journal"
@@ -258,7 +259,7 @@ type dreamNarrativeInput struct {
 }
 
 // writeDreamNarrative generates a morning readout from the dream run and saves it to Firestore _system/latest_dream.
-func writeDreamNarrative(ctx context.Context, app *infra.App, in *dreamNarrativeInput) error {
+func writeDreamNarrative(ctx context.Context, app *infra.App, in *dreamNarrativeInput) (string, error) {
 	ctx, span := infra.StartSpan(ctx, "cron.dream_narrative")
 	defer span.End()
 
@@ -294,19 +295,19 @@ func writeDreamNarrative(ctx context.Context, app *infra.App, in *dreamNarrative
 		ModelOverride:   app.DreamerModel(),
 	})
 	if err != nil {
-		return err
+		return "", err
 	}
 	if narrative == "" {
 		infra.LoggerFrom(ctx).Warn("dream narrative was empty, skipping write")
-		return nil
+		return "", nil
 	}
 
 	now := time.Now().Format(time.RFC3339)
 	if err := system.WriteLatestDream(ctx, app, narrative, now, true); err != nil {
-		return err
+		return "", err
 	}
 	infra.LoggerFrom(ctx).Info("dream narrative written", "len", len(narrative))
-	return nil
+	return narrative, nil
 }
 
 const dreamerTaskPhaseSystemPrompt = `You are the dreamer's task phase. You have access to create_task, update_task_status, and search_tasks.
@@ -780,15 +781,24 @@ func RunDreamer(ctx context.Context, app *infra.App, opts *RunDreamerOpts) (*Dre
 	if progress != nil {
 		progress.OnPhase(ctx, "narrative")
 	}
-	if err := writeDreamNarrative(ctx, app, &dreamNarrativeInput{
+	dreamNarrative, narrativeErr := writeDreamNarrative(ctx, app, &dreamNarrativeInput{
 		EntriesProcessed:    len(entryUUIDs),
 		FactsExtracted:      totalFacts,
 		FactsWritten:        written,
 		ContextsSynthesized: synthesized,
 		PersonaFacts:        personaFacts,
 		EvolutionAudit:      evolutionAudit,
-	}); err != nil {
-		infra.LoggerFrom(ctx).Warn("dreamer narrative failed", "dreamer_run_id", dreamerRunID, "phase", "narrative", "error", err)
+	})
+	if narrativeErr != nil {
+		infra.LoggerFrom(ctx).Warn("dreamer narrative failed", "dreamer_run_id", dreamerRunID, "phase", "narrative", "error", narrativeErr)
+	}
+	if dreamNarrative != "" && app.Config() != nil && app.Config().DebugReportEnabled {
+		cfg := app.Config()
+		narrative := dreamNarrative
+		asyncCtx := context.WithoutCancel(ctx)
+		app.SubmitAsync(func() {
+			gdoc.WriteReport(asyncCtx, cfg, narrative)
+		})
 	}
 
 	// Let the dreamer create or update tasks from the night's journal (tool-calling phase).
