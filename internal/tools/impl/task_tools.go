@@ -10,6 +10,10 @@ import (
 	"github.com/jackstrohm/jot/tools"
 )
 
+type decomposeTaskArgs struct {
+	TaskID string `json:"task_id" description:"UUID of the task to break down into subtasks" required:"true"`
+}
+
 type createTaskArgs struct {
 	Content      string `json:"content" description:"Task description or title" required:"true"`
 	ParentID     string `json:"parent_id" description:"Parent task UUID for hierarchy"`
@@ -250,6 +254,27 @@ func registerTaskTools() {
 				return tools.OK("No tasks found.")
 			}
 			return tools.OK("Found %d task(s):\n%s", len(tasks), task.FormatTasksForContext(tasks, 8000))
+		},
+	})
+
+	tools.Register(&tools.Tool{
+		Name:        "decompose_task",
+		Description: "Break a complex task or project into 3–7 smaller, actionable subtasks. Use proactively when the user mentions a large goal or asks 'how do I start' / 'help me plan'. Creates child tasks linked to the parent.",
+		Category:    "task",
+		Args:        &decomposeTaskArgs{},
+		Execute: func(ctx context.Context, env infra.ToolEnv, args any) tools.Result {
+			a := args.(*decomposeTaskArgs)
+			if a.TaskID == "" {
+				return tools.MissingParam("task_id")
+			}
+			if env == nil {
+				return tools.Fail("No app in context")
+			}
+			result, err := task.BrainstormSubtasks(ctx, env, a.TaskID)
+			if err != nil {
+				return tools.Fail("Error decomposing task: %v", err)
+			}
+			return tools.OK("%s", result)
 		},
 	})
 }

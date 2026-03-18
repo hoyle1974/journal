@@ -68,7 +68,6 @@ func TestRateLimitPath(t *testing.T) {
 		{"/health", "/health"},
 		{"/", "/health"},
 		{"", "/health"},
-		{"/plan", "/plan"},
 	}
 
 	for _, tt := range tests {

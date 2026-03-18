@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/jackstrohm/jot/internal/agent"
-	"github.com/jackstrohm/jot/internal/infra"
 )
 
 const (
@@ -27,7 +26,3 @@ func RunQueryWithDebug(ctx context.Context, app agent.FOHEnv, question, source s
 	return agent.RunQueryWithDebug(ctx, app, question, source, debug)
 }
 
-// CreateAndSavePlan forces Gemini to decompose a goal into JSON, then saves it to the Knowledge Graph.
-func CreateAndSavePlan(ctx context.Context, env infra.ToolEnv, goal string) (string, error) {
-	return agent.CreateAndSavePlan(ctx, env, goal)
-}

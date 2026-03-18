@@ -69,6 +69,7 @@ The Immutable Source of Truth Rule: internal/prompts/app_capabilities.txt and bl
 - **Gold:** Permanent facts for Semantic Memory.
 - **Gravel:** Temporary logs to be ignored by the Dreamer.
 - **FOH:** Front of House (the `query_agent.go` loop).
+- **Project Engine:** The set of tools and prompt-injection logic that allows the agent to reason about complex multi-step goals. A "project" is a Task with subtasks (parent_id hierarchy). Use `decompose_task` to break a task into subtasks. FOH injects the active project subtree via `buildActiveProjectBlock` in `prompter.go`.
 
 ## App capabilities file
 

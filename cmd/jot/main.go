@@ -729,36 +729,6 @@ func cmdJanitor() {
 	}
 }
 
-func cmdPlan(goal string) {
-	fmt.Println("Generating plan (this takes a few seconds)...")
-	result, headers, err := api.Do(context.Background(), "POST", "/plan", map[string]string{"goal": goal}, time.Duration(timeout.QuerySeconds)*time.Second)
-	if err != nil {
-		if err.Error() == "offline" {
-			fmt.Println("Error: Cannot generate plans while offline. Requires cloud connection.")
-		} else {
-			fmt.Printf("Error: %v\n", err)
-			printRateLimitHelp(err)
-		}
-		os.Exit(1)
-	}
-	if result == nil {
-		fmt.Println("Error: No response from API")
-		os.Exit(1)
-	}
-	if traceFlag && headers != nil {
-		printTraceInfo(headers)
-	}
-	if errStr := jsonStr(result, "error"); errStr != "" {
-		fmt.Printf("Error: %s\n", errStr)
-		os.Exit(1)
-	}
-
-	if plan := jsonStr(result, "plan"); plan != "" {
-		fmt.Printf("\n%s\n", plan)
-	} else {
-		fmt.Println("Plan generation completed, but no text was returned.")
-	}
-}
 
 func cmdHelp(topic string) {
 	topics := map[string]string{
@@ -815,22 +785,6 @@ jot janitor
   Run garbage collection: evict low-significance semantic memory entries
   that haven't been recalled in 30+ days. Schedule weekly.
 `,
-		"plan": `
-jot plan <goal>
-jot p <goal>
-
-  Break down a complex goal into a structured, step-by-step plan.
-  The goal and all phases are saved to your knowledge graph for later recall.
-
-  Examples:
-    jot plan Rebuild my home server setup
-    jot p Learn Rust programming over the next 3 months
-    jot plan Migrate infrastructure to AWS
-
-  Later, you can query your plans:
-    jot query What was phase 2 of my server rebuild?
-    jot query What are my pending project goals?
-`,
 	}
 
 	if topic != "" {
@@ -850,12 +804,11 @@ Just talk to your assistant - it figures out what to do:
   jot Had coffee with Sarah        → Logs entry + extracts knowledge
   jot What did I do last week?     → Searches and answers
   jot Who knows about GCP?         → Semantic search of knowledge
-  jot I want to learn Japanese     → Creates structured plan
+  jot I want to learn Japanese     → Creates task + decomposes into subtasks
   jot Remember Alice works at Google → Saves to long-term memory
 
 Commands (optional):
   log, l <message>     Fast logging (bypasses AI)
-  plan, p <goal>       Direct plan generation
   sync, s              Process Google Doc
   edit [limit]         Interactive entry editor
   entries [limit]      List recent entries
@@ -945,14 +898,6 @@ func main() {
 		cmdRollup()
 	case "recall", "awake":
 		cmdRecall()
-
-	case "plan", "p":
-		if len(args) < 2 {
-			fmt.Println("Error: goal is required")
-			os.Exit(1)
-		}
-		goal := strings.Join(args[1:], " ")
-		cmdPlan(goal)
 
 	case "help", "-h", "--help":
 		topic := ""

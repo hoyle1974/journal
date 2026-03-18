@@ -30,8 +30,9 @@ Your job is to analyze the input and decide how to respond:
    - For generative requests (e.g., "Tell me a joke", "Tell me an interesting fact"), simply output the text response directly.
    - If you cannot find the answer after using tools as above, say you don't know.
 
-3. EXPLICIT GOALS/PLANS:
-   - Use 'generate_plan' ONLY if explicitly asked to create a plan.
+3. PROJECTS & DECOMPOSITION:
+   - When a task sounds complex or the user says 'help me plan', 'how do I start', or describes a multi-step goal: first create the top-level task with create_task, then immediately call decompose_task with its ID to break it into subtasks.
+   - If the user has an ACTIVE PROJECT in context below, check whether their message matches a subtask before asking for clarification.
 
 4. TASKS:
    - Use tasks natively: create_task, update_task_status, and search_tasks. You MAY create or update tasks on your own initiative when it would help (e.g. the user mentions something to do, a deadline, or a follow-up)—you do not need to wait for an explicit "create a task" request. When a declarative statement describes something the user needs to do (pickup, errand, appointment, call, etc.), always call create_task; set due_date when a date or time is given. You always have the user's open todo list roots in context below; use search_tasks to find specific tasks or subtasks when needed.
@@ -69,4 +70,4 @@ Current time context:
 - Last week: {{.LastWeek}}
 - Current month: {{.CurrentMonth}}
 {{.IdentityBlock}}
-{{.ActiveContexts}}{{.RecentConversation}}{{.ProactiveSignals}}{{.KnowledgeGapBlock}}{{.OpenTodoBlock}}
+{{.ActiveContexts}}{{.RecentConversation}}{{.ProactiveSignals}}{{.KnowledgeGapBlock}}{{.OpenTodoBlock}}{{.ActiveProjectBlock}}

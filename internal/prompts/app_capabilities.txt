@@ -9,8 +9,8 @@ Jot is a personal journaling and memory system. It ingests journal entries, extr
 - Voice notes received via Telegram are transcribed to text by Gemini and processed identically to typed messages — the FOH agent acts on the transcription. The audio file is persisted in GCS (audio_url field) and the transcription is stored on the journal entry (transcription field).
 
 ## Entry points
-- **CLI**: log, query, sync (Google Doc), dream, janitor, plan, recall (dream narrative), edit, entries.
-- **API**: POST /query, /log, /dream, /rollup, /janitor, /plan, /sync, /decay-contexts, /backfill-embeddings, /webhook, /sms, /telegram; GET /dream/latest, /dream/status, /metrics, /entries, /pending-questions; POST /pending-questions/:id/resolve. POST /dream returns 202 and runs the dream async (single run at a time; poll GET /dream/status for progress). Cloud Tasks for async work (e.g. process-sms-query, process-telegram-query, dream-run).
+- **CLI**: log, query, sync (Google Doc), dream, janitor, recall (dream narrative), edit, entries.
+- **API**: POST /query, /log, /dream, /rollup, /janitor, /sync, /decay-contexts, /backfill-embeddings, /webhook, /sms, /telegram; GET /dream/latest, /dream/status, /metrics, /entries, /pending-questions; POST /pending-questions/:id/resolve. POST /dream returns 202 and runs the dream async (single run at a time; poll GET /dream/status for progress). Cloud Tasks for async work (e.g. process-sms-query, process-telegram-query, dream-run).
 - **Cron**: Dreamer (daily) consolidates last 24h journal into semantic memory; Janitor (weekly) evicts low-significance, rarely recalled nodes.
 - **First-run onboarding**: On cold start, if _system/onboarding is absent, the system seeds pending_questions with onboarding prompts (name, family, work, role); answers are stored as user_identity nodes.
 - **Telegram question flow**: Pending questions surface in the Telegram bot. When a message arrives, the bot checks for unresolved pending questions first; if any exist it asks the oldest one instead of running FOH. Each reply resolves the current question and triggers the next, or returns "all done" and resumes normal operation. Send /skip to skip a question. Active question state is persisted per chat_id in the `telegram_question_state` Firestore collection.
@@ -23,7 +23,7 @@ Jot is a personal journaling and memory system. It ingests journal entries, extr
 - **FOH (Front of House)**: Query loop. Uses system prompt, identity, active contexts, knowledge-gap block, open todos; can call tools (journal, knowledge, context, task, web, utility). Before answering, the model performs an in-prompt audit (reflection: does tool output match intent?; gap detection: what is missing?; synthesis: combine into a cohesive narrative). If the model reports missing info via MISSING_INFO:, the query is saved as a knowledge gap (is_gap). Final answer is passed through the persona layer before being returned to the user. No separate reflection or synthesis API passes—audit is unified in one generation.
 - **Dreamer**: Nightly pipeline. Loads last 24h journal → colloquium (specialists discuss) → specialist extraction (relationship, work, task, thought, selfmodel) → merge facts → write to semantic memory → gap detection → context synthesis → profile synthesis → evolution synthesis → dream narrative + task phase. Writes latest_dream and system_evolution.
 - **Specialists**: Domain extractors (relationship, work, task, thought, selfmodel) plus evolution (Cognitive Engineer). Consultable via tools (consult_anthropologist, consult_architect, etc.).
-- **Planner**: Generates step-by-step plans from a goal; stores phases in knowledge graph.
+- **Project Engine**: Planning is now part of the Task system. A "project" is a task with subtasks (parent_id hierarchy). Use decompose_task to break a complex task into 3–7 subtasks. FOH automatically injects the most recently active project + pending subtasks into the system prompt (ACTIVE PROJECT block).
 
 ## Storage Architecture
 - **Unified collection**: All documents (both episodic log entries and semantic knowledge nodes) live in the `journal` Firestore collection, distinguished by `node_type`.
@@ -40,10 +40,10 @@ Jot is a personal journaling and memory system. It ingests journal entries, extr
 - **Pending questions**: Gaps/contradictions from Dreamer gap detection; user can clarify later.
 
 ## Tools (by category)
-- **knowledge**: semantic_search, upsert_knowledge, list_knowledge, get_entity_network (discovers related facts via vector search and synthesizes a concise profile), generate_plan, check_proactive_signals, get_latest_dream.
+- **knowledge**: semantic_search, upsert_knowledge, list_knowledge, get_entity_network (discovers related facts via vector search and synthesizes a concise profile), check_proactive_signals, get_latest_dream.
 - **journal**: get_recent_entries, get_oldest_entries, get_entries_by_date_range, search_entries, count_entries, list_sources, get_entries_by_source, query_activity_history, query_entities, summarize_daily_activities, retrieve_image. get_recent_entries, get_entries_by_date_range, and search_entries accept optional has_image=true to restrict results to entries with an attached image. Use retrieve_image(entry_uuid) to send a previously ingested image back to the user over Telegram; first find the entry UUID via a search or date-range tool with has_image=true, then call retrieve_image with that UUID and include the returned token verbatim in your answer. Date-range tools accept YYYY-MM-DD or natural expressions (yesterday, last week, today); "today" and date ranges use the server's calendar day (UTC). Phrases like "last 6 months" are not supported.
 - **context**: list_contexts, create_context, touch_context, delete_context, get_system_health_audit, get_project_timeline, update_project_status.
-- **task**: create_task, get_task, update_task, update_task_status, search_tasks.
+- **task**: create_task, get_task, update_task, update_task_status, search_tasks, decompose_task (breaks a task into 3–7 subtasks, creating child tasks with parent_id; Tasks struct now has dependencies and is_sequential fields).
 - **query**: get_recent_queries, search_queries, get_queries_by_date.
 - **web**: fetch_url, define_word, wikipedia, web_search, bookmark, countdown, github_read, get_weather (current conditions + daily forecast for any city; no API key; uses Open-Meteo; default unit: fahrenheit).
 - **utility**: calculate, date_calc, text_stats, convert_units, random, timezone_convert, encode_decode.

@@ -8,7 +8,6 @@ import (
 
 	"github.com/jackstrohm/jot/internal/agent"
 	"github.com/jackstrohm/jot/internal/infra"
-	"github.com/jackstrohm/jot/internal/service"
 	"github.com/jackstrohm/jot/pkg/journal"
 	"github.com/jackstrohm/jot/pkg/memory"
 	"github.com/jackstrohm/jot/pkg/utils"
@@ -35,10 +34,6 @@ type listKnowledgeArgs struct {
 
 type getEntityNetworkArgs struct {
 	EntityName string `json:"entity_name" description:"Name or role of the person (e.g. 'wife', 'Gloria', 'Sarah')" required:"true"`
-}
-
-type generatePlanArgs struct {
-	Goal string `json:"goal" description:"The goal to plan for" required:"true"`
 }
 
 type checkProactiveSignalsArgs struct {
@@ -288,26 +283,6 @@ func registerKnowledgeTools() {
 		},
 	})
 
-	tools.Register(&tools.Tool{
-		Name:        "generate_plan",
-		Description: "Generate a structured plan to achieve a goal. ONLY use when user explicitly says 'plan', 'help me plan', or 'create a plan for'. Breaks down the goal into phases and saves to knowledge graph.",
-		Category:    "knowledge",
-		Args:        &generatePlanArgs{},
-		Execute: func(ctx context.Context, env infra.ToolEnv, args any) tools.Result {
-			a := args.(*generatePlanArgs)
-			if a.Goal == "" {
-				return tools.MissingParam("goal")
-			}
-			if env == nil {
-				return tools.Fail("No app in context")
-			}
-			result, err := service.CreateAndSavePlan(ctx, env, a.Goal)
-			if err != nil {
-				return tools.Fail("Error generating plan: %v", err)
-			}
-			return tools.OK("%s", result)
-		},
-	})
 }
 
 func registerSignalTools() {

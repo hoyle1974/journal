@@ -97,28 +97,3 @@ func handleQuery(s *Server, w http.ResponseWriter, r *http.Request) (any, error)
 	return result, nil
 }
 
-func handlePlan(s *Server, w http.ResponseWriter, r *http.Request) (any, error) {
-	ctx := r.Context()
-	path := pathForLog(r.URL.Path)
-	var data struct {
-		Goal string `json:"goal" validate:"required"`
-	}
-	if err := DecodeAndValidate(r, &data, s.Validator); err != nil {
-		return nil, handlerError(http.StatusBadRequest, err.Error())
-	}
-	goal := strings.TrimSpace(data.Goal)
-	LogHandlerRequest(ctx, r.Method, path, "goal_preview", utils.TruncateString(goal, 80))
-	result, err := s.Agent.CreateAndSavePlan(ctx, goal)
-	if err != nil {
-		infra.ErrorsTotal.Inc()
-		infra.LoggerFrom(ctx).Error("plan failed", "error", err)
-		code := http.StatusInternalServerError
-		if infra.IsLLMQuotaOrBillingError(err) {
-			code = http.StatusTooManyRequests
-		} else if infra.IsLLMPermissionOrBillingDenied(err) {
-			code = http.StatusForbidden
-		}
-		return nil, handlerError(code, err.Error())
-	}
-	return map[string]interface{}{"success": true, "plan": result}, nil
-}
