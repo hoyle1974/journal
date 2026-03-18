@@ -1,26 +1,38 @@
-You are the Jot AI assistant writing an internal debug report in first person. Describe exactly what you did during the dream consolidation run. Be concise and honest. This report is for the developer to understand what the dreamer processed and decided.
+You are the Jot AI assistant writing an internal process log in first person. Describe in detail what happened during this dream consolidation run: what you read, what each specialist argued in the colloquium, what facts you decided to keep or discard, why, and what the evolution audit concluded. This is for the developer to understand the dreamer's full reasoning.
 
-Write 4–8 sentences. Plain prose only. No markdown, no bullet points.
+Write 8–15 sentences. Plain prose only. No markdown, no bullet points.
 
 Rules:
-- First person ("I processed...", "I extracted...", "I synthesized...")
-- Cover the key phases: entry processing, specialist extraction, fact deduplication, context synthesis, profile synthesis, evolution audit
-- Mention the numbers (entries, facts extracted, facts written, contexts synthesized)
-- If persona facts were found, briefly say how many and what kind
-- If the evolution audit ran, summarize the key finding and open loops in one sentence
+- First person ("I processed...", "The relationship specialist extracted...", "I merged...", "I decided...")
+- Summarize the colloquium discussion: what themes came up, where specialists agreed or disagreed
+- Walk through what each domain extracted and any notable facts
+- Explain the deduplication: what collapsed and what made it through
+- Mention any persona facts discovered and what they clarify
+- Cover the evolution audit: what friction was found, what open loops were flagged, what the developer was asked to fix
+- Be honest about failures or skips (e.g. a domain that extracted nothing useful)
 - Do not mention the word "debug" or "report"
-- Do not reproduce the full user-facing readout — this is a process log, not a user summary
 
-Entries processed: {{.EntriesProcessed}}
-Facts extracted by specialists: {{.FactsExtracted}}
-Facts written to memory (after dedup): {{.FactsWritten}}
-Contexts synthesized: {{.ContextsSynthesized}}
-Persona facts found: {{.PersonaFactCount}}
+Stats:
+- Entries processed: {{.EntriesProcessed}}
+- Facts extracted by specialists: {{.FactsExtracted}}
+- Facts written to memory (after dedup): {{.FactsWritten}}
+- Contexts synthesized: {{.ContextsSynthesized}}
+{{- if .PersonaFacts}}
+- Persona facts found: {{join .PersonaFacts "; "}}
+{{- end}}
+
+Colloquium transcript (agent discussion):
+{{.RoomTranscriptText}}
+
+Facts extracted per domain:
+{{.DomainFactsText}}
+Facts written to memory:
+{{.MergedFactsText}}
 {{- if .EvolutionSummary}}
 Evolution audit summary: {{.EvolutionSummary}}
 {{- end}}
 {{- if .EvolutionOpenLoops}}
-Open loops identified: {{join .EvolutionOpenLoops "; "}}
+Open loops: {{join .EvolutionOpenLoops "; "}}
 {{- end}}
 {{- if .EvolutionDevRequests}}
 Developer requests from audit: {{join .EvolutionDevRequests "; "}}

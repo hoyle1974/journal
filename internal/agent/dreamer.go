@@ -794,13 +794,20 @@ func RunDreamer(ctx context.Context, app *infra.App, opts *RunDreamerOpts) (*Dre
 	}
 	if dreamNarrative != "" && app.Config() != nil && app.Config().DebugReportEnabled {
 		cfg := app.Config()
+		mergedContents := make([]string, 0, len(merged))
+		for _, f := range merged {
+			mergedContents = append(mergedContents, f.Content)
+		}
 		dreamerIn := &DreamerReportInput{
 			EntriesProcessed:    len(entryUUIDs),
 			FactsExtracted:      totalFacts,
 			FactsWritten:        written,
 			ContextsSynthesized: synthesized,
-			PersonaFactCount:    len(personaFacts),
+			PersonaFacts:        personaFacts,
 			EvolutionAudit:      evolutionAudit,
+			RoomTranscript:      roomTranscript,
+			DomainOutputs:       outputs,
+			MergedFacts:         mergedContents,
 		}
 		asyncCtx := context.WithoutCancel(ctx)
 		app.SubmitAsync(func() {

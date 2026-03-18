@@ -318,10 +318,13 @@ type DreamerReportData struct {
 	FactsExtracted       int
 	FactsWritten         int
 	ContextsSynthesized  int
-	PersonaFactCount     int
+	PersonaFacts         []string
 	EvolutionSummary     string
 	EvolutionOpenLoops   []string
 	EvolutionDevRequests []string
+	RoomTranscriptText   string
+	DomainFactsText      string
+	MergedFactsText      string
 }
 
 // BuildDreamerReport executes the dreamer report template with the given data.

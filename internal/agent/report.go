@@ -123,15 +123,23 @@ func GenerateProcessEntryReport(ctx context.Context, app infra.ToolEnv, r *Proce
 	return narrative
 }
 
-// DreamerReportInput holds the stats collected during a dream run for the process narrative.
+// DreamerReportInput holds the full content collected during a dream run for the process narrative.
 type DreamerReportInput struct {
 	EntriesProcessed    int
 	FactsExtracted      int
 	FactsWritten        int
 	ContextsSynthesized int
-	PersonaFactCount    int
+	PersonaFacts        []string
 	EvolutionAudit      *EvolutionAuditOutput
+	RoomTranscript      string           // colloquium discussion between specialist agents
+	DomainOutputs       []*SpecialistOutput // per-domain extracted facts and summaries
+	MergedFacts         []string         // content of facts written to memory after dedup
 }
+
+const (
+	dreamerReportRoomTranscriptMax = 4000 // chars
+	dreamerReportMergedFactsMax    = 40   // entries
+)
 
 // GenerateDreamerReport generates a first-person process narrative of what happened during a dream run.
 // On failure it returns an empty string so callers can degrade gracefully.
@@ -142,18 +150,54 @@ func GenerateDreamerReport(ctx context.Context, app infra.ToolEnv, in *DreamerRe
 	if in == nil {
 		return ""
 	}
+
+	// Build domain facts text: one section per domain showing facts extracted.
+	var domainBuf strings.Builder
+	for _, out := range in.DomainOutputs {
+		if out == nil || len(out.Facts) == 0 {
+			continue
+		}
+		domainBuf.WriteString(fmt.Sprintf("[%s — %d facts]\n", out.Domain, len(out.Facts)))
+		for i, f := range out.Facts {
+			domainBuf.WriteString(fmt.Sprintf("  %d. %s\n", i+1, f))
+		}
+	}
+
+	// Build merged facts text (capped to avoid exceeding context).
+	var mergedBuf strings.Builder
+	cap := in.MergedFacts
+	if len(cap) > dreamerReportMergedFactsMax {
+		cap = cap[:dreamerReportMergedFactsMax]
+	}
+	for i, f := range cap {
+		mergedBuf.WriteString(fmt.Sprintf("  %d. %s\n", i+1, f))
+	}
+	if len(in.MergedFacts) > dreamerReportMergedFactsMax {
+		mergedBuf.WriteString(fmt.Sprintf("  ... (%d more)\n", len(in.MergedFacts)-dreamerReportMergedFactsMax))
+	}
+
+	// Truncate room transcript if necessary.
+	roomText := in.RoomTranscript
+	if len(roomText) > dreamerReportRoomTranscriptMax {
+		roomText = roomText[:dreamerReportRoomTranscriptMax] + "\n... (truncated)"
+	}
+
 	data := prompts.DreamerReportData{
 		EntriesProcessed:    in.EntriesProcessed,
 		FactsExtracted:      in.FactsExtracted,
 		FactsWritten:        in.FactsWritten,
 		ContextsSynthesized: in.ContextsSynthesized,
-		PersonaFactCount:    in.PersonaFactCount,
+		PersonaFacts:        in.PersonaFacts,
+		RoomTranscriptText:  roomText,
+		DomainFactsText:     domainBuf.String(),
+		MergedFactsText:     mergedBuf.String(),
 	}
 	if in.EvolutionAudit != nil {
 		data.EvolutionSummary = in.EvolutionAudit.Summary
 		data.EvolutionOpenLoops = in.EvolutionAudit.Facts
 		data.EvolutionDevRequests = in.EvolutionAudit.Entities
 	}
+
 	prompt, err := prompts.BuildDreamerReport(data)
 	if err != nil {
 		infra.LoggerFrom(ctx).Error("dreamer report: prompt build failed", "error", err)
@@ -162,7 +206,7 @@ func GenerateDreamerReport(ctx context.Context, app infra.ToolEnv, in *DreamerRe
 
 	resp, err := app.Dispatch(ctx, &infra.LLMRequest{
 		Parts:     []*genai.Part{{Text: utils.WrapAsUserData(prompt)}},
-		GenConfig: &infra.GenConfig{MaxOutputTokens: 400},
+		GenConfig: &infra.GenConfig{MaxOutputTokens: 800},
 	})
 	if err != nil {
 		infra.LoggerFrom(ctx).Error("dreamer report: LLM call failed", "error", err)
