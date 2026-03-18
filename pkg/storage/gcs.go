@@ -12,12 +12,14 @@ import (
 )
 
 const (
-	gcsMaxSize     = 10 << 20 // 10MB
-	objectPrefix   = "images/"
-	contentTypeJPG = "image/jpeg"
-	contentTypePNG = "image/png"
-	contentTypeWEBP = "image/webp"
-	contentTypeGIF = "image/gif"
+	gcsMaxSize        = 10 << 20 // 10MB
+	objectPrefix      = "images/"
+	audioObjectPrefix = "audio/"
+	contentTypeJPG    = "image/jpeg"
+	contentTypePNG    = "image/png"
+	contentTypeWEBP   = "image/webp"
+	contentTypeGIF    = "image/gif"
+	contentTypeOGG    = "audio/ogg"
 )
 
 // GCSImageStorage uploads images to a Google Cloud Storage bucket.
@@ -48,6 +50,31 @@ func (g *GCSImageStorage) UploadImage(ctx context.Context, data []byte) (string,
 	if _, err := w.Write(data); err != nil {
 		_ = w.Close()
 		return "", fmt.Errorf("write image to GCS: %w", err)
+	}
+	if err := w.Close(); err != nil {
+		return "", fmt.Errorf("close GCS writer: %w", err)
+	}
+	return fmt.Sprintf("gs://%s/%s", g.bucket, objName), nil
+}
+
+// UploadAudio writes audio data to GCS under audio/<uuid> with content-type audio/ogg.
+// Returns gs://bucket/audio/<uuid>.
+func (g *GCSImageStorage) UploadAudio(ctx context.Context, data []byte) (string, error) {
+	if g.client == nil || g.bucket == "" {
+		return "", fmt.Errorf("audio upload not configured: GCS client or bucket missing")
+	}
+	if len(data) == 0 {
+		return "", fmt.Errorf("audio data is empty")
+	}
+	if len(data) > gcsMaxSize {
+		return "", fmt.Errorf("audio exceeds max size (%d bytes)", gcsMaxSize)
+	}
+	objName := path.Join(audioObjectPrefix, uuid.New().String())
+	w := g.client.Bucket(g.bucket).Object(objName).NewWriter(ctx)
+	w.ContentType = contentTypeOGG
+	if _, err := w.Write(data); err != nil {
+		_ = w.Close()
+		return "", fmt.Errorf("write audio to GCS: %w", err)
 	}
 	if err := w.Close(); err != nil {
 		return "", fmt.Errorf("close GCS writer: %w", err)

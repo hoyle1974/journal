@@ -122,6 +122,16 @@ func (a *App) ImageStorage() storage.ImageStorage {
 	return storage.NoopImageStorage()
 }
 
+// UploadAudio uploads raw audio bytes (audio/ogg) to GCS and returns the gs:// URI.
+// Returns an error if JOT_IMAGES_BUCKET is not configured or the upload fails.
+func (a *App) UploadAudio(ctx context.Context, data []byte) (string, error) {
+	gcs, ok := a.imageStorage.(*storage.GCSImageStorage)
+	if !ok || gcs == nil {
+		return "", fmt.Errorf("audio upload not configured: set JOT_IMAGES_BUCKET to enable")
+	}
+	return gcs.UploadAudio(ctx, data)
+}
+
 // EnqueueTask creates a Cloud Task that POSTs the payload to the API at endpoint.
 func (a *App) EnqueueTask(ctx context.Context, endpoint string, payload map[string]interface{}) error {
 	return EnqueueTask(ctx, a.cfg, endpoint, payload)

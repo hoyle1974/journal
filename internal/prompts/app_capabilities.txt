@@ -3,9 +3,10 @@
 Jot is a personal journaling and memory system. It ingests journal entries, extracts structured knowledge, and answers questions via an agentic loop.
 
 ## Multimodal capabilities
-- Jot is multimodal and processes both text and images.
+- Jot is multimodal and processes text, images, and voice notes.
 - Images received via channels (CLI --attach, API multipart /log, Telegram, etc.) are saved in the journal with optional parsed descriptions and image_url (GCS).
 - You can search for, retrieve, and reason about previously seen images: use journal tools (e.g. search_entries, get_recent_entries, get_entries_by_date_range) with has_image=true to filter to entries that contain an attached image; tool results include [Attached Image Content: ...] when a description is available so you can answer questions about visual content.
+- Voice notes received via Telegram are transcribed to text by Gemini and processed identically to typed messages — the FOH agent acts on the transcription. The audio file is persisted in GCS (audio_url field) and the transcription is stored on the journal entry (transcription field).
 
 ## Entry points
 - **CLI**: log, query, sync (Google Doc), dream, janitor, plan, recall (dream narrative), edit, entries.

@@ -52,6 +52,7 @@ func handleTelegram(s *Server, w http.ResponseWriter, r *http.Request) {
 		"body", incoming.Text,
 		"body_len", len(incoming.Text),
 		"image_file_id", incoming.ImageFileID,
+		"voice_file_id", incoming.VoiceFileID,
 	)
 	span.SetAttributes(map[string]string{"telegram.chat_id": fmt.Sprintf("%d", incoming.ChatID), "telegram.update_id": fmt.Sprintf("%d", incoming.UpdateID)})
 	bodyPreview := incoming.Text
@@ -68,15 +69,15 @@ func handleTelegram(s *Server, w http.ResponseWriter, r *http.Request) {
 		WriteJSON(w, http.StatusOK, map[string]string{"ok": "true"})
 		return
 	}
-	if incoming.Text == "" && incoming.ImageFileID == "" && !incoming.HasLocation {
-		infra.LoggerFrom(ctx).Debug("telegram webhook: no text, image, or location, sending hint", "chat_id", incoming.ChatID, "update_id", incoming.UpdateID)
-		infra.LoggerFrom(ctx).Info("telegram message has no text, image, or location, sending hint", "chat_id", incoming.ChatID)
-		_ = s.Telegram.SendMessage(ctx, incoming.ChatID, "Send a text message or photo to log something.")
-		LogHandlerResponse(ctx, r.Method, path, http.StatusOK, "status", "ignored", "reason", "no text or image")
+	if incoming.Text == "" && incoming.ImageFileID == "" && incoming.VoiceFileID == "" && !incoming.HasLocation {
+		infra.LoggerFrom(ctx).Debug("telegram webhook: no text, image, voice, or location, sending hint", "chat_id", incoming.ChatID, "update_id", incoming.UpdateID)
+		infra.LoggerFrom(ctx).Info("telegram message has no text, image, voice, or location, sending hint", "chat_id", incoming.ChatID)
+		_ = s.Telegram.SendMessage(ctx, incoming.ChatID, "Send a text message, photo, or voice note to log something.")
+		LogHandlerResponse(ctx, r.Method, path, http.StatusOK, "status", "ignored", "reason", "no text, image, or voice")
 		WriteJSON(w, http.StatusOK, map[string]string{"ok": "true"})
 		return
 	}
-	infra.LoggerFrom(ctx).Debug("telegram webhook: accepted, enqueueing task", "chat_id", incoming.ChatID, "update_id", incoming.UpdateID, "has_image", incoming.ImageFileID != "")
+	infra.LoggerFrom(ctx).Debug("telegram webhook: accepted, enqueueing task", "chat_id", incoming.ChatID, "update_id", incoming.UpdateID, "has_image", incoming.ImageFileID != "", "has_voice", incoming.VoiceFileID != "")
 	LogHandlerResponse(ctx, r.Method, path, http.StatusOK, "status", "accepted", "chat_id", incoming.ChatID)
 	WriteJSON(w, http.StatusOK, map[string]string{"ok": "true"})
 	infra.LoggerFrom(ctx).Info("telegram responded 200, processing in background")
@@ -97,6 +98,20 @@ func handleTelegram(s *Server, w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// When message is a voice note, download and store audio in GCS before enqueueing.
+	// The task handler will transcribe and run FOH; we store early so the audio is persisted.
+	if incoming.VoiceFileID != "" {
+		audioBytes, _, err := s.Telegram.DownloadFileWithMIME(ctx, incoming.VoiceFileID)
+		if err != nil {
+			infra.LoggerFrom(ctx).Warn("telegram voice note download failed", "error", err)
+		} else {
+			app := s.App.(*infra.App)
+			if _, uploadErr := app.UploadAudio(ctx, audioBytes); uploadErr != nil {
+				infra.LoggerFrom(ctx).Warn("telegram voice note GCS upload failed", "error", uploadErr)
+			}
+		}
+	}
+
 	taskID := "process-telegram-query-" + infra.GenShortRunID()
 	parentTraceID := infra.TraceIDFromContext(ctx)
 	payload := map[string]interface{}{
@@ -111,12 +126,15 @@ func handleTelegram(s *Server, w http.ResponseWriter, r *http.Request) {
 	if incoming.ImageFileID != "" {
 		payload["image_file_id"] = incoming.ImageFileID
 	}
+	if incoming.VoiceFileID != "" {
+		payload["voice_file_id"] = incoming.VoiceFileID
+	}
 	if incoming.HasLocation {
 		payload["has_location"] = true
 		payload["latitude"] = incoming.Latitude
 		payload["longitude"] = incoming.Longitude
 	}
-	infra.LoggerFrom(ctx).Debug("telegram webhook: enqueueing task", "task_id", taskID, "parent_trace_id", parentTraceID, "body_len", len(incoming.Text), "has_image", incoming.ImageFileID != "")
+	infra.LoggerFrom(ctx).Debug("telegram webhook: enqueueing task", "task_id", taskID, "parent_trace_id", parentTraceID, "body_len", len(incoming.Text), "has_image", incoming.ImageFileID != "", "has_voice", incoming.VoiceFileID != "")
 	enqErr := s.App.EnqueueTask(ctx, "/internal/process-telegram-query", payload)
 	if enqErr == nil {
 		infra.LoggerFrom(ctx).Debug("telegram enqueued for process-telegram-query", "chat_id", incoming.ChatID, "task_id", taskID, "parent_trace_id", parentTraceID)

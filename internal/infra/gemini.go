@@ -277,6 +277,45 @@ func GenerateImageCaption(ctx context.Context, env ToolEnv, imageBytes []byte, m
 	return combined.String(), nil
 }
 
+const audioTranscriptionSystemPrompt = `You are a speech-to-text transcription engine. Transcribe the audio exactly as spoken. Output only the verbatim transcript with no commentary, labels, or preamble. If the audio is silent or unintelligible, output exactly: [inaudible]`
+
+// TranscribeAudio sends audio bytes to Gemini and returns the verbatim transcript.
+// audioBytes must be audio/ogg (Telegram voice note format).
+// Returns an error if transcription fails; returns "[inaudible]" (not an error) for silent/unclear audio.
+func TranscribeAudio(ctx context.Context, env ToolEnv, audioBytes []byte, cfg *config.Config) (string, error) {
+	ctx, span := StartSpan(ctx, "gemini.transcribe_audio")
+	defer span.End()
+
+	if env == nil || cfg == nil {
+		return "", fmt.Errorf("env and config required")
+	}
+	if len(audioBytes) == 0 {
+		return "", fmt.Errorf("audio bytes required")
+	}
+	audioPart := genai.NewPartFromBytes(audioBytes, "audio/ogg")
+	if audioPart == nil {
+		return "", fmt.Errorf("failed to create audio part")
+	}
+	req := &LLMRequest{
+		SystemPrompt: audioTranscriptionSystemPrompt,
+		Parts:        []*genai.Part{audioPart},
+		Model:        cfg.GeminiModel,
+		GenConfig:    &GenConfig{MaxOutputTokens: 1024},
+	}
+	resp, err := env.Dispatch(ctx, req)
+	if err != nil {
+		span.RecordError(err)
+		LoggerFrom(ctx).Error("audio transcription failed", "error", err)
+		return "", WrapLLMError(fmt.Errorf("Gemini transcription: %w", err))
+	}
+	transcript := strings.TrimSpace(extractTextFromResponse(resp))
+	span.SetAttributes(map[string]string{"transcript_len": fmt.Sprintf("%d", len(transcript))})
+	if transcript == "" {
+		transcript = "[inaudible]"
+	}
+	return transcript, nil
+}
+
 const factCollisionSystemPrompt = `You are a logic engine. Compare New Fact to Existing Fact. If they mean the exact same thing or New Fact is a direct update to Existing Fact, return 'update'. If they contradict each other or refer to different specific details, return 'insert'. If Existing Fact is empty, return 'update'. Reply with ONLY 'update' or 'insert'.`
 
 // EvaluateFactCollision decides whether the new fact should overwrite the existing one (update) or be stored as a new node (insert).

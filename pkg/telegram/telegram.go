@@ -49,6 +49,14 @@ type TgLocation struct {
 	Latitude  float64 `json:"latitude"`
 }
 
+// TgVoice represents a voice note sent in a Telegram message.
+type TgVoice struct {
+	FileID   string `json:"file_id"`
+	Duration int    `json:"duration"`
+	MimeType string `json:"mime_type"`
+	FileSize int    `json:"file_size"`
+}
+
 // TgMsg is the message part of an Update (chat, from, text/caption, photo).
 type TgMsg struct {
 	MessageID int64         `json:"message_id"`
@@ -58,6 +66,7 @@ type TgMsg struct {
 	Caption   string        `json:"caption"`
 	Photo     []TgPhotoSize `json:"photo"`
 	Location  *TgLocation   `json:"location"`
+	Voice     *TgVoice      `json:"voice"`
 }
 
 // TgChat has the chat id (required for replying).
@@ -74,6 +83,7 @@ type TgUser struct {
 
 // IncomingMessage normalizes an incoming webhook to a single message + chat + sender for processing.
 // When the message is a photo, Text is the caption and ImageFileID is the file_id of the largest photo.
+// When the message is a voice note, VoiceFileID is the file_id of the audio (audio/ogg).
 // When the message is a location pin, HasLocation is true and Latitude/Longitude are populated.
 type IncomingMessage struct {
 	UpdateID    int64
@@ -82,6 +92,7 @@ type IncomingMessage struct {
 	UserID      int64
 	Text        string
 	ImageFileID string  // set when message has photo; use DownloadFile to get bytes
+	VoiceFileID string  // set when message is a voice note; audio/ogg from Telegram
 	HasLocation bool    // set when message is a location pin
 	Latitude    float64 // set when HasLocation is true
 	Longitude   float64 // set when HasLocation is true
@@ -143,13 +154,21 @@ func ParseWebhook(r *http.Request) (*WebhookUpdate, *IncomingMessage, error) {
 		}
 	}
 
+	voiceFileID := ""
+	if msg.Voice != nil && msg.Voice.FileID != "" {
+		voiceFileID = msg.Voice.FileID
+		if text == "" {
+			text = "Voice note"
+		}
+	}
+
 	hasLocation := false
 	var lat, lng float64
 	if msg.Location != nil {
 		hasLocation = true
 		lat = msg.Location.Latitude
 		lng = msg.Location.Longitude
-		if text == "" && imageFileID == "" {
+		if text == "" && imageFileID == "" && voiceFileID == "" {
 			text = "Shared location pin"
 		}
 	}
@@ -166,6 +185,7 @@ func ParseWebhook(r *http.Request) (*WebhookUpdate, *IncomingMessage, error) {
 		UserID:      userID,
 		Text:        text,
 		ImageFileID: imageFileID,
+		VoiceFileID: voiceFileID,
 		HasLocation: hasLocation,
 		Latitude:    lat,
 		Longitude:   lng,

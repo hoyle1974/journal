@@ -27,6 +27,8 @@ type Entry struct {
 	Timestamp              string `firestore:"timestamp" json:"timestamp"`
 	ImageURL               string `firestore:"image_url,omitempty" json:"image_url,omitempty"`
 	ParsedImageDescription string `firestore:"parsed_image_description,omitempty" json:"parsed_image_description,omitempty"` // vision-generated description for FOH to reason about
+	AudioURL               string `firestore:"audio_url,omitempty" json:"audio_url,omitempty"`
+	Transcription          string `firestore:"transcription,omitempty" json:"transcription,omitempty"` // Gemini speech-to-text of voice note
 }
 
 // AddEntry writes a new entry to Firestore and returns the entry UUID. Caller is responsible for enqueueing process-entry (e.g. in jot).
@@ -66,6 +68,22 @@ func AddEntry(ctx context.Context, client *firestore.Client, content, source str
 
 	infra.LoggerFrom(ctx).Debug("entry written to Firestore", "uuid", entryUUID, "source", source, "content", content, "image_url", imageURL)
 	return entryUUID, nil
+}
+
+// UpdateEntryAudio sets the audio_url and transcription fields on an existing entry.
+// Call after transcription completes so the entry reflects both the stored audio and its text.
+func UpdateEntryAudio(ctx context.Context, client *firestore.Client, entryUUID, audioURL, transcription string) error {
+	if client == nil {
+		return fmt.Errorf("firestore client is required")
+	}
+	updates := []firestore.Update{
+		{Path: "audio_url", Value: audioURL},
+		{Path: "transcription", Value: transcription},
+		// Replace placeholder content with the actual transcription.
+		{Path: "content", Value: transcription},
+	}
+	_, err := client.Collection(EntriesCollection).Doc(entryUUID).Update(ctx, updates)
+	return err
 }
 
 // GetEntries fetches entries from Firestore, ordered by timestamp descending.
