@@ -66,8 +66,7 @@ func WithSuppressGDocLog(ctx context.Context) context.Context {
 	return context.WithValue(ctx, suppressGDocLogKey, true)
 }
 
-// IsGDocLogSuppressed reports whether gdoc log forwarding is suppressed in ctx.
-func IsGDocLogSuppressed(ctx context.Context) bool {
+func isGDocLogSuppressed(ctx context.Context) bool {
 	return ctx.Value(suppressGDocLogKey) != nil
 }
 
@@ -250,7 +249,7 @@ func (h *gdocForwardingHandler) Handle(ctx context.Context, r slog.Record) error
 	if err := h.inner.Handle(ctx, r); err != nil {
 		return err
 	}
-	if r.Level < slog.LevelInfo || isGDocLogging(ctx) || isSyncInProgress(ctx) || IsGDocLogSuppressed(ctx) {
+	if r.Level < slog.LevelInfo || isGDocLogging(ctx) || isSyncInProgress(ctx) || isGDocLogSuppressed(ctx) {
 		return nil
 	}
 	if r.Message == "request completed" {

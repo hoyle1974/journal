@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"strings"
@@ -99,10 +100,19 @@ func handleQuery(s *Server, w http.ResponseWriter, r *http.Request) (any, error)
 			"error", result.Error, "iterations", result.Iterations,
 			"tool_call_count", len(result.ToolCalls),
 			"answer_preview", utils.TruncateString(result.Answer, 120))
-		narrative := agent.GenerateDebugReport(reportCtx, app, question, result.ToolCalls, result.DebugLogs, result.Answer)
-		if narrative != "" {
-			gdoc.WriteReport(reportCtx, s.Config, narrative)
-		}
+		// Detach from the request context so the async work survives the HTTP response,
+		// then fire-and-forget the LLM call + gdoc write via the app pool.
+		asyncCtx := context.WithoutCancel(reportCtx)
+		cfg := s.Config
+		toolCalls := result.ToolCalls
+		debugLogs := result.DebugLogs
+		answer := result.Answer
+		app.SubmitAsync(func() {
+			narrative := agent.GenerateDebugReport(asyncCtx, app, question, toolCalls, debugLogs, answer)
+			if narrative != "" {
+				gdoc.WriteReport(asyncCtx, cfg, narrative)
+			}
+		})
 	} else {
 		infra.LoggerFrom(ctx).Info("query completed",
 			"error", result.Error, "iterations", result.Iterations,

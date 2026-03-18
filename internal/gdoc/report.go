@@ -15,8 +15,7 @@ func WriteReport(ctx context.Context, cfg *config.Config, narrative string) {
 	if cfg == nil || narrative == "" {
 		return
 	}
-	// Reuse logToGDocSync which already applies bold formatting to everything it writes.
-	// Wrap the narrative with a newline so it is on its own paragraph.
+	// logToGDocSync applies bold formatting and appends a trailing newline.
 	logToGDocSync(ctx, cfg, narrative)
 	infra.LoggerFrom(ctx).Debug("debug report written to gdoc", "length", len(narrative))
 }

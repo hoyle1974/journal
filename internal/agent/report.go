@@ -73,15 +73,10 @@ func buildToolCallsSummary(toolCalls []map[string]interface{}) string {
 		argsStr := ""
 		if args, ok := tc["arguments"]; ok {
 			if b, err := json.Marshal(args); err == nil {
-				argsStr = string(b)
-				if len(argsStr) > 200 {
-					argsStr = argsStr[:197] + "..."
-				}
+				argsStr = utils.TruncateString(string(b), 200)
 			}
 		}
-		if len(preview) > 150 {
-			preview = preview[:147] + "..."
-		}
+		preview = utils.TruncateString(preview, 150)
 		sb.WriteString(fmt.Sprintf("%d. %s(args=%s) → success=%v result=%q\n",
 			i+1, name, argsStr, success, preview))
 	}
@@ -93,7 +88,7 @@ func filterDecisionLogs(logs []string) string {
 	if len(logs) == 0 {
 		return "(no decision logs)"
 	}
-	filtered := make([]string, 0, maxFilteredLogLines)
+	var filtered []string
 	for _, line := range logs {
 		lc := strings.ToLower(line)
 		for _, marker := range decisionMarkers {
