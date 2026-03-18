@@ -68,9 +68,9 @@ func handleTelegram(s *Server, w http.ResponseWriter, r *http.Request) {
 		WriteJSON(w, http.StatusOK, map[string]string{"ok": "true"})
 		return
 	}
-	if incoming.Text == "" && incoming.ImageFileID == "" {
-		infra.LoggerFrom(ctx).Debug("telegram webhook: no text or image, sending hint", "chat_id", incoming.ChatID, "update_id", incoming.UpdateID)
-		infra.LoggerFrom(ctx).Info("telegram message has no text or image, sending hint", "chat_id", incoming.ChatID)
+	if incoming.Text == "" && incoming.ImageFileID == "" && !incoming.HasLocation {
+		infra.LoggerFrom(ctx).Debug("telegram webhook: no text, image, or location, sending hint", "chat_id", incoming.ChatID, "update_id", incoming.UpdateID)
+		infra.LoggerFrom(ctx).Info("telegram message has no text, image, or location, sending hint", "chat_id", incoming.ChatID)
 		_ = s.Telegram.SendMessage(ctx, incoming.ChatID, "Send a text message or photo to log something.")
 		LogHandlerResponse(ctx, r.Method, path, http.StatusOK, "status", "ignored", "reason", "no text or image")
 		WriteJSON(w, http.StatusOK, map[string]string{"ok": "true"})
@@ -110,6 +110,11 @@ func handleTelegram(s *Server, w http.ResponseWriter, r *http.Request) {
 	}
 	if incoming.ImageFileID != "" {
 		payload["image_file_id"] = incoming.ImageFileID
+	}
+	if incoming.HasLocation {
+		payload["has_location"] = true
+		payload["latitude"] = incoming.Latitude
+		payload["longitude"] = incoming.Longitude
 	}
 	infra.LoggerFrom(ctx).Debug("telegram webhook: enqueueing task", "task_id", taskID, "parent_trace_id", parentTraceID, "body_len", len(incoming.Text), "has_image", incoming.ImageFileID != "")
 	enqErr := s.App.EnqueueTask(ctx, "/internal/process-telegram-query", payload)
