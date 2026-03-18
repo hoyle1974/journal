@@ -41,7 +41,6 @@ func NewRouter(s *Server) *chi.Mux {
 		r.Use(authMiddleware(s))
 		r.With(RateLimitMiddleware(60)).Post("/log", wrapAPI(handleLog))
 		r.With(RateLimitMiddleware(30)).Post("/query", wrapAPI(handleQuery))
-		r.With(RateLimitMiddleware(10)).Post("/plan", wrapAPI(handlePlan))
 		r.With(RateLimitMiddleware(60)).Get("/entries", wrapAPI(handleEntries))
 		r.With(RateLimitMiddleware(60)).Get("/entries/{uuid}", wrapAPI(handleEntries))
 		r.With(RateLimitMiddleware(60)).Patch("/entries", wrapAPI(handleEntries))
@@ -74,7 +73,7 @@ func NewRouter(s *Server) *chi.Mux {
 			"error": "Not found", "path": path,
 			"available_routes": []string{
 				"GET  /health", "GET  /metrics", "GET  /privacy-policy", "GET  /terms-and-conditions",
-				"POST /log", "POST /query", "POST /plan", "GET  /entries", "POST /sync", "GET  /dream/latest", "GET  /dream/status", "POST /dream",
+				"POST /log", "POST /query", "GET  /entries", "POST /sync", "GET  /dream/latest", "GET  /dream/status", "POST /dream",
 				"POST /janitor", "POST /rollup", "POST /webhook", "POST /sms", "POST /telegram", "POST /decay-contexts",
 				"POST /backfill-embeddings", "GET  /pending-questions", "POST /pending-questions/:id/resolve",
 			},

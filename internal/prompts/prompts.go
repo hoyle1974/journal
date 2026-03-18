@@ -26,9 +26,6 @@ var evaluatorTxt string
 //go:embed router.txt
 var routerTxt string
 
-//go:embed plan_system.txt
-var planSystemTxt string
-
 //go:embed context_analyze.txt
 var contextAnalyzeTxt string
 
@@ -119,6 +116,7 @@ type SystemPromptData struct {
 	ProactiveSignals   string
 	KnowledgeGapBlock  string
 	OpenTodoBlock      string
+	ActiveProjectBlock string
 }
 
 // BuildSystemPrompt executes the system prompt template with the given data.
@@ -232,9 +230,6 @@ func Evaluator() string { return evaluatorTxt }
 
 // Router returns the router/dispatcher system prompt (without data safety suffix).
 func Router() string { return routerTxt }
-
-// PlanSystem returns the plan-generation system instruction.
-func PlanSystem() string { return planSystemTxt }
 
 // ExecutiveSummary returns the living-context executive summary prompt.
 func ExecutiveSummary() string { return executiveSummaryTxt }

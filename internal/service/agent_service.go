@@ -74,18 +74,6 @@ func (a *AgentService) RunQuery(ctx context.Context, question, source string) *a
 	return queryResultToAPI(result)
 }
 
-// CreateAndSavePlan creates a plan and saves it to the knowledge graph.
-func (a *AgentService) CreateAndSavePlan(ctx context.Context, goal string) (string, error) {
-	infra.LoggerFrom(ctx).Info("function call", "fn", "CreateAndSavePlan", "goal_preview", utils.TruncateString(goal, 80))
-	plan, err := CreateAndSavePlan(ctx, a.app, goal)
-	if err != nil {
-		infra.LoggerFrom(ctx).Error("function result", "fn", "CreateAndSavePlan", "error", err.Error())
-		return "", err
-	}
-	infra.LoggerFrom(ctx).Info("function result", "fn", "CreateAndSavePlan", "plan_length", len(plan))
-	return plan, nil
-}
-
 // ProcessEntry processes a single entry (embedding, analysis, etc.).
 func (a *AgentService) ProcessEntry(ctx context.Context, entryUUID, content, timestamp, source string) (*infra.LatencyBreakdown, error) {
 	attrs := []any{"fn", "ProcessEntry", "uuid", entryUUID, "source", source, "content_length", len(content)}

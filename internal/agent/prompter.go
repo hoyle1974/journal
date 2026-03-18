@@ -109,12 +109,19 @@ func BuildSystemPrompt(ctx context.Context, env infra.ToolEnv) (string, error) {
 		openTodoBlockWrapped = utils.WrapAsUserData(openTodoBlock)
 	}
 
+	// 6. Active Project (most recently created root task that has subtasks)
+	activeProjectBlock := buildActiveProjectBlock(ctx, env, roots)
+	activeProjectBlockWrapped := activeProjectBlock
+	if activeProjectBlock != "" {
+		activeProjectBlockWrapped = utils.WrapAsUserData(activeProjectBlock)
+	}
+
 	// Log the actual injected context at Info so it appears in production (e.g. tail.sh / LLM_CONTEXT_SENT).
-	injectedSections := strings.TrimSpace(identityBlock + activeContextsStr + recentConversation + proactiveSignals + knowledgeGapBlock + openTodoBlock)
+	injectedSections := strings.TrimSpace(identityBlock + activeContextsStr + recentConversation + proactiveSignals + knowledgeGapBlock + openTodoBlock + activeProjectBlock)
 	if injectedSections == "" {
 		injectedSections = "(no dynamic sections)"
 	}
-	infra.LoggerFrom(ctx).Info("LLM_CONTEXT_SENT | injected context sections (Contexts, Conversation, Alerts, Gaps, Tasks)",
+	infra.LoggerFrom(ctx).Info("LLM_CONTEXT_SENT | injected context sections (Contexts, Conversation, Alerts, Gaps, Tasks, Project)",
 		"event", "LLM_CONTEXT_SENT",
 		"context_sections", injectedSections)
 
@@ -133,6 +140,7 @@ func BuildSystemPrompt(ctx context.Context, env infra.ToolEnv) (string, error) {
 		ProactiveSignals:   proactiveSignalsWrapped,
 		KnowledgeGapBlock:  knowledgeGapBlockWrapped,
 		OpenTodoBlock:      openTodoBlockWrapped,
+		ActiveProjectBlock: activeProjectBlockWrapped,
 	}
 	prompt, err := prompts.BuildSystemPrompt(promptData)
 	if err != nil {
@@ -223,4 +231,33 @@ func formatTodoSection(roots []task.Task) string {
 		lines = append(lines, fmt.Sprintf("- [%s] %s", t.UUID, t.Content))
 	}
 	return fmt.Sprintf("\n---\n## ✅ OPEN TASKS (ROOT)\n# Primary pending actions from the operation queue.\n\n%s", strings.Join(lines, "\n"))
+}
+
+// buildActiveProjectBlock finds the most recently created open root task that has pending subtasks and
+// formats a PROJECT STATUS block for injection into the system prompt.
+// Checks up to the first 3 root tasks to bound the number of Firestore calls.
+func buildActiveProjectBlock(ctx context.Context, env infra.ToolEnv, roots []task.Task) string {
+	limit := 3
+	if len(roots) < limit {
+		limit = len(roots)
+	}
+	for i := 0; i < limit; i++ {
+		parent := roots[i]
+		children, err := task.GetChildTasks(ctx, env, parent.UUID, 10)
+		if err != nil || len(children) == 0 {
+			continue
+		}
+		// Found a project with active subtasks — format the block.
+		var lines []string
+		lines = append(lines, fmt.Sprintf("Project: %s (ID: %s)", parent.Content, parent.UUID))
+		for _, c := range children {
+			dep := ""
+			if len(c.Dependencies) > 0 {
+				dep = fmt.Sprintf(" [depends: %s]", strings.Join(c.Dependencies, ", "))
+			}
+			lines = append(lines, fmt.Sprintf("  - [%s] [%s] %s%s", c.UUID, c.Status, c.Content, dep))
+		}
+		return fmt.Sprintf("\n---\n## 🚀 ACTIVE PROJECT\n# Most recent project with open subtasks. Check subtasks before asking for clarification.\n\n%s", strings.Join(lines, "\n"))
+	}
+	return ""
 }
