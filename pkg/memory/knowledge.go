@@ -171,19 +171,37 @@ func UpsertKnowledge(ctx context.Context, env infra.ToolEnv, content, nodeType, 
 // UpsertSemanticMemory saves a fact with extended schema (significance, domain, etc.).
 // env supplies Firestore and Config; pass from the caller (e.g. ToolEnv).
 func UpsertSemanticMemory(ctx context.Context, env infra.ToolEnv, content, nodeType, domain string, significanceWeight float64, entityLinks []string, journalEntryIDs []string) (string, error) {
-	ctx, span := infra.StartSpan(ctx, "semantic.upsert")
-	defer span.End()
-
 	if env == nil || env.Config() == nil {
 		return "", fmt.Errorf("env and config required")
 	}
 	metadata := fmt.Sprintf(`{"domain":"%s"}`, domain)
-	client, err := env.Firestore(ctx)
+	projectID := env.Config().GoogleCloudProject
+	vector, err := infra.GenerateEmbedding(ctx, projectID, content+" "+metadata, infra.EmbedTaskRetrievalDocument)
 	if err != nil {
 		return "", err
 	}
-	projectID := env.Config().GoogleCloudProject
-	vector, err := infra.GenerateEmbedding(ctx, projectID, content+" "+metadata, infra.EmbedTaskRetrievalDocument)
+	return upsertSemanticMemoryWithVector(ctx, env, content, nodeType, domain, significanceWeight, entityLinks, journalEntryIDs, vector)
+}
+
+// UpsertSemanticMemoryPreembedded is like UpsertSemanticMemory but accepts a precomputed embedding vector,
+// skipping the embedding API call. Use this when the vector has already been generated (e.g. dream batch path).
+// If vector is nil or empty, falls back to generating a fresh embedding.
+func UpsertSemanticMemoryPreembedded(ctx context.Context, env infra.ToolEnv, content, nodeType, domain string, significanceWeight float64, entityLinks []string, journalEntryIDs []string, vector []float32) (string, error) {
+	if env == nil || env.Config() == nil {
+		return "", fmt.Errorf("env and config required")
+	}
+	if len(vector) == 0 {
+		return UpsertSemanticMemory(ctx, env, content, nodeType, domain, significanceWeight, entityLinks, journalEntryIDs)
+	}
+	return upsertSemanticMemoryWithVector(ctx, env, content, nodeType, domain, significanceWeight, entityLinks, journalEntryIDs, vector)
+}
+
+func upsertSemanticMemoryWithVector(ctx context.Context, env infra.ToolEnv, content, nodeType, domain string, significanceWeight float64, entityLinks []string, journalEntryIDs []string, vector []float32) (string, error) {
+	ctx, span := infra.StartSpan(ctx, "semantic.upsert")
+	defer span.End()
+
+	metadata := fmt.Sprintf(`{"domain":"%s"}`, domain)
+	client, err := env.Firestore(ctx)
 	if err != nil {
 		return "", err
 	}

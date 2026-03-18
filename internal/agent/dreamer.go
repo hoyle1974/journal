@@ -60,6 +60,7 @@ type mergedFact struct {
 	NodeType string
 	Domain   string
 	Weight   float64
+	Vector   []float32 // precomputed embedding; reused during upsert to avoid a second API call
 }
 
 func cosineSimilarity(a, b []float32) float64 {
@@ -84,7 +85,13 @@ func mergeDreamerFacts(ctx context.Context, app *infra.App, domains []Domain, ou
 		domain Domain
 		vec    []float32
 	}
-	var flat []factWithMeta
+
+	// Collect all non-empty facts first so we can batch-embed them in one request.
+	type pendingFact struct {
+		fact   string
+		domain Domain
+	}
+	var pending []pendingFact
 	for i, domain := range domains {
 		out := outputs[i]
 		if out == nil {
@@ -92,16 +99,32 @@ func mergeDreamerFacts(ctx context.Context, app *infra.App, domains []Domain, ou
 		}
 		for _, f := range out.Facts {
 			f = strings.TrimSpace(f)
-			if f == "" {
-				continue
+			if f != "" {
+				pending = append(pending, pendingFact{fact: f, domain: domain})
 			}
-			vec, err := generateEmbedding(ctx, app, f)
-			if err != nil {
-				infra.LoggerFrom(ctx).Debug("dreamer merge skip embedding", "fact", f, "error", err)
-				continue
-			}
-			flat = append(flat, factWithMeta{fact: f, domain: domain, vec: vec})
 		}
+	}
+	if len(pending) == 0 {
+		return nil
+	}
+
+	texts := make([]string, len(pending))
+	for i, p := range pending {
+		texts[i] = p.fact
+	}
+	vecs, err := infra.GenerateEmbeddingsBatch(ctx, app.Config().GoogleCloudProject, texts, infra.EmbedTaskRetrievalDocument)
+	if err != nil {
+		infra.LoggerFrom(ctx).Warn("dreamer merge batch embedding failed, skipping fact merge", "error", err)
+		return nil
+	}
+
+	var flat []factWithMeta
+	for i, p := range pending {
+		if len(vecs[i]) == 0 {
+			infra.LoggerFrom(ctx).Debug("dreamer merge skip empty embedding", "fact", p.fact)
+			continue
+		}
+		flat = append(flat, factWithMeta{fact: p.fact, domain: p.domain, vec: vecs[i]})
 	}
 	if len(flat) == 0 {
 		return nil
@@ -153,6 +176,7 @@ func mergeDreamerFacts(ctx context.Context, app *infra.App, domains []Domain, ou
 			NodeType: nodeType,
 			Domain:   string(f.domain),
 			Weight:   weight,
+			Vector:   f.vec,
 		})
 	}
 	return result
@@ -184,7 +208,7 @@ func shouldSynthesizeContext(meta *memory.ContextMetadata) bool {
 func dreamerWriteMergedFacts(ctx context.Context, app *infra.App, merged []mergedFact, entryUUIDs []string, progress DreamerProgress) (written int, err error) {
 	total := len(merged)
 	for _, m := range merged {
-		if _, err = memory.UpsertSemanticMemory(ctx, app, m.Content, m.NodeType, m.Domain, m.Weight, nil, entryUUIDs); err != nil {
+		if _, err = memory.UpsertSemanticMemoryPreembedded(ctx, app, m.Content, m.NodeType, m.Domain, m.Weight, nil, entryUUIDs, m.Vector); err != nil {
 			infra.LoggerFrom(ctx).Warn("dreamer upsert failed", "domain", m.Domain, "fact", utils.TruncateString(m.Content, 50), "error", err)
 			continue
 		}

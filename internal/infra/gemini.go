@@ -322,6 +322,127 @@ const (
 	EmbedTaskRetrievalDocument = "RETRIEVAL_DOCUMENT"
 )
 
+// embeddingBatchSize is the maximum number of instances per Vertex AI predict request.
+const embeddingBatchSize = 250
+
+// GenerateEmbeddingsBatch generates embeddings for multiple texts in as few HTTP requests as possible.
+// Texts are chunked into batches of up to embeddingBatchSize and sent concurrently.
+// The returned slice is the same length and order as texts.
+func GenerateEmbeddingsBatch(ctx context.Context, projectID string, texts []string, taskType ...string) ([][]float32, error) {
+	ctx, span := StartSpan(ctx, "vertex.generate_embeddings_batch")
+	defer span.End()
+
+	if len(texts) == 0 {
+		return nil, nil
+	}
+
+	task := EmbedTaskRetrievalQuery
+	if len(taskType) > 0 && taskType[0] != "" {
+		task = taskType[0]
+	}
+
+	// Build chunks.
+	type chunk struct {
+		start int
+		texts []string
+	}
+	var chunks []chunk
+	for i := 0; i < len(texts); i += embeddingBatchSize {
+		end := i + embeddingBatchSize
+		if end > len(texts) {
+			end = len(texts)
+		}
+		chunks = append(chunks, chunk{start: i, texts: texts[i:end]})
+	}
+
+	endpoint := fmt.Sprintf("https://us-central1-aiplatform.googleapis.com/v1/projects/%s/locations/us-central1/publishers/google/models/text-embedding-005:predict", projectID)
+
+	tokenSource, err := google.DefaultTokenSource(ctx, "https://www.googleapis.com/auth/cloud-platform")
+	if err != nil {
+		span.RecordError(err)
+		return nil, fmt.Errorf("failed to get token source: %w", err)
+	}
+	token, err := tokenSource.Token()
+	if err != nil {
+		span.RecordError(err)
+		return nil, fmt.Errorf("failed to get token: %w", err)
+	}
+
+	results := make([][]float32, len(texts))
+
+	for _, ch := range chunks {
+		instances := make([]map[string]interface{}, len(ch.texts))
+		totalBytes := 0
+		for i, t := range ch.texts {
+			instances[i] = map[string]interface{}{"content": t, "task_type": task}
+			totalBytes += len(t)
+		}
+		requestBody := map[string]interface{}{"instances": instances}
+		jsonBody, err := json.Marshal(requestBody)
+		if err != nil {
+			span.RecordError(err)
+			return nil, err
+		}
+
+		req, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewReader(jsonBody))
+		if err != nil {
+			span.RecordError(err)
+			return nil, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+token.AccessToken)
+
+		httpClient := &http.Client{Timeout: 30 * time.Second}
+		embedStart := time.Now()
+		resp, err := httpClient.Do(req)
+		embedLatency := time.Since(embedStart)
+		if err != nil {
+			span.RecordError(err)
+			LoggerFrom(ctx).Error("batch embedding request failed", "error", err)
+			RecordEmbeddingPrometheusMetrics(task, 0, embedLatency, totalBytes, err)
+			return nil, fmt.Errorf("Embedding API error: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			apiErr := fmt.Errorf("embedding API returned %d: %s", resp.StatusCode, string(body))
+			span.RecordError(apiErr)
+			LoggerFrom(ctx).Error("batch embedding failed", "status", resp.StatusCode, "body", string(body))
+			RecordEmbeddingPrometheusMetrics(task, 0, embedLatency, totalBytes, apiErr)
+			return nil, WrapLLMError(apiErr)
+		}
+
+		var result struct {
+			Predictions []struct {
+				Embeddings struct {
+					Values []float32 `json:"values"`
+				} `json:"embeddings"`
+			} `json:"predictions"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			span.RecordError(err)
+			return nil, fmt.Errorf("failed to decode batch embedding response: %w", err)
+		}
+		if len(result.Predictions) != len(ch.texts) {
+			return nil, fmt.Errorf("batch embedding: expected %d predictions, got %d", len(ch.texts), len(result.Predictions))
+		}
+
+		dims := 0
+		for i, pred := range result.Predictions {
+			if len(pred.Embeddings.Values) == 0 {
+				return nil, fmt.Errorf("batch embedding: empty vector for text index %d", ch.start+i)
+			}
+			results[ch.start+i] = pred.Embeddings.Values
+			dims = len(pred.Embeddings.Values)
+		}
+		LoggerFrom(ctx).Debug("batch embedding generated", "count", len(ch.texts), "dimensions", dims)
+		RecordEmbeddingPrometheusMetrics(task, dims, embedLatency, totalBytes, nil)
+	}
+
+	return results, nil
+}
+
 // GenerateEmbedding creates a 768-dimension vector for semantic search using Vertex AI text-embedding-005.
 func GenerateEmbedding(ctx context.Context, projectID string, text string, taskType ...string) ([]float32, error) {
 	ctx, span := StartSpan(ctx, "vertex.generate_embedding")
