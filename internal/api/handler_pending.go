@@ -6,7 +6,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackstrohm/jot/internal/infra"
-	"github.com/jackstrohm/jot/internal/persona"
 )
 
 func handlePendingQuestions(s *Server, w http.ResponseWriter, r *http.Request) (any, error) {
@@ -16,14 +15,7 @@ func handlePendingQuestions(s *Server, w http.ResponseWriter, r *http.Request) (
 		infra.LoggerFrom(ctx).Error("pending questions list failed", "error", err)
 		return nil, err
 	}
-	if app, ok := s.App.(*infra.App); ok {
-		for i := range questions {
-			if questions[i].Question != "" {
-				questions[i].Question = persona.Apply(ctx, app, questions[i].Question, questions[i].Context)
-			}
-		}
-	}
-	return map[string]interface{}{"questions": questions, "count": len(questions)}, nil
+	return map[string]any{"questions": questions, "count": len(questions)}, nil
 }
 
 func handlePendingQuestionResolve(s *Server, w http.ResponseWriter, r *http.Request) (any, error) {
