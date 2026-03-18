@@ -182,6 +182,13 @@ func handleProcessTelegramQuery(s *Server, w http.ResponseWriter, r *http.Reques
 		infra.LoggerFrom(ctx).Info("process-telegram-query: reply sent (caption)", "chat_id", data.ChatID, "preview", utils.TruncateString(response, 60))
 		return map[string]string{"status": "ok"}, nil
 	}
+	// Handle slash commands before running FOH.
+	if strings.HasPrefix(data.Body, "/") {
+		if handled, slashErr := handleTelegramSlashCommand(ctx, s, data.ChatID, data.Body); handled {
+			return map[string]string{"status": "ok"}, slashErr
+		}
+	}
+
 	msg := &telegram.IncomingMessage{
 		UpdateID:    data.UpdateID,
 		MessageID:   data.MessageID,
