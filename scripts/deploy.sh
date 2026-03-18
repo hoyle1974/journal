@@ -116,6 +116,9 @@ case "$MODE" in
     if [ -n "${JOT_IMAGES_BUCKET:-}" ]; then
       ENV_VARS="$ENV_VARS,JOT_IMAGES_BUCKET=$JOT_IMAGES_BUCKET"
     fi
+    if [ -n "${DOCUMENT_ID:-}" ]; then
+      ENV_VARS="$ENV_VARS,DOCUMENT_ID=$DOCUMENT_ID"
+    fi
 
     # Build env block for YAML (Prometheus sidecar deploy)
     ENV_BLOCK_FILE="$REPO_ROOT/scripts/.env-block.yaml"

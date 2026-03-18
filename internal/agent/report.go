@@ -123,6 +123,57 @@ func GenerateProcessEntryReport(ctx context.Context, app infra.ToolEnv, r *Proce
 	return narrative
 }
 
+// DreamerReportInput holds the stats collected during a dream run for the process narrative.
+type DreamerReportInput struct {
+	EntriesProcessed    int
+	FactsExtracted      int
+	FactsWritten        int
+	ContextsSynthesized int
+	PersonaFactCount    int
+	EvolutionAudit      *EvolutionAuditOutput
+}
+
+// GenerateDreamerReport generates a first-person process narrative of what happened during a dream run.
+// On failure it returns an empty string so callers can degrade gracefully.
+func GenerateDreamerReport(ctx context.Context, app infra.ToolEnv, in *DreamerReportInput) string {
+	ctx, span := infra.StartSpan(ctx, "agent.dreamer_report")
+	defer span.End()
+
+	if in == nil {
+		return ""
+	}
+	data := prompts.DreamerReportData{
+		EntriesProcessed:    in.EntriesProcessed,
+		FactsExtracted:      in.FactsExtracted,
+		FactsWritten:        in.FactsWritten,
+		ContextsSynthesized: in.ContextsSynthesized,
+		PersonaFactCount:    in.PersonaFactCount,
+	}
+	if in.EvolutionAudit != nil {
+		data.EvolutionSummary = in.EvolutionAudit.Summary
+		data.EvolutionOpenLoops = in.EvolutionAudit.Facts
+		data.EvolutionDevRequests = in.EvolutionAudit.Entities
+	}
+	prompt, err := prompts.BuildDreamerReport(data)
+	if err != nil {
+		infra.LoggerFrom(ctx).Error("dreamer report: prompt build failed", "error", err)
+		return ""
+	}
+
+	resp, err := app.Dispatch(ctx, &infra.LLMRequest{
+		Parts:     []*genai.Part{{Text: utils.WrapAsUserData(prompt)}},
+		GenConfig: &infra.GenConfig{MaxOutputTokens: 400},
+	})
+	if err != nil {
+		infra.LoggerFrom(ctx).Error("dreamer report: LLM call failed", "error", err)
+		return ""
+	}
+
+	narrative := strings.TrimSpace(infra.ExtractTextFromResponse(resp))
+	infra.LoggerFrom(ctx).Debug("dreamer report generated", "length", len(narrative))
+	return narrative
+}
+
 // filterDecisionLogs keeps only lines containing a decision-point marker, capped at maxFilteredLogLines.
 func filterDecisionLogs(logs []string) string {
 	if len(logs) == 0 {

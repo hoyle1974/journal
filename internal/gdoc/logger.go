@@ -88,7 +88,7 @@ func logToGDocSync(ctx context.Context, cfg *config.Config, message string) {
 
 	doc, err := docsService.Documents.Get(cfg.DocumentID).Do()
 	if err != nil {
-		infra.LoggerFrom(ctx).Error("failed to fetch document for logging", "error", err)
+		infra.LoggerFrom(ctx).Error("failed to fetch document for logging", "document_id", cfg.DocumentID, "error", err)
 		span.RecordError(err)
 		return
 	}

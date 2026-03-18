@@ -794,10 +794,20 @@ func RunDreamer(ctx context.Context, app *infra.App, opts *RunDreamerOpts) (*Dre
 	}
 	if dreamNarrative != "" && app.Config() != nil && app.Config().DebugReportEnabled {
 		cfg := app.Config()
-		narrative := dreamNarrative
+		dreamerIn := &DreamerReportInput{
+			EntriesProcessed:    len(entryUUIDs),
+			FactsExtracted:      totalFacts,
+			FactsWritten:        written,
+			ContextsSynthesized: synthesized,
+			PersonaFactCount:    len(personaFacts),
+			EvolutionAudit:      evolutionAudit,
+		}
 		asyncCtx := context.WithoutCancel(ctx)
 		app.SubmitAsync(func() {
-			gdoc.WriteReport(asyncCtx, cfg, narrative)
+			processNarrative := GenerateDreamerReport(asyncCtx, app, dreamerIn)
+			if processNarrative != "" {
+				gdoc.WriteReport(asyncCtx, cfg, processNarrative)
+			}
 		})
 	}
 

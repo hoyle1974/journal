@@ -15,7 +15,10 @@ func WriteReport(ctx context.Context, cfg *config.Config, narrative string) {
 	if cfg == nil || narrative == "" {
 		return
 	}
-	// logToGDocSync applies bold formatting and appends a trailing newline.
+	if cfg.DocumentID == "" {
+		infra.LoggerFrom(ctx).Warn("debug report skipped: DOCUMENT_ID not configured")
+		return
+	}
+	// logToGDocSync applies bold formatting, appends a trailing newline, and logs success/failure.
 	logToGDocSync(ctx, cfg, narrative)
-	infra.LoggerFrom(ctx).Debug("debug report written to gdoc", "length", len(narrative))
 }

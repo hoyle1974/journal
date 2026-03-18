@@ -1,0 +1,27 @@
+You are the Jot AI assistant writing an internal debug report in first person. Describe exactly what you did during the dream consolidation run. Be concise and honest. This report is for the developer to understand what the dreamer processed and decided.
+
+Write 4–8 sentences. Plain prose only. No markdown, no bullet points.
+
+Rules:
+- First person ("I processed...", "I extracted...", "I synthesized...")
+- Cover the key phases: entry processing, specialist extraction, fact deduplication, context synthesis, profile synthesis, evolution audit
+- Mention the numbers (entries, facts extracted, facts written, contexts synthesized)
+- If persona facts were found, briefly say how many and what kind
+- If the evolution audit ran, summarize the key finding and open loops in one sentence
+- Do not mention the word "debug" or "report"
+- Do not reproduce the full user-facing readout — this is a process log, not a user summary
+
+Entries processed: {{.EntriesProcessed}}
+Facts extracted by specialists: {{.FactsExtracted}}
+Facts written to memory (after dedup): {{.FactsWritten}}
+Contexts synthesized: {{.ContextsSynthesized}}
+Persona facts found: {{.PersonaFactCount}}
+{{- if .EvolutionSummary}}
+Evolution audit summary: {{.EvolutionSummary}}
+{{- end}}
+{{- if .EvolutionOpenLoops}}
+Open loops identified: {{join .EvolutionOpenLoops "; "}}
+{{- end}}
+{{- if .EvolutionDevRequests}}
+Developer requests from audit: {{join .EvolutionDevRequests "; "}}
+{{- end}}

@@ -81,6 +81,9 @@ var debugReportPromptTxt string
 //go:embed process_entry_report_prompt.txt
 var processEntryReportPromptTxt string
 
+//go:embed dreamer_report_prompt.txt
+var dreamerReportPromptTxt string
+
 var (
 	systemPromptTmpl    = template.Must(template.New("system").Parse(systemPromptTxt))
 	contextAnalyzeTmpl  = template.Must(template.New("context").Parse(contextAnalyzeTxt))
@@ -93,6 +96,9 @@ var (
 	processEntryReportTmpl = template.Must(template.New("processEntryReport").Funcs(template.FuncMap{
 		"join": strings.Join,
 	}).Parse(processEntryReportPromptTxt))
+	dreamerReportTmpl = template.Must(template.New("dreamerReport").Funcs(template.FuncMap{
+		"join": strings.Join,
+	}).Parse(dreamerReportPromptTxt))
 )
 
 var (
@@ -302,6 +308,27 @@ func BuildProcessEntryReport(data ProcessEntryReportData) (string, error) {
 	var buf bytes.Buffer
 	if err := processEntryReportTmpl.Execute(&buf, data); err != nil {
 		return "", fmt.Errorf("process entry report template: %w", err)
+	}
+	return buf.String(), nil
+}
+
+// DreamerReportData holds all inputs for the dreamer process narrative prompt.
+type DreamerReportData struct {
+	EntriesProcessed     int
+	FactsExtracted       int
+	FactsWritten         int
+	ContextsSynthesized  int
+	PersonaFactCount     int
+	EvolutionSummary     string
+	EvolutionOpenLoops   []string
+	EvolutionDevRequests []string
+}
+
+// BuildDreamerReport executes the dreamer report template with the given data.
+func BuildDreamerReport(data DreamerReportData) (string, error) {
+	var buf bytes.Buffer
+	if err := dreamerReportTmpl.Execute(&buf, data); err != nil {
+		return "", fmt.Errorf("dreamer report template: %w", err)
 	}
 	return buf.String(), nil
 }
