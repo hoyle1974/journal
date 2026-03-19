@@ -4,8 +4,8 @@
 package prompts
 
 import (
-	_ "embed"
 	"bytes"
+	_ "embed"
 	"fmt"
 	"strings"
 	"sync"
@@ -84,21 +84,25 @@ var processEntryReportPromptTxt string
 //go:embed dreamer_report_prompt.txt
 var dreamerReportPromptTxt string
 
+//go:embed tag_consolidator.txt
+var tagConsolidatorTxt string
+
 var (
-	systemPromptTmpl    = template.Must(template.New("system").Parse(systemPromptTxt))
-	contextAnalyzeTmpl  = template.Must(template.New("context").Parse(contextAnalyzeTxt))
-	journalAnalyzeTmpl  = template.Must(template.New("journal").Parse(journalAnalyzeTxt))
-	knowledgeGapTmpl = template.Must(template.New("knowledgeGap").Parse(knowledgeGapTxt))
-	gapDetectorTmpl     = template.Must(template.New("gapDetector").Parse(gapDetectorTxt))
-	rollUpTmpl          = template.Must(template.New("rollUp").Parse(rollUpTxt))
-	activityHistoryTmpl = template.Must(template.New("activityHistory").Parse(activityHistoryTxt))
-	debugReportTmpl     = template.Must(template.New("debugReport").Parse(debugReportPromptTxt))
+	systemPromptTmpl       = template.Must(template.New("system").Parse(systemPromptTxt))
+	contextAnalyzeTmpl     = template.Must(template.New("context").Parse(contextAnalyzeTxt))
+	journalAnalyzeTmpl     = template.Must(template.New("journal").Parse(journalAnalyzeTxt))
+	knowledgeGapTmpl       = template.Must(template.New("knowledgeGap").Parse(knowledgeGapTxt))
+	gapDetectorTmpl        = template.Must(template.New("gapDetector").Parse(gapDetectorTxt))
+	rollUpTmpl             = template.Must(template.New("rollUp").Parse(rollUpTxt))
+	activityHistoryTmpl    = template.Must(template.New("activityHistory").Parse(activityHistoryTxt))
+	debugReportTmpl        = template.Must(template.New("debugReport").Parse(debugReportPromptTxt))
 	processEntryReportTmpl = template.Must(template.New("processEntryReport").Funcs(template.FuncMap{
 		"join": strings.Join,
 	}).Parse(processEntryReportPromptTxt))
 	dreamerReportTmpl = template.Must(template.New("dreamerReport").Funcs(template.FuncMap{
 		"join": strings.Join,
 	}).Parse(dreamerReportPromptTxt))
+	tagConsolidatorTmpl = template.Must(template.New("tagConsolidator").Parse(tagConsolidatorTxt))
 )
 
 var (
@@ -223,8 +227,8 @@ func BuildRollUp(data RollUpData) (string, error) {
 
 // ActivityHistoryData holds topic, timeframe, and entries text for activity history summarization.
 type ActivityHistoryData struct {
-	Topic      string
-	Timeframe  string
+	Topic       string
+	Timeframe   string
 	EntriesText string
 }
 
@@ -333,6 +337,20 @@ func BuildDreamerReport(data DreamerReportData) (string, error) {
 	var buf bytes.Buffer
 	if err := dreamerReportTmpl.Execute(&buf, data); err != nil {
 		return "", fmt.Errorf("dreamer report template: %w", err)
+	}
+	return buf.String(), nil
+}
+
+// TagConsolidatorData holds the tag list for the tag consolidator prompt.
+type TagConsolidatorData struct {
+	TagList string // newline-separated list of unique tags
+}
+
+// BuildTagConsolidator executes the tag-consolidator template with the given data.
+func BuildTagConsolidator(data TagConsolidatorData) (string, error) {
+	var buf bytes.Buffer
+	if err := tagConsolidatorTmpl.Execute(&buf, data); err != nil {
+		return "", fmt.Errorf("execute tag consolidator: %w", err)
 	}
 	return buf.String(), nil
 }

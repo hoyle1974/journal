@@ -22,12 +22,12 @@ import (
 )
 
 const (
-	DreamerMergeSimilarity         = 0.93 // cosine similarity above this = same fact
-	DreamerBaseWeight              = 0.7
-	DreamerWeightBoostPerDup      = 0.1
+	DreamerMergeSimilarity           = 0.93 // cosine similarity above this = same fact
+	DreamerBaseWeight                = 0.7
+	DreamerWeightBoostPerDup         = 0.1
 	DreamerSynthesisNewLogsThreshold = 3  // run synthesis if this many new entries since last
-	DreamerSynthesisStaleHours    = 48   // high-significance contexts re-synthesize if older than this
-	DreamerTaskPhaseMaxIterations = 5   // max tool-call rounds in dreamer task phase
+	DreamerSynthesisStaleHours       = 48 // high-significance contexts re-synthesize if older than this
+	DreamerTaskPhaseMaxIterations    = 5  // max tool-call rounds in dreamer task phase
 )
 
 // DreamerInputs holds loaded data for a dream run.
@@ -821,7 +821,19 @@ func RunDreamer(ctx context.Context, app *infra.App, opts *RunDreamerOpts) (*Dre
 		progress.OnPhase(ctx, "incubation")
 		progress.OnLog(ctx, "Promoting recurring themes to contexts...")
 	}
-	if promoted, incErr := memory.PromoteIncubatingClusters(ctx, app); incErr != nil {
+	// Collect unique tags from the 7-day window, normalize them via LLM, then promote.
+	var tagMapping map[string]string
+	if incTags, tagsErr := memory.CollectIncubationTags(ctx, app); tagsErr != nil {
+		infra.LoggerFrom(ctx).Warn("dreamer incubation tag collection failed", "dreamer_run_id", dreamerRunID, "phase", "incubation", "error", tagsErr)
+	} else {
+		var consolidateErr error
+		tagMapping, consolidateErr = ConsolidateTags(ctx, app, incTags)
+		if consolidateErr != nil {
+			infra.LoggerFrom(ctx).Warn("dreamer tag consolidation failed, using identity mapping", "dreamer_run_id", dreamerRunID, "phase", "incubation", "error", consolidateErr)
+			tagMapping = nil
+		}
+	}
+	if promoted, incErr := memory.PromoteIncubatingClusters(ctx, app, tagMapping); incErr != nil {
 		infra.LoggerFrom(ctx).Warn("dreamer incubation failed", "dreamer_run_id", dreamerRunID, "phase", "incubation", "error", incErr)
 	} else if promoted > 0 {
 		infra.LoggerFrom(ctx).Info("dreamer incubation completed", "dreamer_run_id", dreamerRunID, "phase", "incubation", "promoted", promoted)
