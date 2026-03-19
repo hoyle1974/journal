@@ -554,12 +554,23 @@ func RunDreamer(ctx context.Context, app *infra.App, opts *RunDreamerOpts) (*Dre
 
 	dreamerModel := app.DreamerModel()
 
+	// Pre-flight: extract active contexts before the colloquium so specialists are aware.
+	if ctxs, runErr := RunContextExtractor(ctx, app, journalContext); runErr != nil {
+		infra.LoggerFrom(ctx).Warn("dreamer context extractor failed (pre-colloquium)", "dreamer_run_id", dreamerRunID, "error", runErr)
+	} else {
+		impactedContexts = ctxs
+	}
+
 	// --- PHASE 1: THE COLLOQUIUM (Discussion Room) ---
 	if progress != nil {
 		progress.OnPhase(ctx, "colloquium")
 	}
 	tColloquiumStart := time.Now()
-	roomTranscript := "Room is open. Initial pass.\n"
+	roomSeed := "Room is open. Initial pass."
+	if len(impactedContexts) > 0 {
+		roomSeed += "\nActive project contexts: [" + strings.Join(impactedContexts, ", ") + "]."
+	}
+	roomTranscript := roomSeed + "\n"
 	const maxRoomPasses = 10 // up to 10 passes; specialists may reply DONE early
 
 	for pass := 1; pass <= maxRoomPasses; pass++ {
@@ -629,14 +640,7 @@ func RunDreamer(ctx context.Context, app *infra.App, opts *RunDreamerOpts) (*Dre
 		}
 	}
 
-	// 2b. Context Extractor
-	if ctxs, runErr := RunContextExtractor(ctx, app, journalContext); runErr != nil {
-		infra.LoggerFrom(ctx).Warn("dreamer context extractor failed", "dreamer_run_id", dreamerRunID, "phase", "extraction", "error", runErr)
-	} else {
-		impactedContexts = ctxs
-	}
-
-	// 2c. Query Analyzer
+	// 2b. Query Analyzer
 	if analysis, runErr := RunQueryAnalyzer(ctx, app, recentQueriesText); runErr != nil {
 		infra.LoggerFrom(ctx).Warn("dreamer query analyzer failed", "dreamer_run_id", dreamerRunID, "phase", "extraction", "error", runErr)
 	} else {
