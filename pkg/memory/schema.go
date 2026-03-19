@@ -11,17 +11,17 @@ import (
 
 // Node type constants for use by callers and the registry.
 const (
-	NodeTypePerson     = "person"
-	NodeTypeProject    = "project"
-	NodeTypeGoal       = "goal"
-	NodeTypePreference = "preference"
-	NodeTypeEvent      = "event"
-	NodeTypeMilestone  = "milestone"
-	NodeTypePlace      = "place"
-	NodeTypeAsset      = "asset"
-	NodeTypeTool          = "tool"
-	NodeTypeGeneric       = "generic"
-	NodeTypeWeeklySummary = "weekly_summary"
+	NodeTypePerson         = "person"
+	NodeTypeProject        = "project"
+	NodeTypeGoal           = "goal"
+	NodeTypePreference     = "preference"
+	NodeTypeEvent          = "event"
+	NodeTypeMilestone      = "milestone"
+	NodeTypePlace          = "place"
+	NodeTypeAsset          = "asset"
+	NodeTypeTool           = "tool"
+	NodeTypeGeneric        = "generic"
+	NodeTypeWeeklySummary  = "weekly_summary"
 	NodeTypeMonthlySummary = "monthly_summary"
 	// NodeTypeIdentity is the reserved identity-anchor node type. Janitor must not delete or archive these.
 	NodeTypeIdentity = "identity_anchor"
@@ -440,4 +440,42 @@ func setStringSlice(m map[string]any, key string, s []string) {
 	if len(s) > 0 {
 		m[key] = s
 	}
+}
+
+// SPOTriple holds a parsed Subject | Predicate | Object triple.
+type SPOTriple struct {
+	Subject   string
+	Predicate string
+	Object    string
+}
+
+// ParseSPOTriple parses a fact line that may be in "Subject | Predicate | Object" format.
+// Returns a non-nil *SPOTriple only when the line contains exactly two "|" separators.
+// Returns nil when the line is a flat-format fact (e.g. "[WIFE] Gloria: ...").
+func ParseSPOTriple(line string) *SPOTriple {
+	parts := strings.SplitN(line, "|", 3)
+	if len(parts) != 3 {
+		return nil
+	}
+	s := strings.TrimSpace(parts[0])
+	p := strings.TrimSpace(parts[1])
+	o := strings.TrimSpace(parts[2])
+	if s == "" || p == "" || o == "" {
+		return nil
+	}
+	return &SPOTriple{Subject: s, Predicate: p, Object: o}
+}
+
+// IsSPOTriple returns true if the fact line is in Subject | Predicate | Object format.
+func IsSPOTriple(line string) bool {
+	return ParseSPOTriple(line) != nil
+}
+
+// NormalizedPredicate lowercases and replaces spaces/hyphens with underscores so predicates
+// are stored consistently (e.g. "works at" → "works_at").
+func NormalizedPredicate(raw string) string {
+	r := strings.ToLower(strings.TrimSpace(raw))
+	r = strings.ReplaceAll(r, " ", "_")
+	r = strings.ReplaceAll(r, "-", "_")
+	return r
 }
