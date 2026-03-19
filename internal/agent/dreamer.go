@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"cloud.google.com/go/firestore"
@@ -198,20 +199,31 @@ func shouldSynthesizeContext(meta *memory.ContextMetadata) bool {
 
 func dreamerWriteMergedFacts(ctx context.Context, app *infra.App, merged []mergedFact, entryUUIDs []string, progress DreamerProgress) (written int, err error) {
 	total := len(merged)
-	for _, m := range merged {
-		if _, err = memory.UpsertSemanticMemoryPreembedded(ctx, app, m.Content, m.NodeType, m.Domain, m.Weight, nil, entryUUIDs, m.Vector); err != nil {
-			infra.LoggerFrom(ctx).Warn("dreamer upsert failed", "domain", m.Domain, "fact", utils.TruncateString(m.Content, 50), "error", err)
-			continue
-		}
-		written++
-		infra.LoggerFrom(ctx).Info("dreamer wrote fact", "domain", m.Domain, "fact", utils.TruncateString(m.Content, 60), "n", written, "total", total)
-		if progress != nil && total > 0 {
-			// Log every 5 facts or on the last one so pollers see progress without spam
-			if written%5 == 0 || written == total {
-				progress.OnLog(ctx, fmt.Sprintf("  Written %d/%d facts", written, total))
-			}
-		}
+	if total == 0 {
+		return 0, nil
 	}
+
+	var mu sync.Mutex
+	g, gctx := errgroup.WithContext(ctx)
+	for _, m := range merged {
+		fact := m
+		g.Go(func() error {
+			if _, upsertErr := memory.UpsertSemanticMemoryPreembedded(gctx, app, fact.Content, fact.NodeType, fact.Domain, fact.Weight, nil, entryUUIDs, fact.Vector); upsertErr != nil {
+				infra.LoggerFrom(gctx).Warn("dreamer upsert failed", "domain", fact.Domain, "fact", utils.TruncateString(fact.Content, 50), "error", upsertErr)
+				return nil // soft error
+			}
+			mu.Lock()
+			written++
+			n := written
+			mu.Unlock()
+			infra.LoggerFrom(gctx).Info("dreamer wrote fact", "domain", fact.Domain, "fact", utils.TruncateString(fact.Content, 60), "n", n, "total", total)
+			if progress != nil && (n%5 == 0 || n == total) {
+				progress.OnLog(gctx, fmt.Sprintf("  Written %d/%d facts", n, total))
+			}
+			return nil
+		})
+	}
+	_ = g.Wait()
 	return written, nil
 }
 
