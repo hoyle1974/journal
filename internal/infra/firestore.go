@@ -75,3 +75,18 @@ func GetStringSliceField(data map[string]interface{}, field string) []string {
 	}
 	return out
 }
+
+// GetFloat32SliceField parses a Firestore array of float64 (stored as []interface{}) into []float32.
+func GetFloat32SliceField(data map[string]interface{}, field string) []float32 {
+	v, ok := data[field].([]interface{})
+	if !ok {
+		return nil
+	}
+	out := make([]float32, 0, len(v))
+	for _, e := range v {
+		if f, ok := e.(float64); ok {
+			out = append(out, float32(f))
+		}
+	}
+	return out
+}

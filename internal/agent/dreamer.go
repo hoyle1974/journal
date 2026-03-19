@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"fmt"
-	"math"
 	"strings"
 	"time"
 
@@ -62,22 +61,6 @@ type mergedFact struct {
 	Domain   string
 	Weight   float64
 	Vector   []float32 // precomputed embedding; reused during upsert to avoid a second API call
-}
-
-func cosineSimilarity(a, b []float32) float64 {
-	if len(a) != len(b) || len(a) == 0 {
-		return 0
-	}
-	var dot, normA, normB float64
-	for i := range a {
-		dot += float64(a[i]) * float64(b[i])
-		normA += float64(a[i]) * float64(a[i])
-		normB += float64(b[i]) * float64(b[i])
-	}
-	if normA == 0 || normB == 0 {
-		return 0
-	}
-	return dot / (math.Sqrt(normA) * math.Sqrt(normB))
 }
 
 func mergeDreamerFacts(ctx context.Context, app *infra.App, domains []Domain, outputs []*SpecialistOutput) []mergedFact {
@@ -142,7 +125,7 @@ func mergeDreamerFacts(ctx context.Context, app *infra.App, domains []Domain, ou
 			if used[j] {
 				continue
 			}
-			sim := cosineSimilarity(flat[i].vec, flat[j].vec)
+			sim := utils.CosineSimilarity(flat[i].vec, flat[j].vec)
 			if sim >= DreamerMergeSimilarity {
 				group = append(group, j)
 				used[j] = true

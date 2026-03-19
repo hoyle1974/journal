@@ -28,3 +28,11 @@ issues:
 
 ## System Capabilities (what Jot can do + existing tools)
 {{.ToolManifest}}
+
+{{if .PendingQuestionsBlock}}
+## Questions Already Waiting for an Answer
+The following questions have already been queued and are awaiting the user's response.
+Do NOT propose questions that are the same as or closely related to these:
+
+{{.PendingQuestionsBlock}}
+{{end}}

@@ -189,11 +189,12 @@ func BuildKnowledgeGap(data KnowledgeGapData) (string, error) {
 	return buf.String(), nil
 }
 
-// GapDetectorData holds recent journal, relevant knowledge, and tool manifest for gap detection.
+// GapDetectorData holds recent journal, relevant knowledge, tool manifest, and pending questions for gap detection.
 type GapDetectorData struct {
-	RecentJournal    string
-	RelevantKnowledge string
-	ToolManifest     string
+	RecentJournal         string
+	RelevantKnowledge     string
+	ToolManifest          string
+	PendingQuestionsBlock string // SanitizePrompt+WrapAsUserData-wrapped bullet list; empty string if none
 }
 
 // BuildGapDetector executes the gap-detector template.
