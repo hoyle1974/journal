@@ -27,6 +27,12 @@ type KnowledgeNode struct {
 	Metadata        string   `firestore:"metadata" json:"metadata"`
 	Timestamp       string   `firestore:"timestamp" json:"timestamp"`
 	JournalEntryIDs []string `firestore:"-" json:"journal_entry_ids,omitempty"`
+	// SPO triple fields. Predicate is non-empty only for relational nodes extracted in
+	// Subject | Predicate | Object format (e.g. "prefers", "works_at", "is_part_of").
+	// ObjectUUID is the UUID of the object entity node when it corresponds to an existing
+	// knowledge node; empty when the object is a raw string with no node.
+	Predicate  string `firestore:"predicate,omitempty" json:"predicate,omitempty"`
+	ObjectUUID string `firestore:"object_uuid,omitempty" json:"object_uuid,omitempty"`
 }
 
 // KnowledgeNodeWithLinks extends KnowledgeNode with entity_links and journal_entry_ids for graph traversal.
@@ -168,6 +174,12 @@ func UpsertKnowledge(ctx context.Context, env infra.ToolEnv, content, nodeType, 
 	return nodeUUID, nil
 }
 
+// SPOExtra carries optional Subject-Predicate-Object edge data for relational facts.
+type SPOExtra struct {
+	Predicate   string
+	ObjectValue string
+}
+
 // UpsertSemanticMemory saves a fact with extended schema (significance, domain, etc.).
 // env supplies Firestore and Config; pass from the caller (e.g. ToolEnv).
 func UpsertSemanticMemory(ctx context.Context, env infra.ToolEnv, content, nodeType, domain string, significanceWeight float64, entityLinks []string, journalEntryIDs []string) (string, error) {
@@ -180,7 +192,7 @@ func UpsertSemanticMemory(ctx context.Context, env infra.ToolEnv, content, nodeT
 	if err != nil {
 		return "", err
 	}
-	return upsertSemanticMemoryWithVector(ctx, env, content, nodeType, domain, significanceWeight, entityLinks, journalEntryIDs, vector)
+	return upsertSemanticMemoryWithVector(ctx, env, content, nodeType, domain, significanceWeight, entityLinks, journalEntryIDs, vector, nil)
 }
 
 // UpsertSemanticMemoryPreembedded is like UpsertSemanticMemory but accepts a precomputed embedding vector,
@@ -193,10 +205,23 @@ func UpsertSemanticMemoryPreembedded(ctx context.Context, env infra.ToolEnv, con
 	if len(vector) == 0 {
 		return UpsertSemanticMemory(ctx, env, content, nodeType, domain, significanceWeight, entityLinks, journalEntryIDs)
 	}
-	return upsertSemanticMemoryWithVector(ctx, env, content, nodeType, domain, significanceWeight, entityLinks, journalEntryIDs, vector)
+	return upsertSemanticMemoryWithVector(ctx, env, content, nodeType, domain, significanceWeight, entityLinks, journalEntryIDs, vector, nil)
 }
 
-func upsertSemanticMemoryWithVector(ctx context.Context, env infra.ToolEnv, content, nodeType, domain string, significanceWeight float64, entityLinks []string, journalEntryIDs []string, vector []float32) (string, error) {
+// UpsertSemanticMemoryPreembeddedWithSPO is like UpsertSemanticMemoryPreembedded but also persists SPO
+// predicate and object_value fields when spo is non-nil and spo.Predicate is non-empty.
+func UpsertSemanticMemoryPreembeddedWithSPO(ctx context.Context, env infra.ToolEnv, content, nodeType, domain string, significanceWeight float64, entityLinks []string, journalEntryIDs []string, vector []float32, spo *SPOExtra) (string, error) {
+	if env == nil || env.Config() == nil {
+		return "", fmt.Errorf("env and config required")
+	}
+	if len(vector) == 0 {
+		// Fall back to non-SPO path which will regenerate embedding.
+		return UpsertSemanticMemory(ctx, env, content, nodeType, domain, significanceWeight, entityLinks, journalEntryIDs)
+	}
+	return upsertSemanticMemoryWithVector(ctx, env, content, nodeType, domain, significanceWeight, entityLinks, journalEntryIDs, vector, spo)
+}
+
+func upsertSemanticMemoryWithVector(ctx context.Context, env infra.ToolEnv, content, nodeType, domain string, significanceWeight float64, entityLinks []string, journalEntryIDs []string, vector []float32, spo *SPOExtra) (string, error) {
 	ctx, span := infra.StartSpan(ctx, "semantic.upsert")
 	defer span.End()
 
@@ -232,6 +257,10 @@ func upsertSemanticMemoryWithVector(ctx context.Context, env infra.ToolEnv, cont
 	}
 	if len(journalEntryIDs) > 0 {
 		data["journal_entry_ids"] = journalEntryIDs
+	}
+	if spo != nil && spo.Predicate != "" {
+		data["predicate"] = spo.Predicate
+		data["object_value"] = spo.ObjectValue
 	}
 
 	var nodeUUID string
@@ -931,6 +960,80 @@ func GetActiveSignals(ctx context.Context, env infra.ToolEnv, limit int) (string
 		return "", nil
 	}
 	return strings.Join(signals, "\n"), nil
+}
+
+// QueryNodesLinkingTo returns nodes whose entity_links array contains targetUUID (incoming edges).
+// This finds all nodes that explicitly reference the target as a linked entity.
+func QueryNodesLinkingTo(ctx context.Context, env infra.ToolEnv, targetUUID string, limit int) ([]KnowledgeNode, error) {
+	ctx, span := infra.StartSpan(ctx, "knowledge.query_nodes_linking_to")
+	defer span.End()
+	span.SetAttributes(map[string]string{"target_uuid": targetUUID})
+
+	if env == nil {
+		return nil, fmt.Errorf("env required")
+	}
+	client, err := env.Firestore(ctx)
+	if err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+	query := client.Collection(KnowledgeCollection).
+		Where("entity_links", "array-contains", targetUUID).
+		Limit(limit)
+	nodes, err := infra.QueryDocuments(ctx, query, func(doc *firestore.DocumentSnapshot) (KnowledgeNode, error) {
+		data := doc.Data()
+		return KnowledgeNode{
+			UUID:       doc.Ref.ID,
+			Content:    infra.GetStringField(data, "content"),
+			NodeType:   infra.GetStringField(data, "node_type"),
+			Metadata:   infra.GetStringField(data, "metadata"),
+			Timestamp:  infra.GetStringField(data, "timestamp"),
+			Predicate:  infra.GetStringField(data, "predicate"),
+			ObjectUUID: infra.GetStringField(data, "object_uuid"),
+		}, nil
+	})
+	if err != nil {
+		span.RecordError(err)
+		return nil, infra.WrapFirestoreIndexError(err)
+	}
+	return nodes, nil
+}
+
+// QueryOutgoingEdges returns nodes where object_uuid equals subjectUUID (outgoing SPO edges).
+// This finds all relational nodes where the given entity is the subject.
+func QueryOutgoingEdges(ctx context.Context, env infra.ToolEnv, subjectUUID string, limit int) ([]KnowledgeNode, error) {
+	ctx, span := infra.StartSpan(ctx, "knowledge.query_outgoing_edges")
+	defer span.End()
+	span.SetAttributes(map[string]string{"subject_uuid": subjectUUID})
+
+	if env == nil {
+		return nil, fmt.Errorf("env required")
+	}
+	client, err := env.Firestore(ctx)
+	if err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+	query := client.Collection(KnowledgeCollection).
+		Where("object_uuid", "==", subjectUUID).
+		Limit(limit)
+	nodes, err := infra.QueryDocuments(ctx, query, func(doc *firestore.DocumentSnapshot) (KnowledgeNode, error) {
+		data := doc.Data()
+		return KnowledgeNode{
+			UUID:       doc.Ref.ID,
+			Content:    infra.GetStringField(data, "content"),
+			NodeType:   infra.GetStringField(data, "node_type"),
+			Metadata:   infra.GetStringField(data, "metadata"),
+			Timestamp:  infra.GetStringField(data, "timestamp"),
+			Predicate:  infra.GetStringField(data, "predicate"),
+			ObjectUUID: infra.GetStringField(data, "object_uuid"),
+		}, nil
+	})
+	if err != nil {
+		span.RecordError(err)
+		return nil, infra.WrapFirestoreIndexError(err)
+	}
+	return nodes, nil
 }
 
 // ListKnowledgeNodes lists all knowledge nodes (for diagnostics).
