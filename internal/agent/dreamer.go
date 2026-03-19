@@ -228,25 +228,40 @@ func dreamerWriteMergedFacts(ctx context.Context, app *infra.App, merged []merge
 }
 
 func dreamerSynthesizeContexts(ctx context.Context, app *infra.App, contextUUIDs map[string]struct{}) (synthesized, skippedLazy int, err error) {
-	for uuid := range contextUUIDs {
-		meta, err := memory.GetContextMetadata(ctx, app, uuid)
-		if err != nil {
-			infra.LoggerFrom(ctx).Warn("dreamer get context metadata failed", "context_uuid", uuid, "error", err)
-			continue
-		}
-		if !shouldSynthesizeContext(meta) {
-			skippedLazy++
-			if err = memory.TouchContext(ctx, app, uuid, nil, 0); err != nil {
-				infra.LoggerFrom(ctx).Debug("dreamer touch context skipped", "context_uuid", uuid, "error", err)
-			}
-			continue
-		}
-		if err = memory.SynthesizeContext(ctx, app, uuid); err != nil {
-			infra.LoggerFrom(ctx).Warn("dreamer context synthesis failed", "context_uuid", uuid, "error", err)
-			continue
-		}
-		synthesized++
+	if len(contextUUIDs) == 0 {
+		return 0, 0, nil
 	}
+
+	var mu sync.Mutex
+	g, gctx := errgroup.WithContext(ctx)
+	for uuid := range contextUUIDs {
+		u := uuid
+		g.Go(func() error {
+			meta, metaErr := memory.GetContextMetadata(gctx, app, u)
+			if metaErr != nil {
+				infra.LoggerFrom(gctx).Warn("dreamer get context metadata failed", "context_uuid", u, "error", metaErr)
+				return nil
+			}
+			if !shouldSynthesizeContext(meta) {
+				mu.Lock()
+				skippedLazy++
+				mu.Unlock()
+				if touchErr := memory.TouchContext(gctx, app, u, nil, 0); touchErr != nil {
+					infra.LoggerFrom(gctx).Debug("dreamer touch context skipped", "context_uuid", u, "error", touchErr)
+				}
+				return nil
+			}
+			if synthErr := memory.SynthesizeContext(gctx, app, u); synthErr != nil {
+				infra.LoggerFrom(gctx).Warn("dreamer context synthesis failed", "context_uuid", u, "error", synthErr)
+				return nil
+			}
+			mu.Lock()
+			synthesized++
+			mu.Unlock()
+			return nil
+		})
+	}
+	_ = g.Wait()
 	return synthesized, skippedLazy, nil
 }
 
