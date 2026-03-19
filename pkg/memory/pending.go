@@ -133,6 +133,46 @@ func GetUnresolvedPendingQuestions(ctx context.Context, env infra.ToolEnv, limit
 	return out, nil
 }
 
+// GetRecentlyResolvedPendingQuestions returns pending questions resolved after `since`, newest first.
+// Used by the dedup filter to avoid re-asking recently answered questions.
+// Scans at most 200 documents server-side (created_at DESC); client-side filters resolved_at != "".
+func GetRecentlyResolvedPendingQuestions(ctx context.Context, env infra.ToolEnv, since time.Time) ([]PendingQuestion, error) {
+	if env == nil {
+		return nil, fmt.Errorf("env required")
+	}
+	client, err := env.Firestore(ctx)
+	if err != nil {
+		return nil, err
+	}
+	sinceStr := since.Format(time.RFC3339)
+	query := client.Collection(PendingQuestionsCollection).
+		Where("created_at", ">=", sinceStr).
+		OrderBy("created_at", firestore.Desc).
+		Limit(200)
+	out, err := infra.QueryDocuments(ctx, query, func(doc *firestore.DocumentSnapshot) (PendingQuestion, error) {
+		data := doc.Data()
+		if infra.GetStringField(data, "resolved_at") == "" {
+			return PendingQuestion{}, fmt.Errorf("skip")
+		}
+		q := PendingQuestion{
+			UUID:       doc.Ref.ID,
+			Question:   infra.GetStringField(data, "question"),
+			Kind:       infra.GetStringField(data, "kind"),
+			Context:    infra.GetStringField(data, "context"),
+			CreatedAt:  infra.GetStringField(data, "created_at"),
+			ResolvedAt: infra.GetStringField(data, "resolved_at"),
+			Answer:     infra.GetStringField(data, "answer"),
+			Embedding:  infra.GetFloat32SliceField(data, "embedding"),
+		}
+		q.SourceEntryIDs = infra.GetStringSliceField(data, "source_entry_ids")
+		return q, nil
+	})
+	if err != nil {
+		return nil, infra.WrapFirestoreIndexError(err)
+	}
+	return out, nil
+}
+
 // ResolvePendingQuestion sets resolved_at and answer for a pending question.
 // If the question has kind "onboarding", the answer is also upserted as a user_identity
 // knowledge node in a goroutine (non-blocking). env supplies Firestore and Config; pass from the caller.
