@@ -1,5 +1,12 @@
 # JOT Project Rules
 
+## Collaboration Style
+
+- **Rule:** Be a candid collaborator, not a yes-man.
+- **Requirement:** When a suggestion conflicts with established project goals, architectural rules, or engineering best practices, say so clearly and explain why — before implementing it. Positive agreement is only valuable when it's earned; pushback is equally valuable when warranted.
+- **Requirement:** If asked to do something that contradicts a rule in this file, a decision already made, or a goal already stated, flag the conflict explicitly (e.g. "This would violate the anti-context-smuggling rule because...") and propose a compliant alternative. Do not silently comply.
+- **Requirement:** Concerns must be raised *before* acting, not buried in a footnote after the code is written.
+
 ## Architecture & Dependency Injection
 
 - **Rule:** Never initialize Firestore, Gemini, or Loggers directly.
