@@ -8,6 +8,7 @@ import (
 
 	"cloud.google.com/go/firestore"
 	"github.com/jackstrohm/jot/internal/infra"
+	"github.com/jackstrohm/jot/pkg/utils"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -40,6 +41,17 @@ func InsertPendingQuestions(ctx context.Context, env infra.ToolEnv, questions []
 	if env == nil {
 		return fmt.Errorf("env required")
 	}
+
+	// Filter out duplicates before writing.
+	filtered, err := filterDuplicatePendingQuestions(ctx, env, questions)
+	if err != nil {
+		return fmt.Errorf("filter duplicate questions: %w", err)
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
+	questions = filtered
+
 	client, err := env.Firestore(ctx)
 	if err != nil {
 		return err
@@ -171,6 +183,80 @@ func GetRecentlyResolvedPendingQuestions(ctx context.Context, env infra.ToolEnv,
 		return nil, infra.WrapFirestoreIndexError(err)
 	}
 	return out, nil
+}
+
+const dedupSimilarityThreshold = 0.85
+
+// filterDuplicatePendingQuestions removes candidates that are semantically similar
+// to existing pending questions (unresolved or resolved within 30 days).
+// If the embedding API fails, all candidates are returned unfiltered (best-effort).
+func filterDuplicatePendingQuestions(ctx context.Context, env infra.ToolEnv, candidates []PendingQuestion) ([]PendingQuestion, error) {
+	if len(candidates) == 0 {
+		return candidates, nil
+	}
+
+	// Fetch the comparison set.
+	unresolved, err := GetUnresolvedPendingQuestions(ctx, env, 100)
+	if err != nil {
+		infra.LoggerFrom(ctx).Warn("dedup: failed to fetch unresolved questions, skipping dedup", "error", err)
+		return candidates, nil
+	}
+	since := time.Now().AddDate(0, 0, -30)
+	resolved, err := GetRecentlyResolvedPendingQuestions(ctx, env, since)
+	if err != nil {
+		infra.LoggerFrom(ctx).Warn("dedup: failed to fetch resolved questions, skipping dedup", "error", err)
+		return candidates, nil
+	}
+
+	existing := make([]PendingQuestion, 0, len(unresolved)+len(resolved))
+	existing = append(existing, unresolved...)
+	existing = append(existing, resolved...)
+	if len(existing) > 200 {
+		existing = existing[:200]
+	}
+	if len(existing) == 0 {
+		return candidates, nil
+	}
+
+	// Embed all candidates in one batch.
+	projectID := env.Config().GoogleCloudProject
+	texts := make([]string, len(candidates))
+	for i, c := range candidates {
+		texts[i] = c.Question
+	}
+	vecs, err := infra.GenerateEmbeddingsBatch(ctx, projectID, texts, infra.EmbedTaskRetrievalDocument)
+	if err != nil {
+		infra.LoggerFrom(ctx).Warn("dedup: embedding failed, inserting all candidates unfiltered", "error", err)
+		return candidates, nil
+	}
+	for i := range candidates {
+		candidates[i].Embedding = vecs[i]
+	}
+
+	// Compare each candidate against every existing question.
+	kept := make([]PendingQuestion, 0, len(candidates))
+	for _, c := range candidates {
+		duplicate := false
+		for _, ex := range existing {
+			if len(ex.Embedding) == 0 {
+				continue // no stored embedding; can't compare
+			}
+			sim := utils.CosineSimilarity(c.Embedding, ex.Embedding)
+			if sim >= dedupSimilarityThreshold {
+				infra.LoggerFrom(ctx).Info("dedup: dropping similar question",
+					"candidate", c.Question,
+					"matched", ex.Question,
+					"similarity", sim,
+				)
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			kept = append(kept, c)
+		}
+	}
+	return kept, nil
 }
 
 // ResolvePendingQuestion sets resolved_at and answer for a pending question.
