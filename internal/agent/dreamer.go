@@ -22,12 +22,12 @@ import (
 )
 
 const (
-	DreamerMergeSimilarity         = 0.93 // cosine similarity above this = same fact
-	DreamerBaseWeight              = 0.7
-	DreamerWeightBoostPerDup      = 0.1
+	DreamerMergeSimilarity           = 0.93 // cosine similarity above this = same fact
+	DreamerBaseWeight                = 0.7
+	DreamerWeightBoostPerDup         = 0.1
 	DreamerSynthesisNewLogsThreshold = 3  // run synthesis if this many new entries since last
-	DreamerSynthesisStaleHours    = 48   // high-significance contexts re-synthesize if older than this
-	DreamerTaskPhaseMaxIterations = 5   // max tool-call rounds in dreamer task phase
+	DreamerSynthesisStaleHours       = 48 // high-significance contexts re-synthesize if older than this
+	DreamerTaskPhaseMaxIterations    = 5  // max tool-call rounds in dreamer task phase
 )
 
 // DreamerInputs holds loaded data for a dream run.
@@ -828,6 +828,16 @@ func RunDreamer(ctx context.Context, app *infra.App, opts *RunDreamerOpts) (*Dre
 		if progress != nil {
 			progress.OnLog(ctx, fmt.Sprintf("Incubation: %d context(s) promoted.", promoted))
 		}
+	}
+
+	// Centroid incubation: surface invisible themes via embedding-based radius clustering.
+	if progress != nil {
+		progress.OnLog(ctx, "Running centroid-based theme detection...")
+	}
+	if centroidErr := RunCentroidIncubation(ctx, app); centroidErr != nil {
+		infra.LoggerFrom(ctx).Warn("dreamer centroid incubation failed", "dreamer_run_id", dreamerRunID, "phase", "incubation", "error", centroidErr)
+	} else {
+		infra.LoggerFrom(ctx).Info("dreamer centroid incubation completed", "dreamer_run_id", dreamerRunID, "phase", "incubation")
 	}
 
 	// Generate and store the Dream Narrative (morning readout) for the user.
