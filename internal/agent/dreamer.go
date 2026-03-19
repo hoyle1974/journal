@@ -614,11 +614,38 @@ func RunDreamer(ctx context.Context, app *infra.App, opts *RunDreamerOpts) (*Dre
 		progress.OnPhase(ctx, "colloquium")
 	}
 	tColloquiumStart := time.Now()
-	roomSeed := "Room is open. Initial pass."
+	roomSeed := "Room is open."
 	if len(impactedContexts) > 0 {
-		roomSeed += "\nActive project contexts: [" + strings.Join(impactedContexts, ", ") + "]."
+		roomSeed += " Active project contexts: [" + strings.Join(impactedContexts, ", ") + "]."
 	}
 	roomTranscript := roomSeed + "\n"
+
+	// --- Opening statements (parallel): each specialist states observations + any hypotheses ---
+	infra.LoggerFrom(ctx).Info("dreamer colloquium opening statements", "dreamer_run_id", dreamerRunID, "phase", "colloquium")
+	openingResults := make([]string, len(domains))
+	og, ogctx := errgroup.WithContext(ctx)
+	for i, domain := range domains {
+		idx, d := i, domain
+		og.Go(func() error {
+			msg, runErr := RunSpecialistOpening(ogctx, app, d, journalContext, dreamerModel)
+			if runErr != nil {
+				infra.LoggerFrom(ogctx).Warn("specialist opening failed", "dreamer_run_id", dreamerRunID, "domain", d, "error", runErr)
+				return nil
+			}
+			openingResults[idx] = msg
+			return nil
+		})
+	}
+	_ = og.Wait()
+
+	roomTranscript += "\n--- Opening Statements ---\n"
+	for i, d := range domains {
+		if openingResults[i] != "" {
+			roomTranscript += fmt.Sprintf("[%s]: %s\n", d, openingResults[i])
+		}
+	}
+	roomTranscript += "\n"
+
 	const maxRoomPasses = 10 // up to 10 passes; specialists may reply DONE early
 
 	for pass := 1; pass <= maxRoomPasses; pass++ {

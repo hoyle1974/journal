@@ -204,6 +204,54 @@ var specialistSystemPrompts = map[Domain]string{
 	DomainEvolution:    prompts.Specialist("evolution"),
 }
 
+// RunSpecialistOpening runs a single specialist's opening statement for the Colloquium Room.
+// Each specialist states what they observe in the journal for their domain, plus any hypotheses or claims if warranted.
+func RunSpecialistOpening(ctx context.Context, app *infra.App, domain Domain, journalContext string, modelOverride string) (string, error) {
+	ctx, span := infra.StartSpan(ctx, "agent.opening."+string(domain))
+	defer span.End()
+
+	if app == nil {
+		return "", fmt.Errorf("app required")
+	}
+	baseSysPrompt := specialistSystemPrompts[domain]
+
+	systemPrompt := baseSysPrompt + `
+
+*** FORMATTING OVERRIDE ***
+IGNORE any instructions above about outputting JSON, arrays, or specific fields like 'facts:'. Do NOT use JSON arrays.
+
+You are about to enter a colloquium room with other specialist AI agents to discuss this journal. This is your opening statement.
+
+State what you observe in the journal that is relevant to your domain. Be factual and specific. If something stands out — a pattern, a tension, an implication — you may also offer a brief hypothesis or claim worth debating. Keep it to 2-4 PLAIN TEXT sentences. Do not summarize everything; surface what matters most.` + prompts.DataSafety()
+
+	userPrompt := fmt.Sprintf("Journal Context:\n%s", utils.WrapAsUserData(utils.SanitizePrompt(journalContext)))
+
+	infra.LoggerFrom(ctx).Info("specialist opening request", "domain", domain)
+
+	apiCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	defer cancel()
+
+	model := app.Config().GeminiModel
+	if modelOverride != "" {
+		model = app.Config().DreamerModel
+	}
+	req := &infra.LLMRequest{
+		SystemPrompt: systemPrompt,
+		Parts:        []*genai.Part{{Text: userPrompt}},
+		Model:        model,
+		GenConfig:    &infra.GenConfig{MaxOutputTokens: 256},
+	}
+	infra.GeminiCallsTotal.Inc()
+	resp, err := app.Dispatch(apiCtx, req)
+	if err != nil {
+		return "", infra.WrapLLMError(err)
+	}
+
+	text := strings.TrimSpace(infra.ExtractTextFromResponse(resp))
+	infra.LoggerFrom(ctx).Info("specialist opening response", "domain", domain, "response", text)
+	return text, nil
+}
+
 // RunSpecialistDiscussion runs a single specialist in "Chat" mode for the Colloquium Room.
 // Returns the agent's message, a boolean indicating if they are "DONE", and an error.
 func RunSpecialistDiscussion(ctx context.Context, app *infra.App, domain Domain, journalContext string, roomTranscript string, modelOverride string) (string, bool, error) {
@@ -220,8 +268,8 @@ func RunSpecialistDiscussion(ctx context.Context, app *infra.App, domain Domain,
 *** FORMATTING OVERRIDE ***
 IGNORE any instructions above about outputting JSON, arrays, or specific fields like 'facts:'. Do NOT use JSON arrays.
 
-You are currently in a colloquium room with other specialist AI agents. Analyze the journal for your domain. Read the Room Transcript to see what your colleagues have said.
-Briefly state your findings, point out details others missed, or correct colleagues if they misinterpreted something. Write 2-4 PLAIN TEXT conversational sentences ONLY.
+You are in a colloquium room with other specialist AI agents. Read the Room Transcript to see what your colleagues have said, then respond.
+Agree, disagree, refine, or add what others missed. When responding to a specific colleague, address them by their domain name (e.g. "Work, I think you missed..." or "Task, that aligns with what I see..."). Write 2-4 PLAIN TEXT conversational sentences ONLY.
 
 If you completely agree with the current room state and have ABSOLUTELY NOTHING new to add or correct, reply with exactly the word: DONE` + prompts.DataSafety()
 
