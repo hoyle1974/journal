@@ -52,10 +52,25 @@ func RunGapDetection(ctx context.Context, app *infra.App, journalContext string,
 
 	// Inject app capabilities so the gap-detector LLM knows what Jot can do (entry points, agents, memory, tools).
 	capabilitiesAndTools := prompts.AppCapabilities() + "\n\n## Existing tools (compact)\n" + tools.GetCompactDirectory()
+
+	// Build the pending questions block for upstream dedup awareness.
+	pendingQs, pErr := memory.GetUnresolvedPendingQuestions(ctx, app, 20)
+	var pendingQuestionsBlock string
+	if pErr != nil {
+		infra.LoggerFrom(ctx).Warn("gap detection: failed to fetch pending questions", "error", pErr)
+	} else if len(pendingQs) > 0 {
+		lines := make([]string, len(pendingQs))
+		for i, q := range pendingQs {
+			lines[i] = "- " + q.Question
+		}
+		pendingQuestionsBlock = utils.WrapAsUserData(utils.SanitizePrompt(strings.Join(lines, "\n")))
+	}
+
 	userPrompt, err := prompts.BuildGapDetector(prompts.GapDetectorData{
-		RecentJournal:      utils.WrapAsUserData(utils.SanitizePrompt(journalContext)),
-		RelevantKnowledge:  utils.WrapAsUserData(relevantKnowledge),
-		ToolManifest:        utils.WrapAsUserData(capabilitiesAndTools),
+		RecentJournal:         utils.WrapAsUserData(utils.SanitizePrompt(journalContext)),
+		RelevantKnowledge:     utils.WrapAsUserData(relevantKnowledge),
+		ToolManifest:          utils.WrapAsUserData(capabilitiesAndTools),
+		PendingQuestionsBlock: pendingQuestionsBlock,
 	})
 	if err != nil {
 		return fmt.Errorf("build gap detector prompt: %w", err)
