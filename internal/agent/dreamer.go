@@ -16,6 +16,7 @@ import (
 	"github.com/jackstrohm/jot/pkg/task"
 	"github.com/jackstrohm/jot/pkg/utils"
 	"github.com/jackstrohm/jot/tools"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/genai"
 )
 
@@ -61,6 +62,12 @@ type mergedFact struct {
 	Domain   string
 	Weight   float64
 	Vector   []float32 // precomputed embedding; reused during upsert to avoid a second API call
+}
+
+// discussResult holds the outcome of a single specialist's colloquium turn.
+type discussResult struct {
+	msg    string
+	isDone bool
 }
 
 func mergeDreamerFacts(ctx context.Context, app *infra.App, domains []Domain, outputs []*SpecialistOutput) []mergedFact {
@@ -579,18 +586,35 @@ func RunDreamer(ctx context.Context, app *infra.App, opts *RunDreamerOpts) (*Dre
 		allDone := true
 		waitingCount := 0
 
-		for _, domain := range domains {
-			msg, isDone, err := RunSpecialistDiscussion(ctx, app, domain, journalContext, roomTranscript, dreamerModel)
-			if err != nil {
-				infra.LoggerFrom(ctx).Warn("specialist discussion failed", "dreamer_run_id", dreamerRunID, "phase", "colloquium", "domain", domain, "error", err)
-				continue // Skip this agent's turn rather than crashing the room
-			}
-			if !isDone {
+		discussResults := make([]discussResult, len(domains))
+		dg, dgctx := errgroup.WithContext(ctx)
+		for i, domain := range domains {
+			idx, d := i, domain
+			dg.Go(func() error {
+				msg, done, runErr := RunSpecialistDiscussion(dgctx, app, d, journalContext, roomTranscript, dreamerModel)
+				if runErr != nil {
+					infra.LoggerFrom(dgctx).Warn("specialist discussion failed", "dreamer_run_id", dreamerRunID, "phase", "colloquium", "domain", d, "error", runErr)
+					discussResults[idx] = discussResult{isDone: true} // treat error as done to avoid blocking
+					return nil
+				}
+				discussResults[idx] = discussResult{msg: msg, isDone: done}
+				return nil
+			})
+		}
+		_ = dg.Wait() // errors are soft (logged above)
+
+		allDone = true
+		waitingCount = 0
+		for i, d := range domains {
+			r := discussResults[i]
+			if !r.isDone {
 				allDone = false
 				waitingCount++
-				newMessages = append(newMessages, fmt.Sprintf("[%s]: %s", domain, msg))
+				if r.msg != "" {
+					newMessages = append(newMessages, fmt.Sprintf("[%s]: %s", d, r.msg))
+				}
 			} else {
-				infra.LoggerFrom(ctx).Debug("specialist is done", "domain", domain)
+				infra.LoggerFrom(ctx).Debug("specialist is done", "domain", d)
 			}
 		}
 
