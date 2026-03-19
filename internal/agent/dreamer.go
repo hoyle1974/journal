@@ -638,51 +638,66 @@ func RunDreamer(ctx context.Context, app *infra.App, opts *RunDreamerOpts) (*Dre
 	input.RoomContext = roomTranscript
 	infra.LoggerFrom(ctx).Info("dreamer colloquium room_transcript", "dreamer_run_id", dreamerRunID, "phase", "colloquium", "room_transcript", roomTranscript)
 
-	// --- PHASE 2: FINAL EXTRACTION (sequential) ---
+	// --- PHASE 2: FINAL EXTRACTION (parallel) ---
 	if progress != nil {
 		progress.OnPhase(ctx, "extraction")
 		progress.OnLog(ctx, fmt.Sprintf("Extracting from %d domains.", len(domains)))
 	}
-	// 2a. Final Specialist Extraction
+
+	eg, egctx := errgroup.WithContext(ctx)
+
+	// 2a. Five domain specialists in parallel
 	for i, d := range domains {
-		infra.LoggerFrom(ctx).Info("dreamer final extraction start", "dreamer_run_id", dreamerRunID, "phase", "extraction", "domain", d)
-		if progress != nil {
-			progress.OnLog(ctx, fmt.Sprintf("  %d/%d: %s", i+1, len(domains), d))
-		}
-		out, runErr := RunSpecialist(ctx, app, d, input, dreamerModel) // app implements ToolEnv
-		if runErr != nil {
-			infra.LoggerFrom(ctx).Warn("dreamer specialist extraction failed", "dreamer_run_id", dreamerRunID, "phase", "extraction", "domain", d, "error", runErr)
-			if err == nil {
-				err = runErr
+		idx, domain := i, d
+		eg.Go(func() error {
+			infra.LoggerFrom(egctx).Info("dreamer final extraction start", "dreamer_run_id", dreamerRunID, "phase", "extraction", "domain", domain)
+			if progress != nil {
+				progress.OnLog(egctx, fmt.Sprintf("  extracting: %s", domain))
 			}
-			continue
-		}
-		outputs[i] = out
-		infra.LoggerFrom(ctx).Info("dreamer specialist extraction done", "dreamer_run_id", dreamerRunID, "phase", "extraction", "domain", d, "facts", len(out.Facts))
-		if progress != nil && len(out.Facts) > 0 {
-			progress.OnLog(ctx, fmt.Sprintf("    %s: %d facts", d, len(out.Facts)))
-		}
+			out, runErr := RunSpecialist(egctx, app, domain, input, dreamerModel)
+			if runErr != nil {
+				infra.LoggerFrom(egctx).Warn("dreamer specialist extraction failed", "dreamer_run_id", dreamerRunID, "phase", "extraction", "domain", domain, "error", runErr)
+				return nil // soft error
+			}
+			outputs[idx] = out
+			infra.LoggerFrom(egctx).Info("dreamer specialist extraction done", "dreamer_run_id", dreamerRunID, "phase", "extraction", "domain", domain, "facts", len(out.Facts))
+			return nil
+		})
 	}
 
-	// 2b. Query Analyzer
-	if analysis, runErr := RunQueryAnalyzer(ctx, app, recentQueriesText); runErr != nil {
-		infra.LoggerFrom(ctx).Warn("dreamer query analyzer failed", "dreamer_run_id", dreamerRunID, "phase", "extraction", "error", runErr)
-	} else {
-		queryAnalysis = analysis
+	// 2b. Query analyzer in parallel with specialists
+	var queryAnalysisResult string
+	eg.Go(func() error {
+		analysis, runErr := RunQueryAnalyzer(egctx, app, recentQueriesText)
+		if runErr != nil {
+			infra.LoggerFrom(egctx).Warn("dreamer query analyzer failed", "dreamer_run_id", dreamerRunID, "phase", "extraction", "error", runErr)
+			return nil
+		}
+		queryAnalysisResult = analysis
+		return nil
+	})
+
+	_ = eg.Wait()
+	queryAnalysis = queryAnalysisResult
+
+	// Check if at least one specialist succeeded
+	anyOk := false
+	for i := range domains {
+		if outputs[i] != nil {
+			anyOk = true
+			break
+		}
 	}
-	if err != nil {
-		anyOk := false
-		for i := 0; i < len(domains); i++ {
-			if outputs[i] != nil {
-				anyOk = true
-				break
-			}
+	if !anyOk {
+		span.RecordError(fmt.Errorf("all specialists failed"))
+		return nil, fmt.Errorf("dreamer: all specialists failed")
+	}
+
+	// Log per-domain fact counts now that all are complete
+	for i, d := range domains {
+		if outputs[i] != nil && len(outputs[i].Facts) > 0 && progress != nil {
+			progress.OnLog(ctx, fmt.Sprintf("    %s: %d facts", d, len(outputs[i].Facts)))
 		}
-		if !anyOk {
-			span.RecordError(err)
-			return nil, fmt.Errorf("dreamer: all specialists failed: %w", err)
-		}
-		infra.LoggerFrom(ctx).Warn("dreamer some specialists or tasks failed", "dreamer_run_id", dreamerRunID, "phase", "extraction", "error", err)
 	}
 
 	for _, name := range impactedContexts {
