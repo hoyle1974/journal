@@ -21,14 +21,15 @@ const TelegramQuestionStateCollection = "telegram_question_state"
 
 // PendingQuestion is a gap or contradiction detected during Dreamer synthesis, to be clarified by the user.
 type PendingQuestion struct {
-	UUID            string   `firestore:"-" json:"uuid"`
-	Question        string   `firestore:"question" json:"question"`
-	Kind            string   `firestore:"kind" json:"kind"` // "gap" or "contradiction"
-	Context         string   `firestore:"context" json:"context,omitempty"`
-	SourceEntryIDs  []string `firestore:"source_entry_ids" json:"source_entry_ids,omitempty"`
-	CreatedAt       string   `firestore:"created_at" json:"created_at"`
-	ResolvedAt      string   `firestore:"resolved_at" json:"resolved_at,omitempty"`
-	Answer          string   `firestore:"answer" json:"answer,omitempty"`
+	UUID            string    `firestore:"-" json:"uuid"`
+	Question        string    `firestore:"question" json:"question"`
+	Kind            string    `firestore:"kind" json:"kind"` // "gap" or "contradiction"
+	Context         string    `firestore:"context" json:"context,omitempty"`
+	SourceEntryIDs  []string  `firestore:"source_entry_ids" json:"source_entry_ids,omitempty"`
+	CreatedAt       string    `firestore:"created_at" json:"created_at"`
+	ResolvedAt      string    `firestore:"resolved_at" json:"resolved_at,omitempty"`
+	Answer          string    `firestore:"answer" json:"answer,omitempty"`
+	Embedding       []float32 `firestore:"embedding,omitempty" json:"-"`
 }
 
 // InsertPendingQuestions writes one or more pending questions to Firestore.
@@ -60,6 +61,7 @@ func InsertPendingQuestions(ctx context.Context, env infra.ToolEnv, questions []
 			"created_at":       q.CreatedAt,
 			"resolved_at":      q.ResolvedAt,
 			"answer":           q.Answer,
+			"embedding":        q.Embedding,
 		})
 		if err != nil {
 			return err
@@ -117,6 +119,7 @@ func GetUnresolvedPendingQuestions(ctx context.Context, env infra.ToolEnv, limit
 			CreatedAt:  infra.GetStringField(data, "created_at"),
 			ResolvedAt: infra.GetStringField(data, "resolved_at"),
 			Answer:     infra.GetStringField(data, "answer"),
+			Embedding:  infra.GetFloat32SliceField(data, "embedding"),
 		}
 		q.SourceEntryIDs = infra.GetStringSliceField(data, "source_entry_ids")
 		return q, nil
