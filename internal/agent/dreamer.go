@@ -22,12 +22,12 @@ import (
 )
 
 const (
-	DreamerMergeSimilarity         = 0.93 // cosine similarity above this = same fact
-	DreamerBaseWeight              = 0.7
-	DreamerWeightBoostPerDup      = 0.1
+	DreamerMergeSimilarity           = 0.93 // cosine similarity above this = same fact
+	DreamerBaseWeight                = 0.7
+	DreamerWeightBoostPerDup         = 0.1
 	DreamerSynthesisNewLogsThreshold = 3  // run synthesis if this many new entries since last
-	DreamerSynthesisStaleHours    = 48   // high-significance contexts re-synthesize if older than this
-	DreamerTaskPhaseMaxIterations = 5   // max tool-call rounds in dreamer task phase
+	DreamerSynthesisStaleHours       = 48 // high-significance contexts re-synthesize if older than this
+	DreamerTaskPhaseMaxIterations    = 5  // max tool-call rounds in dreamer task phase
 )
 
 // DreamerInputs holds loaded data for a dream run.
@@ -58,11 +58,13 @@ type RunDreamerOpts struct {
 }
 
 type mergedFact struct {
-	Content  string
-	NodeType string
-	Domain   string
-	Weight   float64
-	Vector   []float32 // precomputed embedding; reused during upsert to avoid a second API call
+	Content     string
+	NodeType    string
+	Domain      string
+	Weight      float64
+	Vector      []float32 // precomputed embedding; reused during upsert to avoid a second API call
+	Predicate   string    // empty for non-relational facts
+	ObjectValue string    // raw object string
 }
 
 // discussResult holds the outcome of a single specialist's colloquium turn.
@@ -163,13 +165,18 @@ func mergeDreamerFacts(ctx context.Context, app *infra.App, domains []Domain, ou
 		if weight > 1 {
 			weight = 1
 		}
-		result = append(result, mergedFact{
+		mf := mergedFact{
 			Content:  f.fact,
 			NodeType: nodeType,
 			Domain:   string(f.domain),
 			Weight:   weight,
 			Vector:   f.vec,
-		})
+		}
+		if triple := memory.ParseSPOTriple(f.fact); triple != nil {
+			mf.Predicate = memory.NormalizedPredicate(triple.Predicate)
+			mf.ObjectValue = strings.TrimSpace(triple.Object)
+		}
+		result = append(result, mf)
 	}
 	return result
 }
@@ -208,7 +215,14 @@ func dreamerWriteMergedFacts(ctx context.Context, app *infra.App, merged []merge
 	for _, m := range merged {
 		fact := m
 		g.Go(func() error {
-			if _, upsertErr := memory.UpsertSemanticMemoryPreembedded(gctx, app, fact.Content, fact.NodeType, fact.Domain, fact.Weight, nil, entryUUIDs, fact.Vector); upsertErr != nil {
+			var spo *memory.SPOExtra
+			if fact.Predicate != "" {
+				spo = &memory.SPOExtra{
+					Predicate:   fact.Predicate,
+					ObjectValue: fact.ObjectValue,
+				}
+			}
+			if _, upsertErr := memory.UpsertSemanticMemoryPreembeddedWithSPO(gctx, app, fact.Content, fact.NodeType, fact.Domain, fact.Weight, nil, entryUUIDs, fact.Vector, spo); upsertErr != nil {
 				infra.LoggerFrom(gctx).Warn("dreamer upsert failed", "domain", fact.Domain, "fact", utils.TruncateString(fact.Content, 50), "error", upsertErr)
 				return nil // soft error
 			}

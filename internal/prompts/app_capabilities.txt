@@ -50,6 +50,12 @@ Jot is a personal journaling and memory system. It ingests journal entries, extr
 - **specialist**: consult_anthropologist, consult_architect, consult_executive, consult_philosopher (and any other consult_*).
 - **bootstrap**: discovery_search (intent → tool schemas). When using compact tools, invoke discovered tools via key/value lines only: TOOL: name, then ARGS: with param_name | value per line; no JSON, no code fences.
 
+## SPO Triples
+- Relational facts are stored as Subject-Predicate-Object triples. The `predicate` field (e.g. `works_at`, `is_married_to`, `prefers`) and `object_value` field (raw object string) are persisted alongside the `content` on knowledge nodes.
+- The Dreamer automatically extracts SPO triples from specialist outputs and writes `predicate` + `object_value` to Firestore on each fact write.
+- The `upsert_knowledge` tool supports optional `predicate` and `object_value` parameters so FOH can also write relational facts end-to-end.
+- `get_entity_network` uses 1-hop traversal (`QueryNodesLinkingTo`, `QueryOutgoingEdges`) to surface SPO edges.
+
 ## Data terms
 - **Gold**: Permanent, high-value facts for semantic memory.
 - **Gravel**: Temporary or low-significance (e.g. one-off errands); Dreamer ignores for extraction.

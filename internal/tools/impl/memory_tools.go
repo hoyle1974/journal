@@ -15,9 +15,11 @@ import (
 )
 
 type upsertKnowledgeArgs struct {
-	Content  string `json:"content" description:"The fact or information to store (e.g., 'Alice works at Google')" required:"true"`
-	NodeType string `json:"node_type" description:"Type of knowledge node" required:"true"`
-	Metadata string `json:"metadata" description:"Optional JSON metadata. For project/goal use status one of: active, blocked, done, planning, pending, completed (e.g. {\"status\": \"active\"}). For person: relationship, occupation, etc."`
+	Content     string `json:"content" description:"The fact or information to store (e.g., 'Alice works at Google')" required:"true"`
+	NodeType    string `json:"node_type" description:"Type of knowledge node" required:"true"`
+	Metadata    string `json:"metadata" description:"Optional JSON metadata. For project/goal use status one of: active, blocked, done, planning, pending, completed (e.g. {\"status\": \"active\"}). For person: relationship, occupation, etc."`
+	Predicate   string `json:"predicate" description:"Optional: relationship predicate for relational facts stored as SPO triples (e.g. 'works_at', 'is_married_to', 'prefers'). Leave empty for non-relational facts."`
+	ObjectValue string `json:"object_value" description:"Optional: the raw object string for SPO triple facts (e.g. 'Google', 'Gloria', 'dark chocolate'). Used together with predicate."`
 }
 
 type semanticSearchArgs struct {
@@ -48,7 +50,7 @@ func init() {
 func registerKnowledgeTools() {
 	tools.Register(&tools.Tool{
 		Name:        "upsert_knowledge",
-		Description: "Add or update a piece of knowledge in the knowledge graph. Use ONLY for NEW facts in the CURRENT user input. NEVER upsert information from RECENT CONVERSATION - that data is already saved. Node types: 'person', 'project', 'fact', 'preference', 'list_item', 'goal', 'user_identity'. For node_type 'project' or 'goal', metadata.status must be exactly one of: active, blocked, done, planning, pending, completed (e.g. {\"status\": \"active\"}). Use node_type 'user_identity' for self-referential statements about your core identity (e.g. your name, role, values, traits); these are stored with high priority and are easily retrievable.",
+		Description: "Add or update a piece of knowledge in the knowledge graph. Use ONLY for NEW facts in the CURRENT user input. NEVER upsert information from RECENT CONVERSATION - that data is already saved. Node types: 'person', 'project', 'fact', 'preference', 'list_item', 'goal', 'user_identity'. For node_type 'project' or 'goal', metadata.status must be exactly one of: active, blocked, done, planning, pending, completed (e.g. {\"status\": \"active\"}). Use node_type 'user_identity' for self-referential statements about your core identity (e.g. your name, role, values, traits); these are stored with high priority and are easily retrievable. Relational facts can be stored as SPO triples by supplying optional predicate (e.g. 'works_at') and object_value (e.g. 'Google') — these are persisted as graph edges alongside the content.",
 		Category:    "knowledge",
 		Args:        &upsertKnowledgeArgs{},
 		Execute: func(ctx context.Context, env infra.ToolEnv, args any) tools.Result {
@@ -66,6 +68,20 @@ func registerKnowledgeTools() {
 			var entryIDs []string
 			if cur := agent.CurrentEntryUUIDFrom(ctx); cur != "" {
 				entryIDs = []string{cur}
+			}
+			predicate := strings.TrimSpace(a.Predicate)
+			if predicate != "" {
+				predicate = memory.NormalizedPredicate(predicate)
+				var spo *memory.SPOExtra
+				spo = &memory.SPOExtra{
+					Predicate:   predicate,
+					ObjectValue: strings.TrimSpace(a.ObjectValue),
+				}
+				id, err := memory.UpsertSemanticMemoryPreembeddedWithSPO(ctx, env, a.Content, a.NodeType, "thought", 0.7, nil, entryIDs, nil, spo)
+				if err != nil {
+					return tools.Fail("Error: %v", err)
+				}
+				return tools.OK("Knowledge node stored successfully (ID: %s)", id)
 			}
 			id, err := memory.UpsertKnowledge(ctx, env, a.Content, a.NodeType, metadata, entryIDs)
 			if err != nil {
@@ -184,10 +200,13 @@ func registerKnowledgeTools() {
 
 	tools.Register(&tools.Tool{
 		Name:        "get_entity_network",
-		Description: "Get the entity profile and related knowledge. Dynamically discovers facts about the person even if not explicitly linked. Use for high-level questions like 'Who influenced me?', 'What are my wife's favorites?'.",
+		Description: "Get the entity profile and related knowledge, including 1-hop relationship edges (who relates to this entity and how). Dynamically discovers facts about the person even if not explicitly linked. Use for high-level questions like 'Who influenced me?', 'What are my wife's favorites?'.",
 		Category:    "knowledge",
 		Args:        &getEntityNetworkArgs{},
 		Execute: func(ctx context.Context, env infra.ToolEnv, args any) tools.Result {
+			ctx, span := infra.StartSpan(ctx, "tool.get_entity_network")
+			defer span.End()
+
 			a := args.(*getEntityNetworkArgs)
 			entityName := strings.TrimSpace(a.EntityName)
 			if entityName == "" {
@@ -196,6 +215,8 @@ func registerKnowledgeTools() {
 			if env == nil || env.Config() == nil {
 				return tools.Fail("Error: no app in context")
 			}
+			span.SetAttributes(map[string]string{"entity_name": entityName})
+
 			node, err := memory.FindEntityNodeByName(ctx, env, entityName)
 			if err != nil {
 				return tools.Fail("Error finding entity: %v", err)
@@ -207,19 +228,31 @@ func registerKnowledgeTools() {
 			if err != nil {
 				return tools.Fail("Error loading entity: %v", err)
 			}
+			infra.LoggerFrom(ctx).Debug("get_entity_network root node loaded", "uuid", full.UUID, "content", full.Content)
 
-			var discovered, linked []memory.KnowledgeNode
+			// 1-hop traversal: run four lookups in parallel.
+			var discovered, linked, incomingEdges, outgoingEdges []memory.KnowledgeNode
 			var wg sync.WaitGroup
-			wg.Add(2)
+			wg.Add(4)
 			go func() {
 				defer wg.Done()
-				discovered, _ = memory.DiscoverRelatedNodes(ctx, env, a.EntityName, 10)
+				discovered, _ = memory.DiscoverRelatedNodes(ctx, env, entityName, 10)
 			}()
 			go func() {
 				defer wg.Done()
 				if len(full.EntityLinks) > 0 {
 					linked, _ = memory.GetKnowledgeNodesByIDs(ctx, env, full.EntityLinks)
 				}
+			}()
+			go func() {
+				defer wg.Done()
+				// Incoming edges: nodes whose entity_links reference this entity's UUID.
+				incomingEdges, _ = memory.QueryNodesLinkingTo(ctx, env, full.UUID, 20)
+			}()
+			go func() {
+				defer wg.Done()
+				// Outgoing SPO edges: relational nodes where this entity is the subject (object_uuid == root UUID).
+				outgoingEdges, _ = memory.QueryOutgoingEdges(ctx, env, full.UUID, 20)
 			}()
 			wg.Wait()
 
@@ -238,14 +271,32 @@ func registerKnowledgeTools() {
 					merged = append(merged, n)
 				}
 			}
+			for _, n := range incomingEdges {
+				if n.UUID != "" && !seen[n.UUID] {
+					seen[n.UUID] = true
+					merged = append(merged, n)
+				}
+			}
+			for _, n := range outgoingEdges {
+				if n.UUID != "" && !seen[n.UUID] {
+					seen[n.UUID] = true
+					merged = append(merged, n)
+				}
+			}
+			infra.LoggerFrom(ctx).Debug("get_entity_network 1-hop neighbors", "root_uuid", full.UUID, "discovered", len(discovered), "linked", len(linked), "incoming_edges", len(incomingEdges), "outgoing_edges", len(outgoingEdges), "merged_total", len(merged))
 
 			var allParts []string
 			allParts = append(allParts, fmt.Sprintf("PRIMARY: %s", full.Content))
 			if full.Metadata != "" && full.Metadata != "{}" {
 				allParts = append(allParts, fmt.Sprintf("PRIMARY_METADATA: %s", full.Metadata))
 			}
+			// Separate relational (SPO) nodes from plain facts for cleaner synthesis.
 			for _, n := range merged {
-				allParts = append(allParts, fmt.Sprintf("FACT: %s", n.Content))
+				if n.Predicate != "" {
+					allParts = append(allParts, fmt.Sprintf("RELATION: %s | %s | %s", full.Content, n.Predicate, n.Content))
+				} else {
+					allParts = append(allParts, fmt.Sprintf("FACT: %s", n.Content))
+				}
 			}
 			client, err := env.Firestore(ctx)
 			if err != nil {
@@ -260,26 +311,34 @@ func registerKnowledgeTools() {
 				if err != nil || e == nil {
 					continue
 				}
-				content := e.Content
-				if len(content) > 200 {
-					content = content[:197] + "..."
+				entryContent := e.Content
+				if len(entryContent) > 200 {
+					entryContent = entryContent[:197] + "..."
 				}
 				entryTs := journal.TruncateTimestamp(e.Timestamp, journal.DateTimeDisplayLen)
 				if entryTs == "" {
 					entryTs = "(no date)"
 				}
-				allParts = append(allParts, fmt.Sprintf("JOURNAL: [%s] %s", entryTs, content))
+				allParts = append(allParts, fmt.Sprintf("JOURNAL: [%s] %s", entryTs, entryContent))
 			}
 			allInfo := strings.Join(allParts, "\n")
+			infra.LoggerFrom(ctx).Debug("get_entity_network all_info assembled", "parts", len(allParts), "all_info", allInfo)
 
-			const synthesisPrompt = "Consolidate the following entity data into a concise profile. Remove redundant facts and merge overlapping information. Use bullets. Output only the profile, no preamble."
+			const synthesisPrompt = `Consolidate the following entity data into a concise profile. Remove redundant facts and merge overlapping information.
+
+Format the output as:
+- Entity name and role
+- Attributes (one bullet each)
+- Relationships listed as "predicate: object" (one bullet each for RELATION lines)
+
+Output only the profile, no preamble, no JSON.`
 			userPrompt := utils.WrapAsUserData(allInfo)
 			summary, err := infra.GenerateContentSimple(ctx, env, synthesisPrompt, userPrompt, env.Config(), &infra.GenConfig{MaxOutputTokens: 512})
 			if err != nil {
 				infra.LoggerFrom(ctx).Debug("get_entity_network synthesis failed, returning raw data", "error", err)
-				return tools.OK("Entity: %s\n\n%s", a.EntityName, allInfo)
+				return tools.OK("Entity: %s\n\n%s", entityName, allInfo)
 			}
-			return tools.OK("Entity profile: %s\n\n%s", a.EntityName, summary)
+			return tools.OK("Entity profile: %s\n\n%s", entityName, summary)
 		},
 	})
 
