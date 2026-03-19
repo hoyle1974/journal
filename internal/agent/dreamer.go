@@ -842,6 +842,16 @@ func RunDreamer(ctx context.Context, app *infra.App, opts *RunDreamerOpts) (*Dre
 		}
 	}
 
+	// Centroid incubation: surface invisible themes via embedding-based radius clustering.
+	if progress != nil {
+		progress.OnLog(ctx, "Running centroid-based theme detection...")
+	}
+	if centroidErr := RunCentroidIncubation(ctx, app); centroidErr != nil {
+		infra.LoggerFrom(ctx).Warn("dreamer centroid incubation failed", "dreamer_run_id", dreamerRunID, "phase", "incubation", "error", centroidErr)
+	} else {
+		infra.LoggerFrom(ctx).Info("dreamer centroid incubation completed", "dreamer_run_id", dreamerRunID, "phase", "incubation")
+	}
+
 	// Generate and store the Dream Narrative (morning readout) for the user.
 	if progress != nil {
 		progress.OnPhase(ctx, "narrative")
