@@ -71,7 +71,7 @@ gcloud config set project $PROJECT 2>/dev/null
 echo -e "${YELLOW}Deploying Firestore indexes...${NC}"
 if command -v firebase &> /dev/null; then
   firebase use "$PROJECT" 2>/dev/null || true
-  firebase deploy --only firestore:indexes --project "$PROJECT" --non-interactive
+  firebase deploy --only firestore:indexes --project "$PROJECT" --non-interactive --force
 else
   echo -e "${YELLOW}Firebase CLI not found, skipping index deploy. Ensure indexes match firestore.indexes.json.${NC}"
 fi
