@@ -62,6 +62,7 @@ func NewRouter(s *Server) *chi.Mux {
 		r.With(RateLimitMiddleware(120)).Post("/internal/process-telegram-query", wrapAPI(handleProcessTelegramQuery))
 		r.With(RateLimitMiddleware(120)).Post("/internal/save-query", wrapAPI(handleSaveQuery))
 		r.With(RateLimitMiddleware(120)).Post("/internal/dream-run", wrapAPI(handleDreamRun))
+		r.With(RateLimitMiddleware(300)).Post("/internal/replay", wrapAPI(handleReplay))
 	})
 
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
