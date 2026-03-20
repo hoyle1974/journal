@@ -11,12 +11,11 @@ import (
 	"time"
 
 	"cloud.google.com/go/firestore"
-	"google.golang.org/genai"
-	"github.com/jackstrohm/jot/internal/prompts"
 	"github.com/jackstrohm/jot/internal/infra"
-	"github.com/jackstrohm/jot/pkg/journal"
+	"github.com/jackstrohm/jot/internal/prompts"
 	"github.com/jackstrohm/jot/pkg/utils"
 	"google.golang.org/api/iterator"
+	"google.golang.org/genai"
 )
 
 func truncateForLogContext(s string, maxLen int) string {
@@ -777,7 +776,7 @@ func SynthesizeContext(ctx context.Context, env infra.ToolEnv, contextUUID strin
 		if totalLen >= maxRawLogsChars {
 			break
 		}
-		entry, err := journal.GetEntry(ctx, client, uuid)
+		entry, err := GetEntry(ctx, env, uuid)
 		if err != nil || entry == nil {
 			continue
 		}
