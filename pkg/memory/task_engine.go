@@ -138,7 +138,7 @@ func GetChildTasks(ctx context.Context, env infra.ToolEnv, parentID string, limi
 	client, err := env.Firestore(ctx)
 	if err != nil {
 		span.RecordError(err)
-		return nil, err
+		return nil, fmt.Errorf("firestore client: %w", err)
 	}
 
 	iter := client.Collection(KnowledgeCollection).
@@ -157,7 +157,7 @@ func GetChildTasks(ctx context.Context, env infra.ToolEnv, parentID string, limi
 		}
 		if err != nil {
 			span.RecordError(err)
-			return nil, err
+			return nil, fmt.Errorf("iterate tasks: %w", err)
 		}
 		var t Task
 		if err := doc.DataTo(&t); err != nil {

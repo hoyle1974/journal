@@ -27,7 +27,7 @@ func GetOpenRootTasks(ctx context.Context, env infra.ToolEnv, limit int) ([]Task
 	client, err := env.Firestore(ctx)
 	if err != nil {
 		span.RecordError(err)
-		return nil, err
+		return nil, fmt.Errorf("firestore client: %w", err)
 	}
 
 	iter := client.Collection(KnowledgeCollection).
@@ -45,7 +45,7 @@ func GetOpenRootTasks(ctx context.Context, env infra.ToolEnv, limit int) ([]Task
 		}
 		if err != nil {
 			span.RecordError(err)
-			return nil, err
+			return nil, fmt.Errorf("iterate tasks: %w", err)
 		}
 		var t Task
 		if err := doc.DataTo(&t); err != nil {
@@ -81,7 +81,7 @@ func QuerySimilarTasks(ctx context.Context, env infra.ToolEnv, queryVector []flo
 	client, err := env.Firestore(ctx)
 	if err != nil {
 		span.RecordError(err)
-		return nil, err
+		return nil, fmt.Errorf("firestore client: %w", err)
 	}
 
 	const distanceResultField = "_vector_distance"
@@ -101,7 +101,7 @@ func QuerySimilarTasks(ctx context.Context, env infra.ToolEnv, queryVector []flo
 		if err != nil {
 			infra.LogVectorSearchFailed(ctx, KnowledgeCollection, err, 0)
 			span.RecordError(err)
-			return nil, err
+			return nil, fmt.Errorf("iterate tasks: %w", err)
 		}
 		var t Task
 		if err := doc.DataTo(&t); err != nil {

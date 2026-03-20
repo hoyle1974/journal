@@ -90,7 +90,7 @@ func findRecentDuplicateTask(ctx context.Context, client *firestore.Client, entr
 			break
 		}
 		if err != nil {
-			return "", err
+			return "", fmt.Errorf("iterate tasks: %w", err)
 		}
 		var task Task
 		if err := doc.DataTo(&task); err != nil {
@@ -128,7 +128,7 @@ func CreateTask(ctx context.Context, env infra.ToolEnv, t *Task) (string, error)
 	client, err := env.Firestore(ctx)
 	if err != nil {
 		span.RecordError(err)
-		return "", err
+		return "", fmt.Errorf("firestore client: %w", err)
 	}
 
 	// Idempotency: if this task is linked to exactly one entry, avoid creating a duplicate when agency and LLM both create for the same content.
@@ -186,7 +186,7 @@ func CreateTask(ctx context.Context, env infra.ToolEnv, t *Task) (string, error)
 	_, err = client.Collection(KnowledgeCollection).Doc(uuid).Set(ctx, doc)
 	if err != nil {
 		span.RecordError(err)
-		return "", err
+		return "", fmt.Errorf("set task: %w", err)
 	}
 
 	infra.LoggerFrom(ctx).Debug("task created", "uuid", uuid, "content", t.Content)
@@ -205,19 +205,19 @@ func GetTask(ctx context.Context, env infra.ToolEnv, uuid string) (*Task, error)
 	client, err := env.Firestore(ctx)
 	if err != nil {
 		span.RecordError(err)
-		return nil, err
+		return nil, fmt.Errorf("firestore client: %w", err)
 	}
 
 	doc, err := client.Collection(KnowledgeCollection).Doc(uuid).Get(ctx)
 	if err != nil {
 		span.RecordError(err)
-		return nil, err
+		return nil, fmt.Errorf("get task: %w", err)
 	}
 
 	var t Task
 	if err := doc.DataTo(&t); err != nil {
 		span.RecordError(err)
-		return nil, err
+		return nil, fmt.Errorf("decode task: %w", err)
 	}
 	t.UUID = doc.Ref.ID
 	return &t, nil
@@ -253,7 +253,7 @@ func UpdateTaskStatus(ctx context.Context, env infra.ToolEnv, uuid, newStatus, r
 	client, err := env.Firestore(ctx)
 	if err != nil {
 		span.RecordError(err)
-		return err
+		return fmt.Errorf("firestore client: %w", err)
 	}
 
 	userPrompt := fmt.Sprintf("Task: %s\n\nReason: %s",
@@ -289,7 +289,7 @@ func UpdateTaskStatus(ctx context.Context, env infra.ToolEnv, uuid, newStatus, r
 	})
 	if err != nil {
 		span.RecordError(err)
-		return err
+		return fmt.Errorf("update task: %w", err)
 	}
 
 	infra.LoggerFrom(ctx).Info("task status updated with reflection", "uuid", uuid, "status", newStatus, "reflection_entry", entryUUID)
@@ -326,12 +326,15 @@ func updateTaskStatusOnly(ctx context.Context, env infra.ToolEnv, uuid, newStatu
 	}
 	client, err := env.Firestore(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("firestore client: %w", err)
 	}
 	_, err = client.Collection(KnowledgeCollection).Doc(uuid).Update(ctx, []firestore.Update{
 		{Path: "status", Value: newStatus},
 	})
-	return err
+	if err != nil {
+		return fmt.Errorf("update task: %w", err)
+	}
+	return nil
 }
 
 // UpdateTask updates the given task with any non-nil opts. Recomputes embedding if Content or SystemPrompt changed.
@@ -408,12 +411,12 @@ func UpdateTask(ctx context.Context, env infra.ToolEnv, uuid string, opts *Updat
 	client, err := env.Firestore(ctx)
 	if err != nil {
 		span.RecordError(err)
-		return err
+		return fmt.Errorf("firestore client: %w", err)
 	}
 	_, err = client.Collection(KnowledgeCollection).Doc(uuid).Update(ctx, updates)
 	if err != nil {
 		span.RecordError(err)
-		return err
+		return fmt.Errorf("update task: %w", err)
 	}
 	infra.LoggerFrom(ctx).Debug("task updated", "uuid", uuid)
 	span.SetAttributes(map[string]string{"uuid": uuid})
