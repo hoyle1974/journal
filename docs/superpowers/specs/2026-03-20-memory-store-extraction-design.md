@@ -104,10 +104,11 @@ type LLMRequest struct {
 func NewEmbedder(projectID string) Embedder
 
 // pkg/memory/gemini/dispatcher.go
-func NewDispatcher(projectID string, model string) LLMDispatcher
+// Takes the existing *genai.Client from infra.App — avoids creating a second client.
+func NewDispatcher(client *genai.Client, model string) LLMDispatcher
 ```
 
-Both implementations capture `projectID` and `model` at construction time — nothing is passed per-call. In jot, `infra.App` constructs these once using values from `config.Config` and stores the resulting `*memory.Store` as a field.
+The `Embedder` captures `projectID` at construction (Vertex AI REST, no Gemini SDK client needed). The `LLMDispatcher` takes the existing `*genai.Client` from `infra.App` and the resolved model name. In jot, `infra.App` constructs these once and stores the resulting `*memory.Store` as a field.
 
 ### 3. `EvaluateFactCollision`
 
@@ -116,7 +117,8 @@ Both implementations capture `projectID` and `model` at construction time — no
 This becomes a **private method on `Store`**:
 
 ```go
-func (s *Store) evaluateFactCollision(ctx context.Context, fact1, fact2 string) (bool, error)
+func (s *Store) evaluateFactCollision(ctx context.Context, fact1, fact2 string) (string, error)
+// Returns "update" or "insert", matching the existing infra.EvaluateFactCollision behavior.
 ```
 
 It dispatches through `s.llm.Dispatch(ctx, LLMRequest{...})` with an inline prompt. The logic moves out of `internal/infra` entirely and into `knowledge.go` or a new `pkg/memory/collision.go`.
