@@ -109,32 +109,38 @@
       ]
     },
     {
-      "collectionGroup": "queries",
+      "collectionGroup": "journal",
       "queryScope": "COLLECTION",
       "fields": [
+        { "fieldPath": "node_type", "order": "ASCENDING" },
+        { "fieldPath": "journal_entry_ids", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "timestamp", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "journal",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "node_type", "order": "ASCENDING" },
         { "fieldPath": "is_gap", "order": "ASCENDING" },
         { "fieldPath": "timestamp", "order": "DESCENDING" }
       ]
     },
     {
-      "collectionGroup": "tasks",
+      "collectionGroup": "journal",
       "queryScope": "COLLECTION",
       "fields": [
-        {
-          "fieldPath": "embedding",
-          "vectorConfig": {
-            "dimension": 768,
-            "flat": {}
-          }
-        }
+        { "fieldPath": "node_type", "order": "ASCENDING" },
+        { "fieldPath": "created_at", "order": "DESCENDING" }
       ]
     },
     {
-      "collectionGroup": "tasks",
+      "collectionGroup": "journal",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "journal_entry_ids", "arrayConfig": "CONTAINS" },
-        { "fieldPath": "timestamp", "order": "DESCENDING" }
+        { "fieldPath": "node_type", "order": "ASCENDING" },
+        { "fieldPath": "parent_id", "order": "ASCENDING" },
+        { "fieldPath": "timestamp", "order": "ASCENDING" }
       ]
     }
   ],
