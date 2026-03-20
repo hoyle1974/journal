@@ -12,10 +12,14 @@ func TestAddEntry_NilEnv(t *testing.T) {
 	}
 }
 
-func TestAddEntry_EmptyContent(t *testing.T) {
+// TestAddEntry_NilEnvOrEmptyContent verifies that AddEntry rejects invalid inputs.
+// When env is nil the nil-env guard fires first (before the empty-content guard),
+// so both nil-env and empty-content currently return errors from this single call.
+// A real env cannot be constructed in unit tests without live infrastructure.
+func TestAddEntry_NilEnvOrEmptyContent(t *testing.T) {
 	_, err := AddEntry(context.Background(), nil, "", "test", nil, "")
 	if err == nil {
-		t.Fatal("expected error for empty content, got nil")
+		t.Fatal("expected error for nil env (or empty content), got nil")
 	}
 }
 

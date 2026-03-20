@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -11,6 +12,10 @@ import (
 	"github.com/jackstrohm/jot/internal/infra"
 	"google.golang.org/api/iterator"
 )
+
+// errSkipEntry is a sentinel returned from mapDoc callbacks to exclude a document
+// from results without treating it as an error.
+var errSkipEntry = errors.New("skip entry")
 
 // Entry represents a journal entry (episodic log node).
 type Entry struct {
@@ -31,6 +36,8 @@ func AddEntry(ctx context.Context, env infra.ToolEnv, content, source string, ti
 	if env == nil {
 		return "", fmt.Errorf("env is required")
 	}
+	ctx, span := infra.StartSpan(ctx, "entries.addEntry")
+	defer span.End()
 	if content == "" {
 		return "", fmt.Errorf("content is required and must be a non-empty string")
 	}
@@ -139,6 +146,8 @@ func GetEntriesByDateRange(ctx context.Context, env infra.ToolEnv, startDate, en
 	if env == nil {
 		return nil, fmt.Errorf("env is required")
 	}
+	ctx, span := infra.StartSpan(ctx, "entries.getEntriesByDateRange")
+	defer span.End()
 	client, err := env.Firestore(ctx)
 	if err != nil {
 		return nil, err
@@ -174,6 +183,8 @@ func SearchEntries(ctx context.Context, env infra.ToolEnv, keywords string, limi
 	if env == nil {
 		return nil, fmt.Errorf("env is required")
 	}
+	ctx, span := infra.StartSpan(ctx, "entries.searchEntries")
+	defer span.End()
 	client, err := env.Firestore(ctx)
 	if err != nil {
 		return nil, err
@@ -191,7 +202,7 @@ func SearchEntries(ctx context.Context, env infra.ToolEnv, keywords string, limi
 		contentLower := strings.ToLower(e.Content)
 		for _, kw := range keywordsLower {
 			if !strings.Contains(contentLower, kw) {
-				return Entry{}, fmt.Errorf("skip")
+				return Entry{}, errSkipEntry
 			}
 		}
 		e.UUID = doc.Ref.ID
@@ -211,6 +222,8 @@ func CountEntries(ctx context.Context, env infra.ToolEnv, startDate, endDate *st
 	if env == nil {
 		return 0, fmt.Errorf("env is required")
 	}
+	ctx, span := infra.StartSpan(ctx, "entries.countEntries")
+	defer span.End()
 	client, err := env.Firestore(ctx)
 	if err != nil {
 		return 0, err
@@ -302,7 +315,7 @@ func GetEntriesBySource(ctx context.Context, env infra.ToolEnv, sourceFilter str
 			return Entry{}, err
 		}
 		if !strings.Contains(strings.ToLower(e.Source), sourceFilterLower) {
-			return Entry{}, fmt.Errorf("skip")
+			return Entry{}, errSkipEntry
 		}
 		e.UUID = doc.Ref.ID
 		return e, nil
@@ -342,6 +355,8 @@ func GetEntryDates(ctx context.Context, env infra.ToolEnv, entryIDs []string) (m
 	if env == nil {
 		return nil, fmt.Errorf("env is required")
 	}
+	ctx, span := infra.StartSpan(ctx, "entries.getEntryDates")
+	defer span.End()
 	if len(entryIDs) == 0 {
 		return nil, nil
 	}
@@ -421,6 +436,8 @@ func GetDatesWithEntries(ctx context.Context, env infra.ToolEnv) ([]string, erro
 	if env == nil {
 		return nil, fmt.Errorf("env is required")
 	}
+	ctx, span := infra.StartSpan(ctx, "entries.getDatesWithEntries")
+	defer span.End()
 	client, err := env.Firestore(ctx)
 	if err != nil {
 		return nil, err
