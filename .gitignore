@@ -1,4 +1,7 @@
 
+# Dangerous scripts (never commit)
+scripts/reset-firestore.sh
+
 # Credentials and secrets
 credentials.json
 credentials-*.json
