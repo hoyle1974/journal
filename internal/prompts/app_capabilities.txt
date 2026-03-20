@@ -35,7 +35,7 @@ Jot is a personal journaling and memory system. It ingests journal entries, extr
 - **Reserved names**: user_profile (identity), system_evolution (audit/friction), latest_dream (narrative).
 
 ## Journal
-- **Entries** (node_type: log in `journal` collection): Timestamped, optional source (cli, sms, telegram, web, etc.). Optional image attachment: CLI `--attach <path>`, API multipart/form-data on POST /log (field `image`), Telegram photo messages; images stored in GCS, entry stores `image_url` (requires JOT_IMAGES_BUCKET). Can be analyzed (categories, entities). When processed, entries that mention person entities are linked to those person nodes (journal_entry_ids) so get_entity_network can surface them. Google Doc sync processes new entries and in-doc questions.
+- **Entries** (node_type: log in `journal` collection): Timestamped, optional source (cli, sms, telegram, web, etc.). Optional image attachment: CLI `--attach <path>`, API multipart/form-data on POST /log (field `image`), Telegram photo messages; images stored in GCS, entry stores `image_url` (requires JOT_IMAGES_BUCKET). Can be analyzed (categories, entities). When processed, entity mentions (persons, places, orgs, and all other entity types) are resolved against existing knowledge nodes and the entry is linked to each matched node (journal_entry_ids) synchronously at ingest time — without waiting for the nightly Dreamer. SPO triples (Subject | Predicate | Object) are also extracted from new entries via LLM in a background goroutine and stored as generic knowledge nodes with bidirectional links to subject and object entities. Google Doc sync processes new entries and in-doc questions.
 - **Queries**: Saved with question, answer, source, is_gap. Gap queries surface in knowledge-gap block for FOH.
 - **Pending questions**: Gaps/contradictions from Dreamer gap detection; user can clarify later.
 
@@ -53,6 +53,7 @@ Jot is a personal journaling and memory system. It ingests journal entries, extr
 ## SPO Triples
 - Relational facts are stored as Subject-Predicate-Object triples. The `predicate` field (e.g. `works_at`, `is_married_to`, `prefers`) and `object_value` field (raw object string) are persisted alongside the `content` on knowledge nodes.
 - The Dreamer automatically extracts SPO triples from specialist outputs and writes `predicate` + `object_value` to Firestore on each fact write.
+- **Ingest-time SPO extraction**: At write time, `ExtractAndStoreRelationships` calls the LLM (background goroutine, ~1-2s) to extract SPO triples from new journal entries and stores them as generic knowledge nodes. Subject and object entities are looked up and linked bidirectionally.
 - The `upsert_knowledge` tool supports optional `predicate` and `object_value` parameters so FOH can also write relational facts end-to-end.
 - `get_entity_network` uses 1-hop traversal (`QueryNodesLinkingTo`, `QueryOutgoingEdges`) to surface SPO edges.
 
