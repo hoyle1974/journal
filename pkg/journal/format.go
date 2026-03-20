@@ -11,6 +11,9 @@ import (
 const (
 	DateDisplayLen     = 10
 	DateTimeDisplayLen = 19
+
+	noEntriesFound = "No entries found."
+	noQueriesFound = "No queries found."
 )
 
 // TruncateTimestamp truncates ts for display (date 10 or datetime 19 runes).
@@ -21,7 +24,7 @@ func TruncateTimestamp(ts string, maxLen int) string {
 // FormatEntriesForContext formats entries into a readable string for the LLM context.
 func FormatEntriesForContext(entries []Entry, maxChars int) string {
 	if len(entries) == 0 {
-		return "No entries found."
+		return noEntriesFound
 	}
 	var lines []string
 	totalRunes := 0
@@ -59,7 +62,7 @@ func FormatEntriesForContext(entries []Entry, maxChars int) string {
 // FormatQueriesForContext formats queries into a readable string for the LLM context.
 func FormatQueriesForContext(queries []QueryLog, maxChars int) string {
 	if len(queries) == 0 {
-		return "No queries found."
+		return noQueriesFound
 	}
 	var lines []string
 	totalRunes := 0
