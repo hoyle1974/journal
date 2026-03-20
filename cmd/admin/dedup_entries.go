@@ -14,7 +14,7 @@ import (
 	"google.golang.org/api/iterator"
 
 	"github.com/jackstrohm/jot/internal/infra"
-	"github.com/jackstrohm/jot/pkg/journal"
+	"github.com/jackstrohm/jot/pkg/memory"
 )
 
 type entryRow struct {
@@ -98,7 +98,7 @@ func runDedupEntries(ctx context.Context, app *infra.App, args []string) {
 			end = len(toDelete)
 		}
 		batch := toDelete[i:end]
-		if err := journal.DeleteEntries(ctx, client, batch); err != nil {
+		if err := memory.DeleteEntries(ctx, app, batch); err != nil {
 			log.Fatalf("DeleteEntries: %v", err)
 		}
 		log.Printf("Deleted %d entries (batch %d)", len(batch), i/batchLimit+1)
@@ -107,7 +107,7 @@ func runDedupEntries(ctx context.Context, app *infra.App, args []string) {
 }
 
 func fetchAllEntries(ctx context.Context, client *firestore.Client) ([]entryRow, error) {
-	iter := client.Collection(journal.EntriesCollection).Documents(ctx)
+	iter := client.Collection(memory.EntriesCollection).Documents(ctx)
 	defer iter.Stop()
 
 	var out []entryRow

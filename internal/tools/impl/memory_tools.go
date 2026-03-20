@@ -8,7 +8,6 @@ import (
 
 	"github.com/jackstrohm/jot/internal/agent"
 	"github.com/jackstrohm/jot/internal/infra"
-	"github.com/jackstrohm/jot/pkg/journal"
 	"github.com/jackstrohm/jot/pkg/memory"
 	"github.com/jackstrohm/jot/pkg/utils"
 	"github.com/jackstrohm/jot/tools"
@@ -140,11 +139,7 @@ func registerKnowledgeTools() {
 			if len(nodes) == 0 {
 				return tools.OK("No semantic matches found for '%s'.", a.Query)
 			}
-			client, err := env.Firestore(ctx)
-			if err != nil {
-				return tools.Fail("Error: %v", err)
-			}
-			return tools.OK("Found %d semantic matches for '%s':\n%s", len(nodes), a.Query, formatKnowledgeNodes(ctx, client, nodes))
+			return tools.OK("Found %d semantic matches for '%s':\n%s", len(nodes), a.Query, formatKnowledgeNodes(ctx, env, nodes))
 		},
 	})
 
@@ -187,11 +182,7 @@ func registerKnowledgeTools() {
 				}
 				return tools.OK("No knowledge nodes found.")
 			}
-			client, err := env.Firestore(ctx)
-			if err != nil {
-				return tools.Fail("Error: %v", err)
-			}
-			result := formatKnowledgeNodes(ctx, client, nodes)
+			result := formatKnowledgeNodes(ctx, env, nodes)
 			if nodeType != "" {
 				return tools.OK("Found %d knowledge nodes of type '%s':\n%s", len(nodes), nodeType, result)
 			}
@@ -299,16 +290,12 @@ func registerKnowledgeTools() {
 					allParts = append(allParts, fmt.Sprintf("FACT: %s", n.Content))
 				}
 			}
-			client, err := env.Firestore(ctx)
-			if err != nil {
-				return tools.Fail("Error: %v", err)
-			}
 			for i, eid := range full.JournalEntryIDs {
 				if i >= 5 {
 					allParts = append(allParts, fmt.Sprintf("JOURNAL: ... and %d more entries", len(full.JournalEntryIDs)-5))
 					break
 				}
-				e, err := journal.GetEntry(ctx, client, eid)
+				e, err := memory.GetEntry(ctx, env, eid)
 				if err != nil || e == nil {
 					continue
 				}
@@ -316,7 +303,7 @@ func registerKnowledgeTools() {
 				if len(entryContent) > 200 {
 					entryContent = entryContent[:197] + "..."
 				}
-				entryTs := journal.TruncateTimestamp(e.Timestamp, journal.DateTimeDisplayLen)
+				entryTs := memory.TruncateTimestamp(e.Timestamp, memory.DateTimeDisplayLen)
 				if entryTs == "" {
 					entryTs = "(no date)"
 				}

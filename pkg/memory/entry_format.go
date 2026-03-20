@@ -1,4 +1,4 @@
-package journal
+package memory
 
 import (
 	"fmt"
@@ -21,7 +21,7 @@ func TruncateTimestamp(ts string, maxLen int) string {
 	return utils.TruncateString(ts, maxLen)
 }
 
-// FormatEntriesForContext formats entries into a readable string for the LLM context.
+// FormatEntriesForContext formats entries into a readable string for LLM context.
 func FormatEntriesForContext(entries []Entry, maxChars int) string {
 	if len(entries) == 0 {
 		return noEntriesFound
@@ -57,35 +57,4 @@ func FormatEntriesForContext(entries []Entry, maxChars int) string {
 		totalRunes += lineRunes + 1
 	}
 	return strings.Join(lines, "\n")
-}
-
-// FormatQueriesForContext formats queries into a readable string for the LLM context.
-func FormatQueriesForContext(queries []QueryLog, maxChars int) string {
-	if len(queries) == 0 {
-		return noQueriesFound
-	}
-	var lines []string
-	totalRunes := 0
-	for i, q := range queries {
-		answer := utils.SanitizePrompt(q.Answer)
-		if utf8.RuneCountInString(answer) > 300 {
-			answer = utils.TruncateString(answer, 300) + "..."
-		}
-		ts := q.Timestamp
-		if ts == "" {
-			ts = "(no date)"
-		} else {
-			ts = utils.TruncateString(ts, 19)
-		}
-		question := utils.SanitizePrompt(q.Question)
-		line := fmt.Sprintf("[%s] (%s)\n  Q: %s\n  A: %s", ts, q.Source, question, answer)
-		lineRunes := utf8.RuneCountInString(line)
-		if totalRunes+lineRunes+2 > maxChars {
-			lines = append(lines, fmt.Sprintf("... and %d more queries (truncated)", len(queries)-i))
-			break
-		}
-		lines = append(lines, line)
-		totalRunes += lineRunes + 2
-	}
-	return strings.Join(lines, "\n\n")
 }

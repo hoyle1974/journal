@@ -616,3 +616,33 @@ func assertEqual(t *testing.T, field string, got any, want string) {
 		t.Errorf("%s: got %q, want %q", field, s, want)
 	}
 }
+
+func TestNewNodeTypeConstants(t *testing.T) {
+	if NodeTypeTask != "task" {
+		t.Errorf("expected NodeTypeTask == 'task', got %q", NodeTypeTask)
+	}
+	if NodeTypeQuery != "query" {
+		t.Errorf("expected NodeTypeQuery == 'query', got %q", NodeTypeQuery)
+	}
+	if NodeTypePendingQuestion != "pending_question" {
+		t.Errorf("expected NodeTypePendingQuestion == 'pending_question', got %q", NodeTypePendingQuestion)
+	}
+	if NodeTypeLog != "log" {
+		t.Errorf("expected NodeTypeLog == 'log', got %q", NodeTypeLog)
+	}
+}
+
+func TestTaskStatusConstants(t *testing.T) {
+	if TaskStatusPending != "pending" {
+		t.Errorf("got %q", TaskStatusPending)
+	}
+	if TaskStatusActive != "active" {
+		t.Errorf("got %q", TaskStatusActive)
+	}
+	if TaskStatusCompleted != "completed" {
+		t.Errorf("got %q", TaskStatusCompleted)
+	}
+	if TaskStatusAbandoned != "abandoned" {
+		t.Errorf("got %q", TaskStatusAbandoned)
+	}
+}

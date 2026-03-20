@@ -1,4 +1,4 @@
-package journal
+package memory
 
 import (
 	"context"
@@ -96,7 +96,7 @@ func parseKeyValueAnalysis(text string) (summary, mood, category string, tags []
 // AnalyzeJournalEntry uses Gemini with key/value output (no JSON schema) to analyze a journal entry.
 // env supplies config and LLM dispatch; pass explicitly from the caller (e.g. ToolEnv).
 func AnalyzeJournalEntry(ctx context.Context, env infra.ToolEnv, entryContent, entryUUID, entryTimestamp string) (*JournalAnalysis, error) {
-	ctx, span := infra.StartSpan(ctx, "journal.analyze")
+	ctx, span := infra.StartSpan(ctx, "memory.analyze")
 	defer span.End()
 
 	if len(entryContent) < 20 {

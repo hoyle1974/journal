@@ -5,10 +5,10 @@ import (
 	"testing"
 
 	"cloud.google.com/go/firestore"
-	"google.golang.org/genai"
 	"github.com/jackstrohm/jot/internal/config"
 	"github.com/jackstrohm/jot/internal/infra"
 	"github.com/jackstrohm/jot/pkg/memory"
+	"google.golang.org/genai"
 )
 
 // stubEnv satisfies infra.ToolEnv with nil returns (no real Firestore).

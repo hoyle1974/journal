@@ -13,7 +13,7 @@ import (
 	"google.golang.org/api/iterator"
 
 	"github.com/jackstrohm/jot/internal/infra"
-	"github.com/jackstrohm/jot/pkg/journal"
+	"github.com/jackstrohm/jot/pkg/memory"
 )
 
 func runShowProcessed(ctx context.Context, app *infra.App, args []string) {
@@ -29,7 +29,7 @@ func runShowProcessed(ctx context.Context, app *infra.App, args []string) {
 		log.Fatalf("Firestore: %v", err)
 	}
 
-	iter := client.Collection(journal.EntriesCollection).Documents(ctx)
+	iter := client.Collection(memory.EntriesCollection).Documents(ctx)
 	defer iter.Stop()
 
 	var toDelete []*firestore.DocumentRef

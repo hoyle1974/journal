@@ -1,4 +1,4 @@
-package task
+package memory
 
 import (
 	"context"
@@ -27,7 +27,7 @@ subtasks:
 // 3–7 actionable subtasks, and creates child Task documents in Firestore.
 // Returns a human-readable summary of what was created.
 func BrainstormSubtasks(ctx context.Context, env infra.ToolEnv, parentTaskID string) (string, error) {
-	ctx, span := infra.StartSpan(ctx, "task.engine.brainstorm_subtasks")
+	ctx, span := infra.StartSpan(ctx, "tasks.engine.brainstorm_subtasks")
 	defer span.End()
 
 	if env == nil || env.Config() == nil {
@@ -100,7 +100,7 @@ func BrainstormSubtasks(ctx context.Context, env infra.ToolEnv, parentTaskID str
 		t := &Task{
 			Content:      content,
 			ParentID:     parentTaskID,
-			Status:       StatusPending,
+			Status:       TaskStatusPending,
 			Dependencies: e.deps,
 			IsSequential: isSeq,
 		}
@@ -113,7 +113,7 @@ func BrainstormSubtasks(ctx context.Context, env infra.ToolEnv, parentTaskID str
 	}
 
 	span.SetAttributes(map[string]string{
-		"parent_id":    parentTaskID,
+		"parent_id":     parentTaskID,
 		"subtask_count": fmt.Sprintf("%d", len(entries)),
 		"is_sequential": fmt.Sprintf("%v", isSeq),
 	})
@@ -125,7 +125,7 @@ func BrainstormSubtasks(ctx context.Context, env infra.ToolEnv, parentTaskID str
 // GetChildTasks returns pending and active subtasks for a given parent task UUID, newest first.
 // Limit caps results; 0 or negative defaults to 20.
 func GetChildTasks(ctx context.Context, env infra.ToolEnv, parentID string, limit int) ([]Task, error) {
-	ctx, span := infra.StartSpan(ctx, "task.get_children")
+	ctx, span := infra.StartSpan(ctx, "tasks.get_children")
 	defer span.End()
 
 	if env == nil {
@@ -138,10 +138,11 @@ func GetChildTasks(ctx context.Context, env infra.ToolEnv, parentID string, limi
 	client, err := env.Firestore(ctx)
 	if err != nil {
 		span.RecordError(err)
-		return nil, err
+		return nil, fmt.Errorf("firestore client: %w", err)
 	}
 
-	iter := client.Collection(TasksCollection).
+	iter := client.Collection(KnowledgeCollection).
+		Where("node_type", "==", NodeTypeTask).
 		Where("parent_id", "==", parentID).
 		OrderBy("timestamp", firestore.Asc).
 		Limit(limit * 3).
@@ -156,14 +157,14 @@ func GetChildTasks(ctx context.Context, env infra.ToolEnv, parentID string, limi
 		}
 		if err != nil {
 			span.RecordError(err)
-			return nil, err
+			return nil, fmt.Errorf("iterate tasks: %w", err)
 		}
 		var t Task
 		if err := doc.DataTo(&t); err != nil {
 			continue
 		}
 		t.UUID = doc.Ref.ID
-		if t.Status != StatusPending && t.Status != StatusActive {
+		if t.Status != TaskStatusPending && t.Status != TaskStatusActive {
 			continue
 		}
 		tasks = append(tasks, t)

@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/jackstrohm/jot/internal/infra"
-	"github.com/jackstrohm/jot/pkg/journal"
+	"github.com/jackstrohm/jot/pkg/memory"
 	"github.com/jackstrohm/jot/tools"
 )
 
@@ -35,12 +35,8 @@ func registerQueryTools() {
 		Args:        &getRecentQueriesArgs{},
 		Execute: func(ctx context.Context, env infra.ToolEnv, args any) tools.Result {
 			a := args.(*getRecentQueriesArgs)
-			client, err := env.Firestore(ctx)
-			if err != nil {
-				return tools.Fail("Error: %v", err)
-			}
 			count := clampInt(a.Count, 10, 1, 50)
-			queries, err := journal.GetRecentQueries(ctx, client, count)
+			queries, err := memory.GetRecentQueries(ctx, env, count)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
@@ -62,12 +58,8 @@ func registerQueryTools() {
 			if a.Query == "" {
 				return tools.MissingParam("query")
 			}
-			client, err := env.Firestore(ctx)
-			if err != nil {
-				return tools.Fail("Error: %v", err)
-			}
 			limit := clampInt(a.Limit, 10, 1, 50)
-			queries, err := journal.SearchQueries(ctx, client, a.Query, limit)
+			queries, err := memory.SearchQueries(ctx, env, a.Query, limit)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
@@ -96,12 +88,8 @@ func registerQueryTools() {
 			if err != nil {
 				return tools.Fail("Date range error: %v", err)
 			}
-			client, err := env.Firestore(ctx)
-			if err != nil {
-				return tools.Fail("Error: %v", err)
-			}
 			limit := clampInt(a.Limit, 20, 1, 50)
-			queries, err := journal.GetQueriesByDateRange(ctx, client, startStr, endStr, limit)
+			queries, err := memory.GetQueriesByDateRange(ctx, env, startStr, endStr, limit)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}

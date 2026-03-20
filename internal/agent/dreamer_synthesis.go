@@ -10,7 +10,6 @@ import (
 	"google.golang.org/genai"
 	"github.com/jackstrohm/jot/internal/prompts"
 	"github.com/jackstrohm/jot/internal/infra"
-	"github.com/jackstrohm/jot/pkg/journal"
 	"github.com/jackstrohm/jot/pkg/memory"
 	"github.com/jackstrohm/jot/pkg/utils"
 	"github.com/jackstrohm/jot/tools"
@@ -174,15 +173,11 @@ func RunEvolutionSynthesis(ctx context.Context, env infra.ToolEnv, journalSummar
 	if env == nil {
 		return nil, fmt.Errorf("env required")
 	}
-	client, err := env.Firestore(ctx)
-	if err != nil {
-		return nil, err
-	}
-	queries, err := journal.GetRecentQueries(ctx, client, 50)
+	queries, err := memory.GetRecentQueries(ctx, env, 50)
 	if err != nil {
 		return nil, fmt.Errorf("get recent queries: %w", err)
 	}
-	queriesText := journal.FormatQueriesForContext(queries, 8000)
+	queriesText := memory.FormatQueriesForContext(queries, 8000)
 	if queriesText == "" || strings.TrimSpace(queriesText) == "No queries found." {
 		infra.LoggerFrom(ctx).Info("evolution_synthesis: no queries to audit")
 		return nil, nil
@@ -239,8 +234,9 @@ func RunEvolutionSynthesis(ctx context.Context, env infra.ToolEnv, journalSummar
 	}
 	content := strings.Join(sections, "\n\n")
 
-	if client == nil {
-		return nil, fmt.Errorf("firestore client required to write system_evolution")
+	client, clientErr := env.Firestore(ctx)
+	if clientErr != nil {
+		return nil, fmt.Errorf("firestore client required to write system_evolution: %w", clientErr)
 	}
 	_, err = client.Collection(memory.KnowledgeCollection).Doc(node.UUID).Update(ctx, []firestore.Update{
 		{Path: "content", Value: content},

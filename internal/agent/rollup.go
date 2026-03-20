@@ -6,10 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"cloud.google.com/go/firestore"
 	"github.com/jackstrohm/jot/internal/infra"
 	"github.com/jackstrohm/jot/internal/prompts"
-	"github.com/jackstrohm/jot/pkg/journal"
 	"github.com/jackstrohm/jot/pkg/memory"
 	"github.com/jackstrohm/jot/pkg/utils"
 	"google.golang.org/genai"
@@ -93,8 +91,8 @@ func runRollUpLLM(ctx context.Context, app *infra.App, periodLabel, analysesText
 	return content, out, nil
 }
 
-func getEntriesWithAnalysisForRollup(ctx context.Context, client *firestore.Client, start, end string, limit int) (analysesText string, sourceIDs []string, err error) {
-	withAnalyses, err := journal.GetEntriesWithAnalysisByDateRange(ctx, client, start, end, limit)
+func getEntriesWithAnalysisForRollup(ctx context.Context, env infra.ToolEnv, start, end string, limit int) (analysesText string, sourceIDs []string, err error) {
+	withAnalyses, err := memory.GetEntriesWithAnalysisByDateRange(ctx, env, start, end, limit)
 	if err != nil {
 		return "", nil, err
 	}
@@ -144,14 +142,10 @@ func RunWeeklyRollup(ctx context.Context, app *infra.App) (int, error) {
 	if app == nil {
 		return 0, fmt.Errorf("app required")
 	}
-	client, err := app.Firestore(ctx)
-	if err != nil {
-		return 0, err
-	}
 	start, end := lastCompletedWeekStartEnd(time.Now())
 	periodLabel := fmt.Sprintf("Week of %s", start)
 
-	analysesText, sourceIDs, err := getEntriesWithAnalysisForRollup(ctx, client, start, end, 500)
+	analysesText, sourceIDs, err := getEntriesWithAnalysisForRollup(ctx, app, start, end, 500)
 	if err != nil {
 		return 0, fmt.Errorf("weekly rollup get entries: %w", err)
 	}

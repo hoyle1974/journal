@@ -8,7 +8,7 @@ import (
 
 	"github.com/jackstrohm/jot/internal/infra"
 	"github.com/jackstrohm/jot/internal/prompts"
-	"github.com/jackstrohm/jot/pkg/journal"
+	"github.com/jackstrohm/jot/pkg/memory"
 	"github.com/jackstrohm/jot/pkg/utils"
 	"github.com/jackstrohm/jot/tools"
 )
@@ -77,10 +77,6 @@ func registerJournalTools() {
 		Args:        &getRecentEntriesArgs{},
 		Execute: func(ctx context.Context, env infra.ToolEnv, args any) tools.Result {
 			a := args.(*getRecentEntriesArgs)
-			client, err := env.Firestore(ctx)
-			if err != nil {
-				return tools.Fail("Error: %v", err)
-			}
 			count := clampInt(a.Count, 10, 1, 50)
 			limit := count
 			if a.HasImage {
@@ -92,7 +88,7 @@ func registerJournalTools() {
 					limit = 200
 				}
 			}
-			entries, err := journal.GetEntries(ctx, client, limit)
+			entries, err := memory.GetEntries(ctx, env, limit)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
@@ -102,7 +98,7 @@ func registerJournalTools() {
 					return tools.OK("No recent entries with an attached image found.")
 				}
 			}
-			result := journal.FormatEntriesForContext(entries, 10000)
+			result := memory.FormatEntriesForContext(entries, 10000)
 			return tools.OK("Found %d recent entries:\n%s", len(entries), result)
 		},
 	})
@@ -114,16 +110,12 @@ func registerJournalTools() {
 		Args:        &getOldestEntriesArgs{},
 		Execute: func(ctx context.Context, env infra.ToolEnv, args any) tools.Result {
 			a := args.(*getOldestEntriesArgs)
-			client, err := env.Firestore(ctx)
-			if err != nil {
-				return tools.Fail("Error: %v", err)
-			}
 			count := clampInt(a.Count, 10, 1, 50)
-			entries, err := journal.GetEntriesAsc(ctx, client, count)
+			entries, err := memory.GetEntriesAsc(ctx, env, count)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
-			result := journal.FormatEntriesForContext(entries, 10000)
+			result := memory.FormatEntriesForContext(entries, 10000)
 			return tools.OK("Found %d oldest entries (chronological order):\n%s", len(entries), result)
 		},
 	})
@@ -145,10 +137,6 @@ func registerJournalTools() {
 			if err != nil {
 				return tools.Fail("Date range error: %v", err)
 			}
-			client, err := env.Firestore(ctx)
-			if err != nil {
-				return tools.Fail("Error: %v", err)
-			}
 			limit := clampInt(a.Limit, 50, 1, 200)
 			fetchLimit := limit
 			if a.HasImage {
@@ -157,7 +145,7 @@ func registerJournalTools() {
 					fetchLimit = 500
 				}
 			}
-			entries, err := journal.GetEntriesByDateRange(ctx, client, startStr, endStr, fetchLimit)
+			entries, err := memory.GetEntriesByDateRange(ctx, env, startStr, endStr, fetchLimit)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
@@ -167,7 +155,7 @@ func registerJournalTools() {
 			if len(entries) == 0 {
 				return tools.OK("No entries found between %s and %s.", startStr, endStr)
 			}
-			result := journal.FormatEntriesForContext(entries, 10000)
+			result := memory.FormatEntriesForContext(entries, 10000)
 			return tools.OK("Found %d entries between %s and %s:\n%s", len(entries), startStr, endStr, result)
 		},
 	})
@@ -182,10 +170,6 @@ func registerJournalTools() {
 			if a.Query == "" {
 				return tools.MissingParam("query")
 			}
-			client, err := env.Firestore(ctx)
-			if err != nil {
-				return tools.Fail("Error: %v", err)
-			}
 			limit := clampInt(a.Limit, 20, 1, 50)
 			searchLimit := limit
 			if a.HasImage {
@@ -195,13 +179,14 @@ func registerJournalTools() {
 				}
 			}
 			categoryFilter := strings.ToLower(strings.TrimSpace(a.Category))
-			var entries []journal.Entry
+			var entries []memory.Entry
+			var err error
 			if categoryFilter != "" {
 				startStr, endStr, err := resolveToolDateRange("last month", "today")
 				if err != nil {
 					return tools.Fail("Date range error: %v", err)
 				}
-				withAnalyses, err := journal.GetEntriesWithAnalysisByDateRange(ctx, client, startStr, endStr, 200)
+				withAnalyses, err := memory.GetEntriesWithAnalysisByDateRange(ctx, env, startStr, endStr, 200)
 				if err != nil {
 					return tools.Fail("Error: %v", err)
 				}
@@ -219,7 +204,7 @@ func registerJournalTools() {
 					}
 				}
 			} else {
-				entries, err = journal.SearchEntries(ctx, client, a.Query, searchLimit)
+				entries, err = memory.SearchEntries(ctx, env, a.Query, searchLimit)
 				if err != nil {
 					return tools.Fail("Error: %v", err)
 				}
@@ -230,7 +215,7 @@ func registerJournalTools() {
 			if len(entries) == 0 {
 				return tools.OK("No entries matching '%s' found.", a.Query)
 			}
-			result := journal.FormatEntriesForContext(entries, 10000)
+			result := memory.FormatEntriesForContext(entries, 10000)
 			return tools.OK("Found %d entries matching '%s':\n%s", len(entries), a.Query, result)
 		},
 	})
@@ -242,10 +227,6 @@ func registerJournalTools() {
 		Args:        &countEntriesArgs{},
 		Execute: func(ctx context.Context, env infra.ToolEnv, args any) tools.Result {
 			a := args.(*countEntriesArgs)
-			client, err := env.Firestore(ctx)
-			if err != nil {
-				return tools.Fail("Error: %v", err)
-			}
 			var startDate, endDate *string
 			if a.StartDate != "" {
 				startDate = &a.StartDate
@@ -253,7 +234,7 @@ func registerJournalTools() {
 			if a.EndDate != "" {
 				endDate = &a.EndDate
 			}
-			count, err := journal.CountEntries(ctx, client, startDate, endDate)
+			count, err := memory.CountEntries(ctx, env, startDate, endDate)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
@@ -278,11 +259,7 @@ func registerJournalTools() {
 		Category:    "journal",
 		Args:        &tools.NoArgs{},
 		Execute: func(ctx context.Context, env infra.ToolEnv, args any) tools.Result {
-			client, err := env.Firestore(ctx)
-			if err != nil {
-				return tools.Fail("Error: %v", err)
-			}
-			entries, err := journal.GetEntries(ctx, client, 100)
+			entries, err := memory.GetEntries(ctx, env, 100)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
@@ -313,19 +290,15 @@ func registerJournalTools() {
 			if a.Source == "" {
 				return tools.MissingParam("source")
 			}
-			client, err := env.Firestore(ctx)
-			if err != nil {
-				return tools.Fail("Error: %v", err)
-			}
 			count := clampInt(a.Count, 10, 1, 50)
-			entries, err := journal.GetEntriesBySource(ctx, client, a.Source, count)
+			entries, err := memory.GetEntriesBySource(ctx, env, a.Source, count)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
 			if len(entries) == 0 {
 				return tools.OK("No entries found from source '%s'.", a.Source)
 			}
-			result := journal.FormatEntriesForContext(entries, 10000)
+			result := memory.FormatEntriesForContext(entries, 10000)
 			return tools.OK("Found %d entries from '%s':\n%s", len(entries), a.Source, result)
 		},
 	})
@@ -340,17 +313,14 @@ func registerJournalTools() {
 			if a.Topic == "" {
 				return tools.MissingParam("topic")
 			}
-			client, err := env.Firestore(ctx)
-			if err != nil {
-				return tools.Fail("Error: %v", err)
-			}
-			var entries []journal.Entry
+			var entries []memory.Entry
+			var err error
 			if a.Timeframe != "" {
 				startStr, endStr, err := resolveToolDateRange(a.Timeframe, "today")
 				if err != nil {
 					return tools.Fail("Invalid timeframe: %v", err)
 				}
-				byDate, err := journal.GetEntriesByDateRange(ctx, client, startStr, endStr, 200)
+				byDate, err := memory.GetEntriesByDateRange(ctx, env, startStr, endStr, 200)
 				if err != nil {
 					return tools.Fail("Error fetching entries: %v", err)
 				}
@@ -361,7 +331,7 @@ func registerJournalTools() {
 					}
 				}
 			} else {
-				entries, err = journal.SearchEntries(ctx, client, a.Topic, 100)
+				entries, err = memory.SearchEntries(ctx, env, a.Topic, 100)
 				if err != nil {
 					return tools.Fail("Error searching entries: %v", err)
 				}
@@ -372,7 +342,7 @@ func registerJournalTools() {
 			sort.Slice(entries, func(i, j int) bool {
 				return entries[i].Timestamp < entries[j].Timestamp
 			})
-			entriesText := journal.FormatEntriesForContext(entries, 12000)
+			entriesText := memory.FormatEntriesForContext(entries, 12000)
 			if env == nil || env.Config() == nil {
 				return tools.Fail("App not available for summarization")
 			}
@@ -405,10 +375,6 @@ func registerJournalTools() {
 		Args:        &queryEntitiesArgs{},
 		Execute: func(ctx context.Context, env infra.ToolEnv, args any) tools.Result {
 			a := args.(*queryEntitiesArgs)
-			client, err := env.Firestore(ctx)
-			if err != nil {
-				return tools.Fail("Error: %v", err)
-			}
 			startDate := a.StartDate
 			if startDate == "" {
 				startDate = "30 days ago"
@@ -422,7 +388,7 @@ func registerJournalTools() {
 				return tools.Fail("Date range error: %v", err)
 			}
 			limit := clampInt(a.Limit, 50, 1, 200)
-			withAnalyses, err := journal.GetEntriesWithAnalysisByDateRange(ctx, client, startStr, endStr, limit)
+			withAnalyses, err := memory.GetEntriesWithAnalysisByDateRange(ctx, env, startStr, endStr, limit)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
@@ -441,7 +407,7 @@ func registerJournalTools() {
 					continue
 				}
 				entryDate := ew.Entry.Timestamp
-				entryDate = journal.TruncateTimestamp(entryDate, journal.DateDisplayLen)
+				entryDate = memory.TruncateTimestamp(entryDate, memory.DateDisplayLen)
 				for _, ent := range ew.Analysis.Entities {
 					if entityType != "" && strings.ToLower(ent.Type) != entityType {
 						continue
@@ -477,15 +443,11 @@ func registerJournalTools() {
 			if a.Date == "" {
 				return tools.MissingParam("date")
 			}
-			client, err := env.Firestore(ctx)
-			if err != nil {
-				return tools.Fail("Error: %v", err)
-			}
 			startStr, endStr, err := resolveToolDateRange(a.Date, a.Date)
 			if err != nil {
 				return tools.Fail("Invalid date: %v", err)
 			}
-			withAnalyses, err := journal.GetEntriesWithAnalysisByDateRange(ctx, client, startStr, endStr, 100)
+			withAnalyses, err := memory.GetEntriesWithAnalysisByDateRange(ctx, env, startStr, endStr, 100)
 			if err != nil {
 				return tools.Fail("Error fetching entries: %v", err)
 			}
@@ -498,7 +460,7 @@ func registerJournalTools() {
 			for _, ew := range withAnalyses {
 				if ew.Analysis != nil {
 					if s := strings.TrimSpace(ew.Analysis.Summary); s != "" {
-						ts := journal.TruncateTimestamp(ew.Entry.Timestamp, journal.DateTimeDisplayLen)
+						ts := memory.TruncateTimestamp(ew.Entry.Timestamp, memory.DateTimeDisplayLen)
 						summaries = append(summaries, fmt.Sprintf("[%s] %s", ts, s))
 					}
 					for _, t := range ew.Analysis.Tags {

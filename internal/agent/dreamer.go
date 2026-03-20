@@ -7,14 +7,11 @@ import (
 	"sync"
 	"time"
 
-	"cloud.google.com/go/firestore"
 	"github.com/jackstrohm/jot/internal/gdoc"
 	"github.com/jackstrohm/jot/internal/infra"
 	"github.com/jackstrohm/jot/internal/prompts"
-	"github.com/jackstrohm/jot/pkg/journal"
 	"github.com/jackstrohm/jot/pkg/memory"
 	"github.com/jackstrohm/jot/pkg/system"
-	"github.com/jackstrohm/jot/pkg/task"
 	"github.com/jackstrohm/jot/pkg/utils"
 	"github.com/jackstrohm/jot/tools"
 	"golang.org/x/sync/errgroup"
@@ -364,8 +361,8 @@ func runDreamerTaskPhase(ctx context.Context, app *infra.App, dreamerRunID strin
 	}
 
 	openRootsSummary := ""
-	if roots, err := task.GetOpenRootTasks(ctx, app, 20); err == nil && len(roots) > 0 {
-		openRootsSummary = "\n\nCurrent open todo list roots:\n" + task.FormatTasksForContext(roots, 1500)
+	if roots, err := memory.GetOpenRootTasks(ctx, app, 20); err == nil && len(roots) > 0 {
+		openRootsSummary = "\n\nCurrent open todo list roots:\n" + memory.FormatTasksForContext(roots, 1500)
 	}
 
 	journalPreview := journalContext
@@ -480,11 +477,11 @@ func extractDreamerPersonaFacts(outputs []*SpecialistOutput, domains []Domain) [
 	return personaFacts
 }
 
-func loadDreamerInputs(ctx context.Context, client *firestore.Client) (*DreamerInputs, error) {
+func loadDreamerInputs(ctx context.Context, env infra.ToolEnv) (*DreamerInputs, error) {
 	cutoff := time.Now().Add(-24 * time.Hour)
 	startDate := cutoff.Format("2006-01-02")
 	endDate := time.Now().Format("2006-01-02")
-	entries, err := journal.GetEntriesByDateRange(ctx, client, startDate, endDate, 200)
+	entries, err := memory.GetEntriesByDateRange(ctx, env, startDate, endDate, 200)
 	if err != nil {
 		return nil, err
 	}
@@ -504,7 +501,7 @@ func loadDreamerInputs(ctx context.Context, client *firestore.Client) (*DreamerI
 		entryUUIDs = append(entryUUIDs, e.UUID)
 	}
 	recentQueriesText := ""
-	if queries, qErr := journal.GetRecentQueries(ctx, client, 50); qErr == nil && len(queries) > 0 {
+	if queries, qErr := memory.GetRecentQueries(ctx, env, 50); qErr == nil && len(queries) > 0 {
 		var qLines []string
 		for _, q := range queries {
 			ts := q.Timestamp
@@ -557,12 +554,7 @@ func RunDreamer(ctx context.Context, app *infra.App, opts *RunDreamerOpts) (*Dre
 		progress.OnPhase(ctx, "fetch")
 	}
 
-	client, err := app.Firestore(ctx)
-	if err != nil {
-		span.RecordError(err)
-		return nil, err
-	}
-	inputs, err := loadDreamerInputs(ctx, client)
+	inputs, err := loadDreamerInputs(ctx, app)
 	if err != nil {
 		span.RecordError(err)
 		infra.LoggerFrom(ctx).Error("dreamer fetch entries failed", "dreamer_run_id", dreamerRunID, "phase", "fetch", "error", err)

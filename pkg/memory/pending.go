@@ -14,7 +14,7 @@ import (
 )
 
 // PendingQuestionsCollection is the Firestore collection name for pending questions.
-const PendingQuestionsCollection = "pending_questions"
+const PendingQuestionsCollection = KnowledgeCollection
 
 // TelegramQuestionStateCollection tracks which pending question is currently being
 // asked to each Telegram chat. Documents are keyed by string(chat_id).
@@ -22,15 +22,15 @@ const TelegramQuestionStateCollection = "telegram_question_state"
 
 // PendingQuestion is a gap or contradiction detected during Dreamer synthesis, to be clarified by the user.
 type PendingQuestion struct {
-	UUID            string    `firestore:"-" json:"uuid"`
-	Question        string    `firestore:"question" json:"question"`
-	Kind            string    `firestore:"kind" json:"kind"` // "gap" or "contradiction"
-	Context         string    `firestore:"context" json:"context,omitempty"`
-	SourceEntryIDs  []string  `firestore:"source_entry_ids" json:"source_entry_ids,omitempty"`
-	CreatedAt       string    `firestore:"created_at" json:"created_at"`
-	ResolvedAt      string    `firestore:"resolved_at" json:"resolved_at,omitempty"`
-	Answer          string    `firestore:"answer" json:"answer,omitempty"`
-	Embedding       []float32 `firestore:"embedding,omitempty" json:"-"`
+	UUID           string    `firestore:"-" json:"uuid"`
+	Question       string    `firestore:"question" json:"question"`
+	Kind           string    `firestore:"kind" json:"kind"` // "gap" or "contradiction"
+	Context        string    `firestore:"context" json:"context,omitempty"`
+	SourceEntryIDs []string  `firestore:"source_entry_ids" json:"source_entry_ids,omitempty"`
+	CreatedAt      string    `firestore:"created_at" json:"created_at"`
+	ResolvedAt     string    `firestore:"resolved_at" json:"resolved_at,omitempty"`
+	Answer         string    `firestore:"answer" json:"answer,omitempty"`
+	Embedding      []float32 `firestore:"embedding,omitempty" json:"-"`
 }
 
 // InsertPendingQuestions writes one or more pending questions to Firestore.
@@ -41,6 +41,9 @@ func InsertPendingQuestions(ctx context.Context, env infra.ToolEnv, questions []
 	if env == nil {
 		return fmt.Errorf("env required")
 	}
+
+	ctx, span := infra.StartSpan(ctx, "pending.insertPendingQuestions")
+	defer span.End()
 
 	// Filter out duplicates before writing.
 	filtered, err := filterDuplicatePendingQuestions(ctx, env, questions)
@@ -54,7 +57,7 @@ func InsertPendingQuestions(ctx context.Context, env infra.ToolEnv, questions []
 
 	client, err := env.Firestore(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("firestore: %w", err)
 	}
 	now := time.Now().Format(time.RFC3339)
 	for i := range questions {
@@ -66,17 +69,19 @@ func InsertPendingQuestions(ctx context.Context, env infra.ToolEnv, questions []
 			q.CreatedAt = now
 		}
 		_, err = client.Collection(PendingQuestionsCollection).Doc(q.UUID).Set(ctx, map[string]interface{}{
-			"question":         q.Question,
-			"kind":             q.Kind,
-			"context":          q.Context,
-			"source_entry_ids": q.SourceEntryIDs,
-			"created_at":       q.CreatedAt,
-			"resolved_at":      q.ResolvedAt,
-			"answer":           q.Answer,
-			"embedding":        q.Embedding,
+			"question":            q.Question,
+			"kind":                q.Kind,
+			"context":             q.Context,
+			"source_entry_ids":    q.SourceEntryIDs,
+			"created_at":          q.CreatedAt,
+			"resolved_at":         q.ResolvedAt,
+			"answer":              q.Answer,
+			"embedding":           q.Embedding,
+			"node_type":           NodeTypePendingQuestion,
+			"significance_weight": 0.1,
 		})
 		if err != nil {
-			return err
+			return fmt.Errorf("insert pending question: %w", err)
 		}
 	}
 	return nil
@@ -108,14 +113,19 @@ func GetUnresolvedPendingQuestions(ctx context.Context, env infra.ToolEnv, limit
 	if env == nil {
 		return nil, fmt.Errorf("env required")
 	}
+
+	ctx, span := infra.StartSpan(ctx, "pending.getUnresolvedPendingQuestions")
+	defer span.End()
+
 	client, err := env.Firestore(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("firestore: %w", err)
 	}
 	if limit <= 0 {
 		limit = 20
 	}
 	query := client.Collection(PendingQuestionsCollection).
+		Where("node_type", "==", NodeTypePendingQuestion).
 		OrderBy("created_at", firestore.Desc).
 		Limit(100)
 	out, err := infra.QueryDocuments(ctx, query, func(doc *firestore.DocumentSnapshot) (PendingQuestion, error) {
@@ -152,12 +162,17 @@ func GetRecentlyResolvedPendingQuestions(ctx context.Context, env infra.ToolEnv,
 	if env == nil {
 		return nil, fmt.Errorf("env required")
 	}
+
+	ctx, span := infra.StartSpan(ctx, "pending.getRecentlyResolvedPendingQuestions")
+	defer span.End()
+
 	client, err := env.Firestore(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("firestore: %w", err)
 	}
 	sinceStr := since.Format(time.RFC3339)
 	query := client.Collection(PendingQuestionsCollection).
+		Where("node_type", "==", NodeTypePendingQuestion).
 		Where("created_at", ">=", sinceStr).
 		OrderBy("created_at", firestore.Desc).
 		Limit(200)

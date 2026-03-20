@@ -19,6 +19,18 @@ import (
 // Knowledge nodes are distinguished from log entries by node_type != "log".
 const KnowledgeCollection = "journal"
 
+// EntriesCollection is an alias for KnowledgeCollection for call-site compatibility
+// when referring specifically to journal log entries.
+const EntriesCollection = KnowledgeCollection
+
+// QueriesCollection is the Firestore collection name for query logs.
+// In the unified schema, queries are stored in the same "journal" collection as knowledge nodes.
+const QueriesCollection = KnowledgeCollection
+
+// TasksCollection is the Firestore collection name for tasks.
+// In the unified schema, tasks are stored in the "journal" collection as knowledge nodes (node_type=task).
+const TasksCollection = KnowledgeCollection
+
 // KnowledgeNode represents an arbitrary piece of structured data (Person, Task, Goal, Fact).
 type KnowledgeNode struct {
 	UUID            string   `firestore:"-" json:"uuid"`

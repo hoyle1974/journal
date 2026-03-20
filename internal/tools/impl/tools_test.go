@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jackstrohm/jot/pkg/journal"
 	"github.com/jackstrohm/jot/pkg/memory"
 	"github.com/jackstrohm/jot/pkg/utils"
 )
@@ -13,19 +12,19 @@ import (
 func TestFormatEntriesForContext(t *testing.T) {
 	tests := []struct {
 		name     string
-		entries  []journal.Entry
+		entries  []memory.Entry
 		maxChars int
 		contains []string
 	}{
 		{
 			name:     "empty entries",
-			entries:  []journal.Entry{},
+			entries:  []memory.Entry{},
 			maxChars: 1000,
 			contains: []string{"No entries found"},
 		},
 		{
 			name: "single entry",
-			entries: []journal.Entry{
+			entries: []memory.Entry{
 				{Timestamp: "2024-01-15T10:00:00Z", Source: "cli", Content: "Test entry"},
 			},
 			maxChars: 1000,
@@ -33,7 +32,7 @@ func TestFormatEntriesForContext(t *testing.T) {
 		},
 		{
 			name: "truncation",
-			entries: []journal.Entry{
+			entries: []memory.Entry{
 				{Timestamp: "2024-01-15T10:00:00Z", Source: "cli", Content: "First entry"},
 				{Timestamp: "2024-01-15T11:00:00Z", Source: "cli", Content: "Second entry"},
 			},
@@ -44,7 +43,7 @@ func TestFormatEntriesForContext(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := journal.FormatEntriesForContext(tt.entries, tt.maxChars)
+			result := memory.FormatEntriesForContext(tt.entries, tt.maxChars)
 			for _, s := range tt.contains {
 				if !strings.Contains(result, s) {
 					t.Errorf("FormatEntriesForContext() result should contain %q, got %q", s, result)

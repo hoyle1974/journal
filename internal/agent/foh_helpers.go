@@ -9,7 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackstrohm/jot/internal/infra"
-	"github.com/jackstrohm/jot/pkg/journal"
+	"github.com/jackstrohm/jot/pkg/memory"
 )
 
 var imageSentinelRE = regexp.MustCompile(`\[SEND_IMAGE:[^\]]+\]`)
@@ -28,11 +28,7 @@ func AddEntryAndEnqueue(ctx context.Context, app *infra.App, content, source str
 	if app == nil {
 		return "", fmt.Errorf("app required for AddEntryAndEnqueue")
 	}
-	client, err := app.Firestore(ctx)
-	if err != nil {
-		return "", err
-	}
-	entryUUID, err := journal.AddEntry(ctx, client, content, source, timestamp, imageURL)
+	entryUUID, err := memory.AddEntry(ctx, app, content, source, timestamp, imageURL)
 	if err != nil {
 		return "", err
 	}

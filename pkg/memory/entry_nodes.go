@@ -1,7 +1,8 @@
-package journal
+package memory
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -12,37 +13,41 @@ import (
 	"google.golang.org/api/iterator"
 )
 
-// JournalCollection is the unified Firestore collection for all journal documents
-// (episodic log entries with node_type "log" and semantic knowledge nodes).
-const JournalCollection = "journal"
+// errSkipEntry is a sentinel returned from mapDoc callbacks to exclude a document
+// from results without treating it as an error.
+var errSkipEntry = errors.New("skip entry")
 
-// EntriesCollection is an alias for JournalCollection kept for call-site compatibility.
-const EntriesCollection = JournalCollection
-
-// Entry represents a journal entry.
+// Entry represents a journal entry (episodic log node).
 type Entry struct {
 	UUID                   string `firestore:"-" json:"uuid"`
 	Content                string `firestore:"content" json:"content"`
 	Source                 string `firestore:"source" json:"source"`
 	Timestamp              string `firestore:"timestamp" json:"timestamp"`
 	ImageURL               string `firestore:"image_url,omitempty" json:"image_url,omitempty"`
-	ParsedImageDescription string `firestore:"parsed_image_description,omitempty" json:"parsed_image_description,omitempty"` // vision-generated description for FOH to reason about
+	ParsedImageDescription string `firestore:"parsed_image_description,omitempty" json:"parsed_image_description,omitempty"`
 	AudioURL               string `firestore:"audio_url,omitempty" json:"audio_url,omitempty"`
-	Transcription          string `firestore:"transcription,omitempty" json:"transcription,omitempty"` // Gemini speech-to-text of voice note
+	Transcription          string `firestore:"transcription,omitempty" json:"transcription,omitempty"`
 }
 
-// AddEntry writes a new entry to Firestore and returns the entry UUID. Caller is responsible for enqueueing process-entry (e.g. in jot).
+// AddEntry writes a new entry to Firestore and returns the entry UUID.
+// Caller is responsible for enqueueing process-entry (e.g. in jot).
 // imageURL is optional (e.g. gs://bucket/path); when non-empty it is stored on the entry.
-// client must be non-nil; obtain it from infra.FirestoreProvider.Firestore(ctx) at the call site.
-func AddEntry(ctx context.Context, client *firestore.Client, content, source string, timestamp *string, imageURL string) (string, error) {
-	if client == nil {
-		return "", fmt.Errorf("firestore client is required")
+func AddEntry(ctx context.Context, env infra.ToolEnv, content, source string, timestamp *string, imageURL string) (string, error) {
+	if env == nil {
+		return "", fmt.Errorf("env is required")
 	}
+	ctx, span := infra.StartSpan(ctx, "entries.addEntry")
+	defer span.End()
 	if content == "" {
 		return "", fmt.Errorf("content is required and must be a non-empty string")
 	}
 	if source == "" {
 		return "", fmt.Errorf("source is required and must be a string")
+	}
+
+	client, err := env.Firestore(ctx)
+	if err != nil {
+		return "", err
 	}
 
 	entryUUID := infra.GenerateUUID()
@@ -55,13 +60,13 @@ func AddEntry(ctx context.Context, client *firestore.Client, content, source str
 		"content":             content,
 		"source":              source,
 		"timestamp":           ts,
-		"node_type":           "log",
+		"node_type":           NodeTypeLog,
 		"significance_weight": 0.3,
 	}
 	if imageURL != "" {
 		doc["image_url"] = imageURL
 	}
-	_, err := client.Collection(EntriesCollection).Doc(entryUUID).Set(ctx, doc)
+	_, err = client.Collection(KnowledgeCollection).Doc(entryUUID).Set(ctx, doc)
 	if err != nil {
 		return "", err
 	}
@@ -72,9 +77,13 @@ func AddEntry(ctx context.Context, client *firestore.Client, content, source str
 
 // UpdateEntryAudio sets the audio_url and transcription fields on an existing entry.
 // Call after transcription completes so the entry reflects both the stored audio and its text.
-func UpdateEntryAudio(ctx context.Context, client *firestore.Client, entryUUID, audioURL, transcription string) error {
-	if client == nil {
-		return fmt.Errorf("firestore client is required")
+func UpdateEntryAudio(ctx context.Context, env infra.ToolEnv, entryUUID, audioURL, transcription string) error {
+	if env == nil {
+		return fmt.Errorf("env is required")
+	}
+	client, err := env.Firestore(ctx)
+	if err != nil {
+		return err
 	}
 	updates := []firestore.Update{
 		{Path: "audio_url", Value: audioURL},
@@ -82,17 +91,20 @@ func UpdateEntryAudio(ctx context.Context, client *firestore.Client, entryUUID, 
 		// Replace placeholder content with the actual transcription.
 		{Path: "content", Value: transcription},
 	}
-	_, err := client.Collection(EntriesCollection).Doc(entryUUID).Update(ctx, updates)
+	_, err = client.Collection(KnowledgeCollection).Doc(entryUUID).Update(ctx, updates)
 	return err
 }
 
 // GetEntries fetches entries from Firestore, ordered by timestamp descending.
-// client must be non-nil; obtain from infra.FirestoreProvider.Firestore(ctx).
-func GetEntries(ctx context.Context, client *firestore.Client, limit int) ([]Entry, error) {
-	if client == nil {
-		return nil, fmt.Errorf("firestore client is required")
+func GetEntries(ctx context.Context, env infra.ToolEnv, limit int) ([]Entry, error) {
+	if env == nil {
+		return nil, fmt.Errorf("env is required")
 	}
-	query := client.Collection(EntriesCollection).
+	client, err := env.Firestore(ctx)
+	if err != nil {
+		return nil, err
+	}
+	query := client.Collection(KnowledgeCollection).
 		Where("node_type", "==", "log").
 		OrderBy("timestamp", firestore.Desc).
 		Limit(limit)
@@ -107,11 +119,15 @@ func GetEntries(ctx context.Context, client *firestore.Client, limit int) ([]Ent
 }
 
 // GetEntriesAsc fetches entries from Firestore, ordered by timestamp ascending (oldest first).
-func GetEntriesAsc(ctx context.Context, client *firestore.Client, limit int) ([]Entry, error) {
-	if client == nil {
-		return nil, fmt.Errorf("firestore client is required")
+func GetEntriesAsc(ctx context.Context, env infra.ToolEnv, limit int) ([]Entry, error) {
+	if env == nil {
+		return nil, fmt.Errorf("env is required")
 	}
-	query := client.Collection(EntriesCollection).
+	client, err := env.Firestore(ctx)
+	if err != nil {
+		return nil, err
+	}
+	query := client.Collection(KnowledgeCollection).
 		Where("node_type", "==", "log").
 		OrderBy("timestamp", firestore.Asc).
 		Limit(limit)
@@ -126,9 +142,15 @@ func GetEntriesAsc(ctx context.Context, client *firestore.Client, limit int) ([]
 }
 
 // GetEntriesByDateRange fetches entries within a date range.
-func GetEntriesByDateRange(ctx context.Context, client *firestore.Client, startDate, endDate string, limit int) ([]Entry, error) {
-	if client == nil {
-		return nil, fmt.Errorf("firestore client is required")
+func GetEntriesByDateRange(ctx context.Context, env infra.ToolEnv, startDate, endDate string, limit int) ([]Entry, error) {
+	if env == nil {
+		return nil, fmt.Errorf("env is required")
+	}
+	ctx, span := infra.StartSpan(ctx, "entries.getEntriesByDateRange")
+	defer span.End()
+	client, err := env.Firestore(ctx)
+	if err != nil {
+		return nil, err
 	}
 	if len(startDate) == 10 {
 		startDate = startDate + "T00:00:00"
@@ -136,7 +158,7 @@ func GetEntriesByDateRange(ctx context.Context, client *firestore.Client, startD
 	if len(endDate) == 10 {
 		endDate = endDate + "T23:59:59"
 	}
-	query := client.Collection(EntriesCollection).
+	query := client.Collection(KnowledgeCollection).
 		Where("node_type", "==", "log").
 		Where("timestamp", ">=", startDate).
 		Where("timestamp", "<=", endDate).
@@ -157,12 +179,18 @@ func GetEntriesByDateRange(ctx context.Context, client *firestore.Client, startD
 }
 
 // SearchEntries searches entries containing keywords (case-insensitive).
-func SearchEntries(ctx context.Context, client *firestore.Client, keywords string, limit int) ([]Entry, error) {
-	if client == nil {
-		return nil, fmt.Errorf("firestore client is required")
+func SearchEntries(ctx context.Context, env infra.ToolEnv, keywords string, limit int) ([]Entry, error) {
+	if env == nil {
+		return nil, fmt.Errorf("env is required")
+	}
+	ctx, span := infra.StartSpan(ctx, "entries.searchEntries")
+	defer span.End()
+	client, err := env.Firestore(ctx)
+	if err != nil {
+		return nil, err
 	}
 	keywordsLower := strings.Fields(strings.ToLower(keywords))
-	query := client.Collection(EntriesCollection).
+	query := client.Collection(KnowledgeCollection).
 		Where("node_type", "==", "log").
 		OrderBy("timestamp", firestore.Desc).
 		Limit(500)
@@ -174,7 +202,7 @@ func SearchEntries(ctx context.Context, client *firestore.Client, keywords strin
 		contentLower := strings.ToLower(e.Content)
 		for _, kw := range keywordsLower {
 			if !strings.Contains(contentLower, kw) {
-				return Entry{}, fmt.Errorf("skip")
+				return Entry{}, errSkipEntry
 			}
 		}
 		e.UUID = doc.Ref.ID
@@ -190,9 +218,15 @@ func SearchEntries(ctx context.Context, client *firestore.Client, keywords strin
 }
 
 // CountEntries counts entries, optionally within a date range.
-func CountEntries(ctx context.Context, client *firestore.Client, startDate, endDate *string) (int, error) {
-	if client == nil {
-		return 0, fmt.Errorf("firestore client is required")
+func CountEntries(ctx context.Context, env infra.ToolEnv, startDate, endDate *string) (int, error) {
+	if env == nil {
+		return 0, fmt.Errorf("env is required")
+	}
+	ctx, span := infra.StartSpan(ctx, "entries.countEntries")
+	defer span.End()
+	client, err := env.Firestore(ctx)
+	if err != nil {
+		return 0, err
 	}
 	var query firestore.Query
 	if startDate != nil && endDate != nil && *startDate != "" && *endDate != "" {
@@ -204,12 +238,12 @@ func CountEntries(ctx context.Context, client *firestore.Client, startDate, endD
 		if len(end) == 10 {
 			end = end + "T23:59:59"
 		}
-		query = client.Collection(EntriesCollection).
+		query = client.Collection(KnowledgeCollection).
 			Where("node_type", "==", "log").
 			Where("timestamp", ">=", start).
 			Where("timestamp", "<=", end)
 	} else {
-		query = client.Collection(EntriesCollection).
+		query = client.Collection(KnowledgeCollection).
 			Where("node_type", "==", "log")
 	}
 	iter := query.Documents(ctx)
@@ -229,11 +263,15 @@ func CountEntries(ctx context.Context, client *firestore.Client, startDate, endD
 }
 
 // GetUniqueSources returns all unique source values from entries.
-func GetUniqueSources(ctx context.Context, client *firestore.Client) ([]string, error) {
-	if client == nil {
-		return nil, fmt.Errorf("firestore client is required")
+func GetUniqueSources(ctx context.Context, env infra.ToolEnv) ([]string, error) {
+	if env == nil {
+		return nil, fmt.Errorf("env is required")
 	}
-	iter := client.Collection(EntriesCollection).Where("node_type", "==", "log").Limit(1000).Documents(ctx)
+	client, err := env.Firestore(ctx)
+	if err != nil {
+		return nil, err
+	}
+	iter := client.Collection(KnowledgeCollection).Where("node_type", "==", "log").Limit(1000).Documents(ctx)
 	defer iter.Stop()
 	sources := make(map[string]bool)
 	for {
@@ -258,12 +296,16 @@ func GetUniqueSources(ctx context.Context, client *firestore.Client) ([]string, 
 }
 
 // GetEntriesBySource returns entries filtered by source (partial match).
-func GetEntriesBySource(ctx context.Context, client *firestore.Client, sourceFilter string, limit int) ([]Entry, error) {
-	if client == nil {
-		return nil, fmt.Errorf("firestore client is required")
+func GetEntriesBySource(ctx context.Context, env infra.ToolEnv, sourceFilter string, limit int) ([]Entry, error) {
+	if env == nil {
+		return nil, fmt.Errorf("env is required")
+	}
+	client, err := env.Firestore(ctx)
+	if err != nil {
+		return nil, err
 	}
 	sourceFilterLower := strings.ToLower(sourceFilter)
-	query := client.Collection(EntriesCollection).
+	query := client.Collection(KnowledgeCollection).
 		Where("node_type", "==", "log").
 		OrderBy("timestamp", firestore.Desc).
 		Limit(500)
@@ -273,7 +315,7 @@ func GetEntriesBySource(ctx context.Context, client *firestore.Client, sourceFil
 			return Entry{}, err
 		}
 		if !strings.Contains(strings.ToLower(e.Source), sourceFilterLower) {
-			return Entry{}, fmt.Errorf("skip")
+			return Entry{}, errSkipEntry
 		}
 		e.UUID = doc.Ref.ID
 		return e, nil
@@ -288,11 +330,15 @@ func GetEntriesBySource(ctx context.Context, client *firestore.Client, sourceFil
 }
 
 // GetEntry fetches a single entry by UUID.
-func GetEntry(ctx context.Context, client *firestore.Client, entryUUID string) (*Entry, error) {
-	if client == nil {
-		return nil, fmt.Errorf("firestore client is required")
+func GetEntry(ctx context.Context, env infra.ToolEnv, entryUUID string) (*Entry, error) {
+	if env == nil {
+		return nil, fmt.Errorf("env is required")
 	}
-	doc, err := client.Collection(EntriesCollection).Doc(entryUUID).Get(ctx)
+	client, err := env.Firestore(ctx)
+	if err != nil {
+		return nil, err
+	}
+	doc, err := client.Collection(KnowledgeCollection).Doc(entryUUID).Get(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -305,10 +351,12 @@ func GetEntry(ctx context.Context, client *firestore.Client, entryUUID string) (
 }
 
 // GetEntryDates returns a map from entry UUID to date string (YYYY-MM-DD). Missing entries are omitted.
-func GetEntryDates(ctx context.Context, client *firestore.Client, entryIDs []string) (map[string]string, error) {
-	if client == nil {
-		return nil, fmt.Errorf("firestore client is required")
+func GetEntryDates(ctx context.Context, env infra.ToolEnv, entryIDs []string) (map[string]string, error) {
+	if env == nil {
+		return nil, fmt.Errorf("env is required")
 	}
+	ctx, span := infra.StartSpan(ctx, "entries.getEntryDates")
+	defer span.End()
 	if len(entryIDs) == 0 {
 		return nil, nil
 	}
@@ -322,7 +370,7 @@ func GetEntryDates(ctx context.Context, client *firestore.Client, entryIDs []str
 	}
 	result := make(map[string]string, len(deduped))
 	for _, id := range deduped {
-		e, err := GetEntry(ctx, client, id)
+		e, err := GetEntry(ctx, env, id)
 		if err != nil || e == nil || e.Timestamp == "" {
 			continue
 		}
@@ -336,47 +384,65 @@ func GetEntryDates(ctx context.Context, client *firestore.Client, entryIDs []str
 }
 
 // UpdateEntry updates an entry's content.
-func UpdateEntry(ctx context.Context, client *firestore.Client, entryUUID, newContent string) error {
-	if client == nil {
-		return fmt.Errorf("firestore client is required")
+func UpdateEntry(ctx context.Context, env infra.ToolEnv, entryUUID, newContent string) error {
+	if env == nil {
+		return fmt.Errorf("env is required")
 	}
-	_, err := client.Collection(EntriesCollection).Doc(entryUUID).Update(ctx, []firestore.Update{
+	client, err := env.Firestore(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = client.Collection(KnowledgeCollection).Doc(entryUUID).Update(ctx, []firestore.Update{
 		{Path: "content", Value: newContent},
 	})
 	return err
 }
 
 // DeleteEntry deletes a single entry.
-func DeleteEntry(ctx context.Context, client *firestore.Client, entryUUID string) error {
-	if client == nil {
-		return fmt.Errorf("firestore client is required")
+func DeleteEntry(ctx context.Context, env infra.ToolEnv, entryUUID string) error {
+	if env == nil {
+		return fmt.Errorf("env is required")
 	}
-	_, err := client.Collection(EntriesCollection).Doc(entryUUID).Delete(ctx)
+	client, err := env.Firestore(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = client.Collection(KnowledgeCollection).Doc(entryUUID).Delete(ctx)
 	return err
 }
 
 // DeleteEntries deletes multiple entries.
-func DeleteEntries(ctx context.Context, client *firestore.Client, entryUUIDs []string) error {
-	if client == nil {
-		return fmt.Errorf("firestore client is required")
+func DeleteEntries(ctx context.Context, env infra.ToolEnv, entryUUIDs []string) error {
+	if env == nil {
+		return fmt.Errorf("env is required")
 	}
 	if len(entryUUIDs) == 0 {
 		return nil
 	}
+	client, err := env.Firestore(ctx)
+	if err != nil {
+		return err
+	}
 	batch := client.Batch()
 	for _, uuid := range entryUUIDs {
-		batch.Delete(client.Collection(EntriesCollection).Doc(uuid))
+		batch.Delete(client.Collection(KnowledgeCollection).Doc(uuid))
 	}
-	_, err := batch.Commit(ctx)
+	_, err = batch.Commit(ctx)
 	return err
 }
 
 // GetDatesWithEntries returns sorted dates (YYYY-MM-DD) that have at least one entry.
-func GetDatesWithEntries(ctx context.Context, client *firestore.Client) ([]string, error) {
-	if client == nil {
-		return nil, fmt.Errorf("firestore client is required")
+func GetDatesWithEntries(ctx context.Context, env infra.ToolEnv) ([]string, error) {
+	if env == nil {
+		return nil, fmt.Errorf("env is required")
 	}
-	iter := client.Collection(EntriesCollection).
+	ctx, span := infra.StartSpan(ctx, "entries.getDatesWithEntries")
+	defer span.End()
+	client, err := env.Firestore(ctx)
+	if err != nil {
+		return nil, err
+	}
+	iter := client.Collection(KnowledgeCollection).
 		Where("node_type", "==", "log").
 		OrderBy("timestamp", firestore.Asc).
 		Documents(ctx)

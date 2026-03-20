@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/jackstrohm/jot/internal/infra"
-	"github.com/jackstrohm/jot/pkg/journal"
 )
 
 const (
@@ -29,12 +28,7 @@ func PromoteIncubatingClusters(ctx context.Context, env infra.ToolEnv, tagMappin
 		return 0, fmt.Errorf("env required")
 	}
 	startDate, endDate := journalDateRange(IncubationLastNDays)
-	client, err := env.Firestore(ctx)
-	if err != nil {
-		span.RecordError(err)
-		return 0, err
-	}
-	entries, err := journal.GetEntriesWithAnalysisByDateRange(ctx, client, startDate, endDate, 200)
+	entries, err := GetEntriesWithAnalysisByDateRange(ctx, env, startDate, endDate, 200)
 	if err != nil {
 		span.RecordError(err)
 		return 0, fmt.Errorf("get entries for incubation: %w", err)
@@ -110,12 +104,7 @@ func CollectIncubationTags(ctx context.Context, env infra.ToolEnv) ([]string, er
 		return nil, fmt.Errorf("env required")
 	}
 	startDate, endDate := journalDateRange(IncubationLastNDays)
-	client, err := env.Firestore(ctx)
-	if err != nil {
-		span.RecordError(err)
-		return nil, err
-	}
-	entries, err := journal.GetEntriesWithAnalysisByDateRange(ctx, client, startDate, endDate, 200)
+	entries, err := GetEntriesWithAnalysisByDateRange(ctx, env, startDate, endDate, 200)
 	if err != nil {
 		span.RecordError(err)
 		return nil, fmt.Errorf("get entries for tag collection: %w", err)
@@ -155,7 +144,7 @@ func dateFromTimestamp(ts string) string {
 	return ""
 }
 
-func themesFromEntry(ew journal.EntryWithAnalysis) []string {
+func themesFromEntry(ew EntryWithAnalysis) []string {
 	var out []string
 	if ew.Analysis != nil {
 		if c := strings.TrimSpace(strings.ToLower(ew.Analysis.Category)); c != "" {

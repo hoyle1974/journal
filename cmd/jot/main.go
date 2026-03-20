@@ -19,7 +19,7 @@ import (
 	"time"
 
 	"github.com/jackstrohm/jot/internal/timeout"
-	"github.com/jackstrohm/jot/pkg/journal"
+	"github.com/jackstrohm/jot/pkg/memory"
 	"github.com/joho/godotenv"
 )
 
@@ -415,7 +415,7 @@ func cmdEntries(limit int) {
 		if !ok {
 			continue
 		}
-		ts := journal.TruncateTimestamp(jsonStr(entry, "timestamp"), journal.DateTimeDisplayLen)
+		ts := memory.TruncateTimestamp(jsonStr(entry, "timestamp"), memory.DateTimeDisplayLen)
 		source := jsonStr(entry, "source")
 		content := jsonStr(entry, "content")
 
@@ -462,7 +462,7 @@ func cmdEdit(limit int) {
 			}
 			entries = append(entries, entry)
 
-			ts := journal.TruncateTimestamp(jsonStr(entry, "timestamp"), journal.DateTimeDisplayLen)
+			ts := memory.TruncateTimestamp(jsonStr(entry, "timestamp"), memory.DateTimeDisplayLen)
 			content := jsonStr(entry, "content")
 			if len(content) > 60 {
 				content = content[:57] + "..."

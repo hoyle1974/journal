@@ -8,7 +8,6 @@ import (
 
 	"github.com/jackstrohm/jot/internal/agent"
 	"github.com/jackstrohm/jot/internal/infra"
-	"github.com/jackstrohm/jot/pkg/journal"
 	"github.com/jackstrohm/jot/pkg/memory"
 	"github.com/jackstrohm/jot/pkg/utils"
 	"github.com/jackstrohm/jot/tools"
@@ -184,7 +183,7 @@ func registerSystemEvolutionTools() {
 			if content == "" {
 				return tools.OK("System evolution audit exists but is empty. The next nightly run will populate it.")
 			}
-			auditTs := journal.TruncateTimestamp(node.Timestamp, journal.DateTimeDisplayLen)
+			auditTs := memory.TruncateTimestamp(node.Timestamp, memory.DateTimeDisplayLen)
 			if auditTs == "" {
 				auditTs = "(no date)"
 			}
@@ -226,11 +225,7 @@ func registerProjectStatusTools() {
 			if err != nil {
 				return tools.Fail("Date range error: %v", err)
 			}
-			client, err := env.Firestore(ctx)
-			if err != nil {
-				return tools.Fail("Error: %v", err)
-			}
-			withAnalyses, err := journal.GetEntriesWithAnalysisByDateRange(ctx, client, startStr, endStr, 100)
+			withAnalyses, err := memory.GetEntriesWithAnalysisByDateRange(ctx, env, startStr, endStr, 100)
 			if err != nil {
 				return tools.Fail("Error fetching journal entries: %v", err)
 			}
@@ -250,7 +245,7 @@ func registerProjectStatusTools() {
 				if !hasProject {
 					continue
 				}
-				date := journal.TruncateTimestamp(ew.Entry.Timestamp, journal.DateDisplayLen)
+				date := memory.TruncateTimestamp(ew.Entry.Timestamp, memory.DateDisplayLen)
 				summary := ew.Analysis.Summary
 				if summary == "" {
 					summary = utils.TruncateString(ew.Entry.Content, 80)

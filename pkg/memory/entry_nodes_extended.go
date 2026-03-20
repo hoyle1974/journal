@@ -1,4 +1,4 @@
-package journal
+package memory
 
 import (
 	"context"
@@ -17,9 +17,13 @@ type EntryWithAnalysis struct {
 }
 
 // GetEntriesWithAnalysisByDateRange fetches entries in the date range and parses journal_analysis from each doc.
-func GetEntriesWithAnalysisByDateRange(ctx context.Context, client *firestore.Client, startDate, endDate string, limit int) ([]EntryWithAnalysis, error) {
-	if client == nil {
-		return nil, fmt.Errorf("firestore client is required")
+func GetEntriesWithAnalysisByDateRange(ctx context.Context, env infra.ToolEnv, startDate, endDate string, limit int) ([]EntryWithAnalysis, error) {
+	if env == nil {
+		return nil, fmt.Errorf("env is required")
+	}
+	client, err := env.Firestore(ctx)
+	if err != nil {
+		return nil, err
 	}
 	if limit <= 0 || limit > 500 {
 		limit = 200
@@ -30,7 +34,7 @@ func GetEntriesWithAnalysisByDateRange(ctx context.Context, client *firestore.Cl
 	if len(endDate) == 10 {
 		endDate = endDate + "T23:59:59"
 	}
-	query := client.Collection(EntriesCollection).
+	query := client.Collection(KnowledgeCollection).
 		Where("node_type", "==", "log").
 		Where("timestamp", ">=", startDate).
 		Where("timestamp", "<=", endDate).
@@ -67,17 +71,21 @@ func GetEntriesWithAnalysisByDateRange(ctx context.Context, client *firestore.Cl
 }
 
 // QuerySimilarEntries performs a KNN vector search on journal entries.
-func QuerySimilarEntries(ctx context.Context, client *firestore.Client, queryVector []float32, limit int) ([]Entry, error) {
+func QuerySimilarEntries(ctx context.Context, env infra.ToolEnv, queryVector []float32, limit int) ([]Entry, error) {
+	if env == nil {
+		return nil, fmt.Errorf("env is required")
+	}
+
 	ctx, span := infra.StartSpan(ctx, "entries.query_similar")
 	defer span.End()
-
-	if client == nil {
-		return nil, fmt.Errorf("firestore client is required")
+	client, err := env.Firestore(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	const distanceResultField = "_vector_distance"
 	opts := &firestore.FindNearestOptions{DistanceResultField: distanceResultField}
-	vectorQuery := client.Collection(EntriesCollection).
+	vectorQuery := client.Collection(KnowledgeCollection).
 		Where("node_type", "==", "log").
 		FindNearest("embedding", firestore.Vector32(queryVector), limit, firestore.DistanceMeasureCosine, opts)
 	iter := vectorQuery.Documents(ctx)
@@ -91,7 +99,7 @@ func QuerySimilarEntries(ctx context.Context, client *firestore.Client, queryVec
 			break
 		}
 		if err != nil {
-			infra.LogVectorSearchFailed(ctx, EntriesCollection, err, 0)
+			infra.LogVectorSearchFailed(ctx, KnowledgeCollection, err, 0)
 			span.RecordError(err)
 			return nil, err
 		}
@@ -129,19 +137,23 @@ func QuerySimilarEntries(ctx context.Context, client *firestore.Client, queryVec
 }
 
 // BackfillEntryEmbeddings finds entries without embeddings, generates them, and updates docs.
-// client and projectID must be provided by the caller (e.g. from ToolEnv or FirestoreProvider + Config).
-func BackfillEntryEmbeddings(ctx context.Context, client *firestore.Client, projectID string, limit int) (int, error) {
+func BackfillEntryEmbeddings(ctx context.Context, env infra.ToolEnv, limit int) (int, error) {
+	if env == nil {
+		return 0, fmt.Errorf("env is required")
+	}
+
 	ctx, span := infra.StartSpan(ctx, "entries.backfill_embeddings")
 	defer span.End()
-
-	if client == nil {
-		return 0, fmt.Errorf("firestore client is required")
+	client, err := env.Firestore(ctx)
+	if err != nil {
+		return 0, err
 	}
+	projectID := env.Config().GoogleCloudProject
 	if limit <= 0 || limit > 50 {
 		limit = 20
 	}
 
-	iter := client.Collection(EntriesCollection).
+	iter := client.Collection(KnowledgeCollection).
 		Where("node_type", "==", "log").
 		OrderBy("timestamp", firestore.Asc).
 		Limit(500).
@@ -170,7 +182,7 @@ func BackfillEntryEmbeddings(ctx context.Context, client *firestore.Client, proj
 			infra.LoggerFrom(ctx).Warn("backfill embedding failed", "doc", doc.Ref.ID, "error", err)
 			continue
 		}
-		_, err = client.Collection(EntriesCollection).Doc(doc.Ref.ID).Update(ctx, []firestore.Update{
+		_, err = client.Collection(KnowledgeCollection).Doc(doc.Ref.ID).Update(ctx, []firestore.Update{
 			{Path: "embedding", Value: firestore.Vector32(vector)},
 		})
 		if err != nil {

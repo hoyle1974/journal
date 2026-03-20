@@ -1,4 +1,4 @@
-package task
+package memory
 
 import (
 	"context"
@@ -8,24 +8,55 @@ import (
 
 	"cloud.google.com/go/firestore"
 	"github.com/jackstrohm/jot/internal/infra"
-	"github.com/jackstrohm/jot/pkg/journal"
 	"github.com/jackstrohm/jot/pkg/utils"
 	"google.golang.org/api/iterator"
 )
 
-const (
-	TasksCollection = "tasks"
-	StatusPending   = "pending"
-	StatusActive    = "active"
-	StatusCompleted = "completed"
-	StatusAbandoned = "abandoned"
-
-	// TaskCreateIdempotencyWindow is the window in which we consider a task "recent" for deduplication.
-	// Prevents duplicate tasks when both process-entry (agency) and the LLM create_task run concurrently for the same entry.
-	TaskCreateIdempotencyWindow = 30 * time.Second
-)
+// TaskCreateIdempotencyWindow is the window in which we consider a task "recent" for deduplication.
+// Prevents duplicate tasks when both process-entry (agency) and the LLM create_task run concurrently for the same entry.
+const TaskCreateIdempotencyWindow = 30 * time.Second
 
 const reflectionSystemPrompt = `You are a summarizer. Given context about why a task was completed or abandoned, output exactly 1-2 short sentences of plain prose suitable for a journal reflection. Output plain text only—no JSON, no arrays, no code, no numbers or brackets. No preamble or quotes.`
+
+// Task represents a todo/task with optional hierarchy and backlinks to journal and memory.
+// A "project" is simply a Task with subtasks (child tasks whose ParentID == this task's UUID).
+type Task struct {
+	UUID            string             `firestore:"-" json:"uuid"`
+	ParentID        string             `firestore:"parent_id" json:"parent_id"`
+	Content         string             `firestore:"content" json:"content"`
+	Status          string             `firestore:"status" json:"status"` // pending, active, completed, abandoned
+	DueDate         string             `firestore:"due_date" json:"due_date"`
+	SystemPrompt    string             `firestore:"system_prompt" json:"system_prompt"`
+	Dependencies    []string           `firestore:"dependencies" json:"dependencies"`
+	IsSequential    bool               `firestore:"is_sequential" json:"is_sequential"`
+	JournalEntryIDs []string           `firestore:"journal_entry_ids" json:"journal_entry_ids"`
+	MemoryNodeIDs   []string           `firestore:"memory_node_ids" json:"memory_node_ids"`
+	Embedding       firestore.Vector32 `firestore:"embedding" json:"-"`
+	Timestamp       string             `firestore:"timestamp" json:"timestamp"`
+}
+
+// UpdateTaskOpts holds optional fields to update on a task. Only non-nil/non-empty fields are updated.
+// When Content or SystemPrompt is set, the task embedding is recomputed.
+// Add* and Remove* IDs are applied after other field updates: add then remove, deduplicated.
+type UpdateTaskOpts struct {
+	Content               *string
+	ParentID              *string
+	DueDate               *string
+	SystemPrompt          *string
+	AddJournalEntryIDs    []string // append these (deduplicated)
+	RemoveJournalEntryIDs []string // remove these
+	AddMemoryNodeIDs      []string
+	RemoveMemoryNodeIDs   []string
+}
+
+// NormalizeTaskStatus returns a valid status value (pending, active, completed, abandoned).
+func NormalizeTaskStatus(s string) string {
+	switch s {
+	case TaskStatusPending, TaskStatusActive, TaskStatusCompleted, TaskStatusAbandoned:
+		return s
+	}
+	return TaskStatusPending
+}
 
 // normalizeContentForDedup normalizes task content for idempotency comparison (trim, lowercase, collapse whitespace).
 func normalizeContentForDedup(content string) string {
@@ -46,7 +77,8 @@ func findRecentDuplicateTask(ctx context.Context, client *firestore.Client, entr
 		return "", nil
 	}
 	cutoff := time.Now().Add(-within)
-	iter := client.Collection(TasksCollection).
+	iter := client.Collection(KnowledgeCollection).
+		Where("node_type", "==", NodeTypeTask).
 		Where("journal_entry_ids", "array-contains", entryUUID).
 		OrderBy("timestamp", firestore.Desc).
 		Limit(20).
@@ -58,7 +90,7 @@ func findRecentDuplicateTask(ctx context.Context, client *firestore.Client, entr
 			break
 		}
 		if err != nil {
-			return "", err
+			return "", fmt.Errorf("iterate tasks: %w", err)
 		}
 		var task Task
 		if err := doc.DataTo(&task); err != nil {
@@ -79,10 +111,11 @@ func findRecentDuplicateTask(ctx context.Context, client *firestore.Client, entr
 	return "", nil
 }
 
-// CreateTask creates a task in Firestore, generates an embedding for Content+SystemPrompt, and returns the task UUID.
+// CreateTask creates a task in the journal collection (node_type=task), generates an embedding for
+// Content+SystemPrompt, and returns the task UUID.
 // env supplies Firestore and Config; pass from the caller (e.g. ToolEnv).
 func CreateTask(ctx context.Context, env infra.ToolEnv, t *Task) (string, error) {
-	ctx, span := infra.StartSpan(ctx, "task.create")
+	ctx, span := infra.StartSpan(ctx, "tasks.create")
 	defer span.End()
 
 	if t == nil || t.Content == "" {
@@ -95,7 +128,7 @@ func CreateTask(ctx context.Context, env infra.ToolEnv, t *Task) (string, error)
 	client, err := env.Firestore(ctx)
 	if err != nil {
 		span.RecordError(err)
-		return "", err
+		return "", fmt.Errorf("firestore client: %w", err)
 	}
 
 	// Idempotency: if this task is linked to exactly one entry, avoid creating a duplicate when agency and LLM both create for the same content.
@@ -131,15 +164,17 @@ func CreateTask(ctx context.Context, env infra.ToolEnv, t *Task) (string, error)
 	}
 
 	doc := map[string]interface{}{
-		"parent_id":          t.ParentID,
-		"content":            t.Content,
-		"status":             normalizeStatus(t.Status),
-		"due_date":           t.DueDate,
-		"system_prompt":      t.SystemPrompt,
-		"journal_entry_ids":  t.JournalEntryIDs,
-		"memory_node_ids":    t.MemoryNodeIDs,
-		"embedding":          firestore.Vector32(embedding),
-		"timestamp":          ts,
+		"node_type":           NodeTypeTask,
+		"significance_weight": 0.7,
+		"parent_id":           t.ParentID,
+		"content":             t.Content,
+		"status":              NormalizeTaskStatus(t.Status),
+		"due_date":            t.DueDate,
+		"system_prompt":       t.SystemPrompt,
+		"journal_entry_ids":   t.JournalEntryIDs,
+		"memory_node_ids":     t.MemoryNodeIDs,
+		"embedding":           firestore.Vector32(embedding),
+		"timestamp":           ts,
 	}
 	if doc["journal_entry_ids"] == nil {
 		doc["journal_entry_ids"] = []string{}
@@ -148,10 +183,10 @@ func CreateTask(ctx context.Context, env infra.ToolEnv, t *Task) (string, error)
 		doc["memory_node_ids"] = []string{}
 	}
 
-	_, err = client.Collection(TasksCollection).Doc(uuid).Set(ctx, doc)
+	_, err = client.Collection(KnowledgeCollection).Doc(uuid).Set(ctx, doc)
 	if err != nil {
 		span.RecordError(err)
-		return "", err
+		return "", fmt.Errorf("set task: %w", err)
 	}
 
 	infra.LoggerFrom(ctx).Debug("task created", "uuid", uuid, "content", t.Content)
@@ -161,7 +196,7 @@ func CreateTask(ctx context.Context, env infra.ToolEnv, t *Task) (string, error)
 
 // GetTask fetches a task by UUID. env supplies Firestore; pass from the caller (e.g. ToolEnv).
 func GetTask(ctx context.Context, env infra.ToolEnv, uuid string) (*Task, error) {
-	ctx, span := infra.StartSpan(ctx, "task.get")
+	ctx, span := infra.StartSpan(ctx, "tasks.get")
 	defer span.End()
 
 	if env == nil {
@@ -170,19 +205,19 @@ func GetTask(ctx context.Context, env infra.ToolEnv, uuid string) (*Task, error)
 	client, err := env.Firestore(ctx)
 	if err != nil {
 		span.RecordError(err)
-		return nil, err
+		return nil, fmt.Errorf("firestore client: %w", err)
 	}
 
-	doc, err := client.Collection(TasksCollection).Doc(uuid).Get(ctx)
+	doc, err := client.Collection(KnowledgeCollection).Doc(uuid).Get(ctx)
 	if err != nil {
 		span.RecordError(err)
-		return nil, err
+		return nil, fmt.Errorf("get task: %w", err)
 	}
 
 	var t Task
 	if err := doc.DataTo(&t); err != nil {
 		span.RecordError(err)
-		return nil, err
+		return nil, fmt.Errorf("decode task: %w", err)
 	}
 	t.UUID = doc.Ref.ID
 	return &t, nil
@@ -192,11 +227,11 @@ func GetTask(ctx context.Context, env infra.ToolEnv, uuid string) (*Task, error)
 // calls Gemini to generate a 1-2 sentence summary, appends a journal entry with that summary, and appends the entry UUID to the task's journal_entry_ids.
 // env supplies Firestore, Config, and Dispatch; pass from the caller (e.g. ToolEnv).
 func UpdateTaskStatus(ctx context.Context, env infra.ToolEnv, uuid, newStatus, reflectionReason string) error {
-	ctx, span := infra.StartSpan(ctx, "task.update_status")
+	ctx, span := infra.StartSpan(ctx, "tasks.update_status")
 	defer span.End()
 
-	newStatus = normalizeStatus(newStatus)
-	if newStatus != StatusCompleted && newStatus != StatusAbandoned {
+	newStatus = NormalizeTaskStatus(newStatus)
+	if newStatus != TaskStatusCompleted && newStatus != TaskStatusAbandoned {
 		// No reflection required; just update status.
 		return updateTaskStatusOnly(ctx, env, uuid, newStatus)
 	}
@@ -208,7 +243,7 @@ func UpdateTaskStatus(ctx context.Context, env infra.ToolEnv, uuid, newStatus, r
 	existing, err := GetTask(ctx, env, uuid)
 	if err != nil {
 		span.RecordError(err)
-		return err
+		return fmt.Errorf("get task for status update: %w", err)
 	}
 
 	if env == nil || env.Config() == nil {
@@ -218,7 +253,7 @@ func UpdateTaskStatus(ctx context.Context, env infra.ToolEnv, uuid, newStatus, r
 	client, err := env.Firestore(ctx)
 	if err != nil {
 		span.RecordError(err)
-		return err
+		return fmt.Errorf("firestore client: %w", err)
 	}
 
 	userPrompt := fmt.Sprintf("Task: %s\n\nReason: %s",
@@ -239,7 +274,7 @@ func UpdateTaskStatus(ctx context.Context, env infra.ToolEnv, uuid, newStatus, r
 		summary = reflectionReason
 	}
 
-	entryUUID, err := journal.AddEntry(ctx, client, summary, "system:task_engine", nil, "")
+	entryUUID, err := AddEntry(ctx, env, summary, "system:task_engine", nil, "")
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("add reflection entry: %w", err)
@@ -248,13 +283,13 @@ func UpdateTaskStatus(ctx context.Context, env infra.ToolEnv, uuid, newStatus, r
 	journalIDs := append([]string{}, existing.JournalEntryIDs...)
 	journalIDs = append(journalIDs, entryUUID)
 
-	_, err = client.Collection(TasksCollection).Doc(uuid).Update(ctx, []firestore.Update{
+	_, err = client.Collection(KnowledgeCollection).Doc(uuid).Update(ctx, []firestore.Update{
 		{Path: "status", Value: newStatus},
 		{Path: "journal_entry_ids", Value: journalIDs},
 	})
 	if err != nil {
 		span.RecordError(err)
-		return err
+		return fmt.Errorf("update task: %w", err)
 	}
 
 	infra.LoggerFrom(ctx).Info("task status updated with reflection", "uuid", uuid, "status", newStatus, "reflection_entry", entryUUID)
@@ -291,32 +326,21 @@ func updateTaskStatusOnly(ctx context.Context, env infra.ToolEnv, uuid, newStatu
 	}
 	client, err := env.Firestore(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("firestore client: %w", err)
 	}
-	_, err = client.Collection(TasksCollection).Doc(uuid).Update(ctx, []firestore.Update{
+	_, err = client.Collection(KnowledgeCollection).Doc(uuid).Update(ctx, []firestore.Update{
 		{Path: "status", Value: newStatus},
 	})
-	return err
-}
-
-// UpdateTaskOpts holds optional fields to update on a task. Only non-nil/non-empty fields are updated.
-// When Content or SystemPrompt is set, the task embedding is recomputed.
-// Add* and Remove* IDs are applied after other field updates: add then remove, deduplicated.
-type UpdateTaskOpts struct {
-	Content               *string
-	ParentID              *string
-	DueDate               *string
-	SystemPrompt          *string
-	AddJournalEntryIDs    []string // append these (deduplicated)
-	RemoveJournalEntryIDs []string // remove these
-	AddMemoryNodeIDs      []string
-	RemoveMemoryNodeIDs   []string
+	if err != nil {
+		return fmt.Errorf("update task: %w", err)
+	}
+	return nil
 }
 
 // UpdateTask updates the given task with any non-nil opts. Recomputes embedding if Content or SystemPrompt changed.
 // env supplies Firestore and Config; pass from the caller (e.g. ToolEnv).
 func UpdateTask(ctx context.Context, env infra.ToolEnv, uuid string, opts *UpdateTaskOpts) error {
-	ctx, span := infra.StartSpan(ctx, "task.update")
+	ctx, span := infra.StartSpan(ctx, "tasks.update")
 	defer span.End()
 
 	if opts == nil {
@@ -329,7 +353,7 @@ func UpdateTask(ctx context.Context, env infra.ToolEnv, uuid string, opts *Updat
 	existing, err := GetTask(ctx, env, uuid)
 	if err != nil {
 		span.RecordError(err)
-		return err
+		return fmt.Errorf("get task for update: %w", err)
 	}
 
 	var updates []firestore.Update
@@ -387,155 +411,14 @@ func UpdateTask(ctx context.Context, env infra.ToolEnv, uuid string, opts *Updat
 	client, err := env.Firestore(ctx)
 	if err != nil {
 		span.RecordError(err)
-		return err
+		return fmt.Errorf("firestore client: %w", err)
 	}
-	_, err = client.Collection(TasksCollection).Doc(uuid).Update(ctx, updates)
+	_, err = client.Collection(KnowledgeCollection).Doc(uuid).Update(ctx, updates)
 	if err != nil {
 		span.RecordError(err)
-		return err
+		return fmt.Errorf("update task: %w", err)
 	}
 	infra.LoggerFrom(ctx).Debug("task updated", "uuid", uuid)
 	span.SetAttributes(map[string]string{"uuid": uuid})
 	return nil
-}
-
-// GetOpenRootTasks returns root-level tasks (no parent) that are pending or active, newest first.
-// env supplies Firestore; pass from the caller (e.g. ToolEnv).
-func GetOpenRootTasks(ctx context.Context, env infra.ToolEnv, limit int) ([]Task, error) {
-	ctx, span := infra.StartSpan(ctx, "task.get_open_roots")
-	defer span.End()
-
-	if limit <= 0 || limit > 50 {
-		limit = 25
-	}
-
-	if env == nil {
-		return nil, fmt.Errorf("env required")
-	}
-	client, err := env.Firestore(ctx)
-	if err != nil {
-		span.RecordError(err)
-		return nil, err
-	}
-
-	iter := client.Collection(TasksCollection).
-		OrderBy("timestamp", firestore.Desc).
-		Limit(100).
-		Documents(ctx)
-	defer iter.Stop()
-
-	var tasks []Task
-	for {
-		doc, err := iter.Next()
-		if err == iterator.Done {
-			break
-		}
-		if err != nil {
-			span.RecordError(err)
-			return nil, err
-		}
-		var t Task
-		if err := doc.DataTo(&t); err != nil {
-			infra.LoggerFrom(ctx).Warn("GetOpenRootTasks: skipping task document", "doc_id", doc.Ref.ID, "error", err)
-			continue
-		}
-		t.UUID = doc.Ref.ID
-		if t.ParentID != "" {
-			continue
-		}
-		if t.Status != StatusPending && t.Status != StatusActive {
-			continue
-		}
-		tasks = append(tasks, t)
-		if len(tasks) >= limit {
-			break
-		}
-	}
-
-	span.SetAttributes(map[string]string{"results_count": fmt.Sprintf("%d", len(tasks))})
-	return tasks, nil
-}
-
-// QuerySimilarTasks performs a KNN vector search on the tasks collection.
-// env supplies Firestore; pass from the caller (e.g. ToolEnv).
-func QuerySimilarTasks(ctx context.Context, env infra.ToolEnv, queryVector []float32, limit int) ([]Task, error) {
-	ctx, span := infra.StartSpan(ctx, "task.query_similar")
-	defer span.End()
-
-	if env == nil {
-		return nil, fmt.Errorf("env required")
-	}
-	client, err := env.Firestore(ctx)
-	if err != nil {
-		span.RecordError(err)
-		return nil, err
-	}
-
-	const distanceResultField = "_vector_distance"
-	opts := &firestore.FindNearestOptions{DistanceResultField: distanceResultField}
-	vectorQuery := client.Collection(TasksCollection).
-		FindNearest("embedding", firestore.Vector32(queryVector), limit, firestore.DistanceMeasureCosine, opts)
-	iter := vectorQuery.Documents(ctx)
-	defer iter.Stop()
-
-	var tasks []Task
-	for {
-		doc, err := iter.Next()
-		if err == iterator.Done {
-			break
-		}
-		if err != nil {
-			infra.LogVectorSearchFailed(ctx, TasksCollection, err, 0)
-			span.RecordError(err)
-			return nil, err
-		}
-		var t Task
-		if err := doc.DataTo(&t); err != nil {
-			infra.LoggerFrom(ctx).Warn("QuerySimilarTasks: skipping task document", "doc_id", doc.Ref.ID, "error", err)
-			continue
-		}
-		t.UUID = doc.Ref.ID
-		tasks = append(tasks, t)
-	}
-
-	span.SetAttributes(map[string]string{"results_count": fmt.Sprintf("%d", len(tasks))})
-	return tasks, nil
-}
-
-// FormatTasksForContext formats tasks for LLM context (uuid, status, due_date, content).
-// Use due=(not set) when DueDate is empty so the agent sees the field is present.
-func FormatTasksForContext(tasks []Task, maxChars int) string {
-	if len(tasks) == 0 {
-		return "No tasks found."
-	}
-	var out []string
-	n := 0
-	for _, t := range tasks {
-		due := t.DueDate
-		if due == "" {
-			due = "(not set)"
-		}
-		line := fmt.Sprintf("[%s] status=%s due=%s | %s", t.UUID, t.Status, due, utils.TruncateString(t.Content, 120))
-		if n+len(line) > maxChars {
-			break
-		}
-		out = append(out, line)
-		n += len(line)
-	}
-	return strings.Join(out, "\n")
-}
-
-// NormalizeStatus returns a valid status value (pending, active, completed, abandoned).
-func NormalizeStatus(s string) string {
-	switch s {
-	case StatusPending, StatusActive, StatusCompleted, StatusAbandoned:
-		return s
-	case "":
-		return StatusPending
-	}
-	return StatusPending
-}
-
-func normalizeStatus(s string) string {
-	return NormalizeStatus(s)
 }

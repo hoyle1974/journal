@@ -5,8 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"cloud.google.com/go/firestore"
-	"github.com/jackstrohm/jot/pkg/journal"
+	"github.com/jackstrohm/jot/internal/infra"
 	"github.com/jackstrohm/jot/pkg/memory"
 	"github.com/jackstrohm/jot/pkg/utils"
 )
@@ -36,8 +35,8 @@ const maxSourceDatesPerNode = 5
 const maxEntryIDsToResolve = 25
 
 // formatKnowledgeNodes formats knowledge nodes for LLM context, appending source dates when JournalEntryIDs are present.
-// client is used for journal.GetEntryDates; pass from env.Firestore(ctx) at the call site.
-func formatKnowledgeNodes(ctx context.Context, client *firestore.Client, nodes []memory.KnowledgeNode) string {
+// env is used for memory.GetEntryDates; pass the tool env at the call site.
+func formatKnowledgeNodes(ctx context.Context, env infra.ToolEnv, nodes []memory.KnowledgeNode) string {
 	// Collect unique entry IDs for batch date resolution
 	seenIDs := make(map[string]bool)
 	var allIDs []string
@@ -56,8 +55,8 @@ func formatKnowledgeNodes(ctx context.Context, client *firestore.Client, nodes [
 		}
 	}
 	var dateMap map[string]string
-	if client != nil {
-		dateMap, _ = journal.GetEntryDates(ctx, client, allIDs)
+	if env != nil {
+		dateMap, _ = memory.GetEntryDates(ctx, env, allIDs)
 	}
 
 	var lines []string
@@ -66,7 +65,7 @@ func formatKnowledgeNodes(ctx context.Context, client *firestore.Client, nodes [
 		if len(content) > 200 {
 			content = content[:197] + "..."
 		}
-		ts := journal.TruncateTimestamp(n.Timestamp, journal.DateTimeDisplayLen)
+		ts := memory.TruncateTimestamp(n.Timestamp, memory.DateTimeDisplayLen)
 		if ts == "" {
 			ts = "(no date)"
 		}
@@ -99,14 +98,14 @@ func formatKnowledgeNodes(ctx context.Context, client *firestore.Client, nodes [
 }
 
 // formatEntries formats entries for LLM context (short form).
-func formatEntries(entries []journal.Entry) string {
+func formatEntries(entries []memory.Entry) string {
 	var lines []string
 	for i, e := range entries {
 		content := e.Content
 		if len(content) > 200 {
 			content = content[:197] + "..."
 		}
-		ts := journal.TruncateTimestamp(e.Timestamp, journal.DateTimeDisplayLen)
+		ts := memory.TruncateTimestamp(e.Timestamp, memory.DateTimeDisplayLen)
 		if ts == "" {
 			ts = "(no date)"
 		}
@@ -136,11 +135,11 @@ func formatContexts(nodes []memory.KnowledgeNode, metas []memory.ContextMetadata
 		if len(content) > 150 {
 			content = content[:147] + "..."
 		}
-		lastTouched := journal.TruncateTimestamp(meta.LastTouched, journal.DateTimeDisplayLen)
+		lastTouched := memory.TruncateTimestamp(meta.LastTouched, memory.DateTimeDisplayLen)
 		if lastTouched == "" {
 			lastTouched = "(no date)"
 		}
-		updated := journal.TruncateTimestamp(n.Timestamp, journal.DateTimeDisplayLen)
+		updated := memory.TruncateTimestamp(n.Timestamp, memory.DateTimeDisplayLen)
 		if updated == "" {
 			updated = "(no date)"
 		}
@@ -151,13 +150,13 @@ func formatContexts(nodes []memory.KnowledgeNode, metas []memory.ContextMetadata
 }
 
 // formatQueriesForContext formats query history for LLM context using jot's formatter.
-func formatQueriesForContext(queries []journal.QueryLog) string {
-	return journal.FormatQueriesForContext(queries, 10000)
+func formatQueriesForContext(queries []memory.QueryLog) string {
+	return memory.FormatQueriesForContext(queries, 10000)
 }
 
 // filterEntriesWithImage returns entries that have an attached image (ImageURL != ""), up to maxN, preserving order.
-func filterEntriesWithImage(entries []journal.Entry, maxN int) []journal.Entry {
-	out := make([]journal.Entry, 0, maxN)
+func filterEntriesWithImage(entries []memory.Entry, maxN int) []memory.Entry {
+	out := make([]memory.Entry, 0, maxN)
 	for i := range entries {
 		if entries[i].ImageURL != "" {
 			out = append(out, entries[i])
