@@ -131,7 +131,7 @@ func GetUnresolvedPendingQuestions(ctx context.Context, env infra.ToolEnv, limit
 	out, err := infra.QueryDocuments(ctx, query, func(doc *firestore.DocumentSnapshot) (PendingQuestion, error) {
 		data := doc.Data()
 		if infra.GetStringField(data, "resolved_at") != "" {
-			return PendingQuestion{}, fmt.Errorf("skip")
+			return PendingQuestion{}, errSkipEntry
 		}
 		q := PendingQuestion{
 			UUID:       doc.Ref.ID,
@@ -179,7 +179,7 @@ func GetRecentlyResolvedPendingQuestions(ctx context.Context, env infra.ToolEnv,
 	out, err := infra.QueryDocuments(ctx, query, func(doc *firestore.DocumentSnapshot) (PendingQuestion, error) {
 		data := doc.Data()
 		if infra.GetStringField(data, "resolved_at") == "" {
-			return PendingQuestion{}, fmt.Errorf("skip")
+			return PendingQuestion{}, errSkipEntry
 		}
 		q := PendingQuestion{
 			UUID:       doc.Ref.ID,

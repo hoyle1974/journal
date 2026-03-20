@@ -28,14 +28,10 @@ func GetEntriesWithAnalysisByDateRange(ctx context.Context, env infra.ToolEnv, s
 	if limit <= 0 || limit > 500 {
 		limit = 200
 	}
-	if len(startDate) == 10 {
-		startDate = startDate + "T00:00:00"
-	}
-	if len(endDate) == 10 {
-		endDate = endDate + "T23:59:59"
-	}
+	startDate = padDateStart(startDate)
+	endDate = padDateEnd(endDate)
 	query := client.Collection(KnowledgeCollection).
-		Where("node_type", "==", "log").
+		Where("node_type", "==", NodeTypeLog).
 		Where("timestamp", ">=", startDate).
 		Where("timestamp", "<=", endDate).
 		OrderBy("timestamp", firestore.Desc).
@@ -86,7 +82,7 @@ func QuerySimilarEntries(ctx context.Context, env infra.ToolEnv, queryVector []f
 	const distanceResultField = "_vector_distance"
 	opts := &firestore.FindNearestOptions{DistanceResultField: distanceResultField}
 	vectorQuery := client.Collection(KnowledgeCollection).
-		Where("node_type", "==", "log").
+		Where("node_type", "==", NodeTypeLog).
 		FindNearest("embedding", firestore.Vector32(queryVector), limit, firestore.DistanceMeasureCosine, opts)
 	iter := vectorQuery.Documents(ctx)
 	defer iter.Stop()
@@ -154,7 +150,7 @@ func BackfillEntryEmbeddings(ctx context.Context, env infra.ToolEnv, limit int) 
 	}
 
 	iter := client.Collection(KnowledgeCollection).
-		Where("node_type", "==", "log").
+		Where("node_type", "==", NodeTypeLog).
 		OrderBy("timestamp", firestore.Asc).
 		Limit(500).
 		Documents(ctx)

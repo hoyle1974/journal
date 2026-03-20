@@ -17,6 +17,22 @@ import (
 // from results without treating it as an error.
 var errSkipEntry = errors.New("skip entry")
 
+// padDateStart appends T00:00:00 to a bare date (YYYY-MM-DD) for timestamp comparisons.
+func padDateStart(d string) string {
+	if len(d) == 10 {
+		return d + "T00:00:00"
+	}
+	return d
+}
+
+// padDateEnd appends T23:59:59 to a bare date (YYYY-MM-DD) for timestamp comparisons.
+func padDateEnd(d string) string {
+	if len(d) == 10 {
+		return d + "T23:59:59"
+	}
+	return d
+}
+
 // Entry represents a journal entry (episodic log node).
 type Entry struct {
 	UUID                   string `firestore:"-" json:"uuid"`
@@ -95,50 +111,36 @@ func UpdateEntryAudio(ctx context.Context, env infra.ToolEnv, entryUUID, audioUR
 	return err
 }
 
-// GetEntries fetches entries from Firestore, ordered by timestamp descending.
-func GetEntries(ctx context.Context, env infra.ToolEnv, limit int) ([]Entry, error) {
+func getEntriesOrdered(ctx context.Context, env infra.ToolEnv, limit int, dir firestore.Direction) ([]Entry, error) {
 	if env == nil {
 		return nil, fmt.Errorf("env is required")
 	}
 	client, err := env.Firestore(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("firestore client: %w", err)
 	}
 	query := client.Collection(KnowledgeCollection).
-		Where("node_type", "==", "log").
-		OrderBy("timestamp", firestore.Desc).
+		Where("node_type", "==", NodeTypeLog).
+		OrderBy("timestamp", dir).
 		Limit(limit)
 	return infra.QueryDocuments(ctx, query, func(doc *firestore.DocumentSnapshot) (Entry, error) {
 		var e Entry
 		if err := doc.DataTo(&e); err != nil {
-			return Entry{}, err
+			return Entry{}, fmt.Errorf("decode entry: %w", err)
 		}
 		e.UUID = doc.Ref.ID
 		return e, nil
 	})
 }
 
+// GetEntries fetches entries from Firestore, ordered by timestamp descending.
+func GetEntries(ctx context.Context, env infra.ToolEnv, limit int) ([]Entry, error) {
+	return getEntriesOrdered(ctx, env, limit, firestore.Desc)
+}
+
 // GetEntriesAsc fetches entries from Firestore, ordered by timestamp ascending (oldest first).
 func GetEntriesAsc(ctx context.Context, env infra.ToolEnv, limit int) ([]Entry, error) {
-	if env == nil {
-		return nil, fmt.Errorf("env is required")
-	}
-	client, err := env.Firestore(ctx)
-	if err != nil {
-		return nil, err
-	}
-	query := client.Collection(KnowledgeCollection).
-		Where("node_type", "==", "log").
-		OrderBy("timestamp", firestore.Asc).
-		Limit(limit)
-	return infra.QueryDocuments(ctx, query, func(doc *firestore.DocumentSnapshot) (Entry, error) {
-		var e Entry
-		if err := doc.DataTo(&e); err != nil {
-			return Entry{}, err
-		}
-		e.UUID = doc.Ref.ID
-		return e, nil
-	})
+	return getEntriesOrdered(ctx, env, limit, firestore.Asc)
 }
 
 // GetEntriesByDateRange fetches entries within a date range.
@@ -152,14 +154,10 @@ func GetEntriesByDateRange(ctx context.Context, env infra.ToolEnv, startDate, en
 	if err != nil {
 		return nil, err
 	}
-	if len(startDate) == 10 {
-		startDate = startDate + "T00:00:00"
-	}
-	if len(endDate) == 10 {
-		endDate = endDate + "T23:59:59"
-	}
+	startDate = padDateStart(startDate)
+	endDate = padDateEnd(endDate)
 	query := client.Collection(KnowledgeCollection).
-		Where("node_type", "==", "log").
+		Where("node_type", "==", NodeTypeLog).
 		Where("timestamp", ">=", startDate).
 		Where("timestamp", "<=", endDate).
 		OrderBy("timestamp", firestore.Desc).
@@ -190,10 +188,14 @@ func SearchEntries(ctx context.Context, env infra.ToolEnv, keywords string, limi
 		return nil, err
 	}
 	keywordsLower := strings.Fields(strings.ToLower(keywords))
+	fetchLimit := limit * 5
+	if fetchLimit < 50 {
+		fetchLimit = 50
+	}
 	query := client.Collection(KnowledgeCollection).
-		Where("node_type", "==", "log").
+		Where("node_type", "==", NodeTypeLog).
 		OrderBy("timestamp", firestore.Desc).
-		Limit(500)
+		Limit(fetchLimit)
 	entries, err := infra.QueryDocuments(ctx, query, func(doc *firestore.DocumentSnapshot) (Entry, error) {
 		var e Entry
 		if err := doc.DataTo(&e); err != nil {
@@ -230,21 +232,15 @@ func CountEntries(ctx context.Context, env infra.ToolEnv, startDate, endDate *st
 	}
 	var query firestore.Query
 	if startDate != nil && endDate != nil && *startDate != "" && *endDate != "" {
-		start := *startDate
-		end := *endDate
-		if len(start) == 10 {
-			start = start + "T00:00:00"
-		}
-		if len(end) == 10 {
-			end = end + "T23:59:59"
-		}
+		start := padDateStart(*startDate)
+		end := padDateEnd(*endDate)
 		query = client.Collection(KnowledgeCollection).
-			Where("node_type", "==", "log").
+			Where("node_type", "==", NodeTypeLog).
 			Where("timestamp", ">=", start).
 			Where("timestamp", "<=", end)
 	} else {
 		query = client.Collection(KnowledgeCollection).
-			Where("node_type", "==", "log")
+			Where("node_type", "==", NodeTypeLog)
 	}
 	iter := query.Documents(ctx)
 	defer iter.Stop()
@@ -271,7 +267,7 @@ func GetUniqueSources(ctx context.Context, env infra.ToolEnv) ([]string, error) 
 	if err != nil {
 		return nil, err
 	}
-	iter := client.Collection(KnowledgeCollection).Where("node_type", "==", "log").Limit(1000).Documents(ctx)
+	iter := client.Collection(KnowledgeCollection).Where("node_type", "==", NodeTypeLog).Limit(1000).Documents(ctx)
 	defer iter.Stop()
 	sources := make(map[string]bool)
 	for {
@@ -306,9 +302,9 @@ func GetEntriesBySource(ctx context.Context, env infra.ToolEnv, sourceFilter str
 	}
 	sourceFilterLower := strings.ToLower(sourceFilter)
 	query := client.Collection(KnowledgeCollection).
-		Where("node_type", "==", "log").
+		Where("node_type", "==", NodeTypeLog).
 		OrderBy("timestamp", firestore.Desc).
-		Limit(500)
+		Limit(limit * 5)
 	entries, err := infra.QueryDocuments(ctx, query, func(doc *firestore.DocumentSnapshot) (Entry, error) {
 		var e Entry
 		if err := doc.DataTo(&e); err != nil {
@@ -443,7 +439,7 @@ func GetDatesWithEntries(ctx context.Context, env infra.ToolEnv) ([]string, erro
 		return nil, err
 	}
 	iter := client.Collection(KnowledgeCollection).
-		Where("node_type", "==", "log").
+		Where("node_type", "==", NodeTypeLog).
 		OrderBy("timestamp", firestore.Asc).
 		Documents(ctx)
 	defer iter.Stop()

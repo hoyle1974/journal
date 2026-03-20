@@ -93,10 +93,14 @@ func SearchQueries(ctx context.Context, env infra.ToolEnv, keywords string, limi
 		return nil, fmt.Errorf("firestore: %w", err)
 	}
 	keywordsLower := strings.Fields(strings.ToLower(keywords))
+	fetchLimit := limit * 5
+	if fetchLimit < 50 {
+		fetchLimit = 50
+	}
 	query := client.Collection(KnowledgeCollection).
 		Where("node_type", "==", NodeTypeQuery).
 		OrderBy("timestamp", firestore.Desc).
-		Limit(200)
+		Limit(fetchLimit)
 	queries, err := infra.QueryDocuments(ctx, query, func(doc *firestore.DocumentSnapshot) (QueryLog, error) {
 		var q QueryLog
 		if err := doc.DataTo(&q); err != nil {
@@ -105,7 +109,7 @@ func SearchQueries(ctx context.Context, env infra.ToolEnv, keywords string, limi
 		questionLower := strings.ToLower(q.Question)
 		for _, kw := range keywordsLower {
 			if !strings.Contains(questionLower, kw) {
-				return QueryLog{}, fmt.Errorf("skip")
+				return QueryLog{}, errSkipEntry
 			}
 		}
 		q.UUID = doc.Ref.ID
@@ -163,12 +167,8 @@ func GetQueriesByDateRange(ctx context.Context, env infra.ToolEnv, startDate, en
 	if err != nil {
 		return nil, fmt.Errorf("firestore: %w", err)
 	}
-	if len(startDate) == 10 {
-		startDate = startDate + "T00:00:00"
-	}
-	if len(endDate) == 10 {
-		endDate = endDate + "T23:59:59"
-	}
+	startDate = padDateStart(startDate)
+	endDate = padDateEnd(endDate)
 	query := client.Collection(KnowledgeCollection).
 		Where("node_type", "==", NodeTypeQuery).
 		Where("timestamp", ">=", startDate).
