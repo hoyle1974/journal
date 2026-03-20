@@ -1,10 +1,12 @@
-// admin runs administrative subcommands: backfill-links, clean-test, dedup, dedup-entries, migrate-meta, reset-firestore, show-logged, show-processed, strip-done.
+// admin runs administrative subcommands: backfill-links, clean-test, dedup, dedup-entries, export-journal, migrate-meta, replay-journal, reset-firestore, show-logged, show-processed, strip-done.
 // Usage: go run ./cmd/admin <subcommand> [flags]
 //   backfill-links   - link journal entries to knowledge nodes ([-limit=100] [-dry-run])
 //   clean-test       - delete entries by source (-source=required [-dry-run])
 //   dedup            - merge duplicate knowledge nodes ([-dry-run] [-threshold=0.95])
 //   dedup-entries    - find/remove duplicate journal entries (same content); keep oldest ([-min=2] [-dry-run] [-remove])
+//   export-journal   - export all journal entries to a local archive (--output=required)
 //   migrate-meta     - repair knowledge_nodes metadata ([-dry-run])
+//   replay-journal   - replay a local archive to the Jot API (--archive=required [--api-url] [--api-key])
 //   reset-firestore  - delete all data in Firestore (requires typing a random 3-digit code to confirm)
 //   show-logged      - list journal entries whose content contains "Logged" ([-preview=120] [-remove] [-dry-run])
 //   show-processed   - list journal entries whose content contains "Processed" ([-preview=120] [-remove] [-dry-run])
@@ -23,7 +25,7 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintf(os.Stderr, "Usage: %s <backfill-links|clean-test|dedup|dedup-entries|migrate-meta|reset-firestore|show-logged|show-processed|strip-done> [flags]\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Usage: %s <backfill-links|clean-test|dedup|dedup-entries|export-journal|migrate-meta|replay-journal|reset-firestore|show-logged|show-processed|strip-done> [flags]\n", os.Args[0])
 		os.Exit(1)
 	}
 	subcommand := os.Args[1]
@@ -47,6 +49,8 @@ func main() {
 		runDedup(ctx, app, args)
 	case "dedup-entries":
 		runDedupEntries(ctx, app, args)
+	case "export-journal":
+		runExportJournal(ctx, app, args)
 	case "migrate-meta":
 		runMigrateMeta(ctx, app, args)
 	case "reset-firestore":
@@ -55,6 +59,8 @@ func main() {
 		runShowLogged(ctx, app, args)
 	case "show-processed":
 		runShowProcessed(ctx, app, args)
+	case "replay-journal":
+		runReplayJournal(ctx, app, args)
 	case "strip-done":
 		runStripDone(ctx, app, args)
 	default:
