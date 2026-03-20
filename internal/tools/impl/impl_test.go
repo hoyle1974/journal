@@ -62,6 +62,7 @@ func TestToolDefinitionsComplete(t *testing.T) {
 		"discovery_search",
 		"retrieve_image",
 		"get_weather",
+		"graph_expand",
 	}
 
 	toolDefs := tools.GetDefinitions()

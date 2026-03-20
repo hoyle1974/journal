@@ -45,6 +45,7 @@ type checkProactiveSignalsArgs struct {
 func init() {
 	registerKnowledgeTools()
 	registerSignalTools()
+	registerGraphTools()
 }
 
 func registerKnowledgeTools() {
