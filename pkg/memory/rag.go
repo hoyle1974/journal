@@ -2,8 +2,6 @@ package memory
 
 import (
 	"sort"
-
-	"github.com/jackstrohm/jot/pkg/journal"
 )
 
 const rrfK = 60
@@ -53,10 +51,10 @@ func FuseKnowledgeNodes(vectorNodes []KnowledgeNode, keywordNodes []KnowledgeNod
 	return result
 }
 
-// FuseEntries combines vector and keyword search results using RRF; uses journal.Entry.
-func FuseEntries(vectorEntries []journal.Entry, keywordEntries []journal.Entry, topN int) []journal.Entry {
+// FuseEntries combines vector and keyword search results using RRF.
+func FuseEntries(vectorEntries []Entry, keywordEntries []Entry, topN int) []Entry {
 	type scoredEntry struct {
-		entry journal.Entry
+		entry Entry
 		score float64
 	}
 	scores := make(map[string]*scoredEntry)
@@ -91,7 +89,7 @@ func FuseEntries(vectorEntries []journal.Entry, keywordEntries []journal.Entry, 
 	if topN > len(out) {
 		topN = len(out)
 	}
-	result := make([]journal.Entry, 0, topN)
+	result := make([]Entry, 0, topN)
 	for i := 0; i < topN; i++ {
 		result = append(result, out[i].entry)
 	}
