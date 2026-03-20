@@ -42,6 +42,9 @@ func InsertPendingQuestions(ctx context.Context, env infra.ToolEnv, questions []
 		return fmt.Errorf("env required")
 	}
 
+	ctx, span := infra.StartSpan(ctx, "pending.insertPendingQuestions")
+	defer span.End()
+
 	// Filter out duplicates before writing.
 	filtered, err := filterDuplicatePendingQuestions(ctx, env, questions)
 	if err != nil {
@@ -54,7 +57,7 @@ func InsertPendingQuestions(ctx context.Context, env infra.ToolEnv, questions []
 
 	client, err := env.Firestore(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("firestore: %w", err)
 	}
 	now := time.Now().Format(time.RFC3339)
 	for i := range questions {
@@ -78,7 +81,7 @@ func InsertPendingQuestions(ctx context.Context, env infra.ToolEnv, questions []
 			"significance_weight": 0.1,
 		})
 		if err != nil {
-			return err
+			return fmt.Errorf("insert pending question: %w", err)
 		}
 	}
 	return nil
@@ -110,9 +113,13 @@ func GetUnresolvedPendingQuestions(ctx context.Context, env infra.ToolEnv, limit
 	if env == nil {
 		return nil, fmt.Errorf("env required")
 	}
+
+	ctx, span := infra.StartSpan(ctx, "pending.getUnresolvedPendingQuestions")
+	defer span.End()
+
 	client, err := env.Firestore(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("firestore: %w", err)
 	}
 	if limit <= 0 {
 		limit = 20
@@ -155,9 +162,13 @@ func GetRecentlyResolvedPendingQuestions(ctx context.Context, env infra.ToolEnv,
 	if env == nil {
 		return nil, fmt.Errorf("env required")
 	}
+
+	ctx, span := infra.StartSpan(ctx, "pending.getRecentlyResolvedPendingQuestions")
+	defer span.End()
+
 	client, err := env.Firestore(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("firestore: %w", err)
 	}
 	sinceStr := since.Format(time.RFC3339)
 	query := client.Collection(PendingQuestionsCollection).
