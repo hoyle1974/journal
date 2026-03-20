@@ -108,9 +108,15 @@ func ProcessEntry(ctx context.Context, app *infra.App, entryUUID, content, times
 	}
 	infra.LoggerFrom(ctx).Debug("process-entry: journal analysis done", "entry_uuid", entryUUID, "has_analysis", analysis != nil, "reason", "mood/tags/entities for rollup and search")
 	if analysis != nil && len(analysis.Entities) > 0 {
-		bgCtx := context.Background()
-		go LinkEntryToPeople(bgCtx, app, entryUUID, analysis.Entities)
+		// Synchronous entity resolution with internal timeout. Resolves entity mentions to
+		// existing knowledge nodes and links this entry to them.
+		ResolveAndLinkEntities(ctx, app, entryUUID, analysis.Entities)
 	}
+	// Best-effort SPO relationship extraction — runs in background because it makes an LLM call.
+	go func() {
+		bgCtx := context.Background()
+		ExtractAndStoreRelationships(bgCtx, app, entryUUID, content)
+	}()
 
 	t3 := time.Now()
 	vector, err := infra.GenerateEmbedding(ctx, app.Config().GoogleCloudProject, content, infra.EmbedTaskRetrievalDocument)
