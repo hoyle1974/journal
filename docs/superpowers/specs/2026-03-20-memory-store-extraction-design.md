@@ -255,7 +255,7 @@ pkg/memory/
 │   └── executive_summary.txt
 ├── gemini/
 │   ├── embedder.go         # NewEmbedder(projectID string) Embedder
-│   └── dispatcher.go       # NewDispatcher(projectID, model string) LLMDispatcher
+│   └── dispatcher.go       # NewDispatcher(client *genai.Client, model string) LLMDispatcher
 ├── analysis.go
 ├── context.go
 ├── entry_format.go
@@ -285,7 +285,7 @@ pkg/memory/
 - Existing test files (`*_test.go`) are updated to construct a `*Store` directly with a test Firestore client, removing the need to mock `infra.ToolEnv`
 - The `Embedder` and `LLMDispatcher` interfaces make it straightforward to inject fakes in unit tests without hitting Gemini
 - Integration tests continue to use a real Firestore emulator as before
-- `pending_dedup_test.go` calls `utils.CosineSimilarity` directly; after Phase 1 this is satisfied by the in-package copy in `math.go` (same package, self-healing)
+- `pending_dedup_test.go` is `package memory_test` (external test package) and keeps its `pkg/utils` import — test files may have their own imports without affecting the library's API
 
 ---
 
