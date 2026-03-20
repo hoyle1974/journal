@@ -243,7 +243,7 @@ func UpdateTaskStatus(ctx context.Context, env infra.ToolEnv, uuid, newStatus, r
 	existing, err := GetTask(ctx, env, uuid)
 	if err != nil {
 		span.RecordError(err)
-		return err
+		return fmt.Errorf("get task for status update: %w", err)
 	}
 
 	if env == nil || env.Config() == nil {
@@ -353,7 +353,7 @@ func UpdateTask(ctx context.Context, env infra.ToolEnv, uuid string, opts *Updat
 	existing, err := GetTask(ctx, env, uuid)
 	if err != nil {
 		span.RecordError(err)
-		return err
+		return fmt.Errorf("get task for update: %w", err)
 	}
 
 	var updates []firestore.Update
