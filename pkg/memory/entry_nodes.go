@@ -265,20 +265,24 @@ func CountEntries(ctx context.Context, env infra.ToolEnv, startDate, endDate *st
 		query = client.Collection(KnowledgeCollection).
 			Where("node_type", "==", NodeTypeLog)
 	}
-	iter := query.Documents(ctx)
-	defer iter.Stop()
-	count := 0
-	for {
-		_, err := iter.Next()
-		if err == iterator.Done {
-			break
-		}
-		if err != nil {
-			return 0, infra.WrapFirestoreIndexError(err)
-		}
-		count++
+	result, err := query.NewAggregationQuery().WithCount("count").Get(ctx)
+	if err != nil {
+		return 0, infra.WrapFirestoreIndexError(err)
 	}
-	return count, nil
+	val, ok := result["count"]
+	if !ok {
+		return 0, fmt.Errorf("count key missing from aggregation result")
+	}
+	// The SDK stores aggregation values as *firestorepb.Value; use GetIntegerValue().
+	type intGetter interface{ GetIntegerValue() int64 }
+	if g, ok := val.(intGetter); ok {
+		return int(g.GetIntegerValue()), nil
+	}
+	// Fallback for direct int64 (future SDK changes).
+	if n, ok := val.(int64); ok {
+		return int(n), nil
+	}
+	return 0, fmt.Errorf("unexpected count result type: %T", val)
 }
 
 // GetUniqueSources returns all unique source values from entries.
