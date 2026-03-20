@@ -10,16 +10,21 @@ import (
 	"github.com/jackstrohm/jot/pkg/memory"
 )
 
-const replayMultipartMaxBytes = 10 << 20 // 10 MB
-
 // handleReplay accepts a multipart form with content, source, timestamp, and optional
 // image/audio files, inserting the entry through the full processing pipeline
 // (AddEntryAndEnqueue → /internal/process-entry) with the original timestamp preserved.
 // Intended for dev replay of prod journal archives.
 func handleReplay(s *Server, w http.ResponseWriter, r *http.Request) (any, error) {
 	ctx := r.Context()
+	ctx, span := infra.StartSpan(ctx, "api.replay")
+	defer span.End()
 
-	if err := r.ParseMultipartForm(replayMultipartMaxBytes); err != nil {
+	app, ok := s.App.(*infra.App)
+	if !ok {
+		return nil, handlerError(http.StatusInternalServerError, "app not available")
+	}
+
+	if err := r.ParseMultipartForm(logMultipartMaxBytes); err != nil {
 		return nil, handlerError(http.StatusBadRequest, "invalid multipart form")
 	}
 
@@ -37,53 +42,47 @@ func handleReplay(s *Server, w http.ResponseWriter, r *http.Request) (any, error
 		return nil, handlerError(http.StatusBadRequest, "timestamp is required")
 	}
 
-	// Upload image if provided.
+	// readFormFileBytes reads the named multipart field and returns its bytes, or nil if absent.
+	readFormFileBytes := func(field string) ([]byte, error) {
+		f, _, err := r.FormFile(field)
+		if err != nil {
+			return nil, nil // field not present
+		}
+		defer f.Close()
+		b, readErr := io.ReadAll(f)
+		if readErr != nil {
+			return nil, handlerError(http.StatusBadRequest, "could not read "+field+" file")
+		}
+		return b, nil
+	}
+
+	imageBytes, err := readFormFileBytes("image")
+	if err != nil {
+		return nil, err
+	}
+	audioBytes, err := readFormFileBytes("audio")
+	if err != nil {
+		return nil, err
+	}
+
 	var imageURL string
-	if f, _, err := r.FormFile("image"); err == nil {
-		defer f.Close()
-		imageBytes, readErr := io.ReadAll(f)
-		if readErr != nil {
-			return nil, handlerError(http.StatusBadRequest, "could not read image file")
-		}
-		if len(imageBytes) > 0 {
-			app, ok := s.App.(*infra.App)
-			if !ok {
-				return nil, handlerError(http.StatusInternalServerError, "image storage not available")
-			}
-			var uploadErr error
-			imageURL, uploadErr = app.ImageStorage().UploadImage(ctx, imageBytes)
-			if uploadErr != nil {
-				infra.LoggerFrom(ctx).Warn("replay: image upload failed", "error", uploadErr)
-				return nil, handlerError(http.StatusInternalServerError, "image upload failed")
-			}
+	if len(imageBytes) > 0 {
+		var uploadErr error
+		imageURL, uploadErr = app.ImageStorage().UploadImage(ctx, imageBytes)
+		if uploadErr != nil {
+			infra.LoggerFrom(ctx).Warn("replay: image upload failed", "error", uploadErr)
+			return nil, handlerError(http.StatusInternalServerError, "image upload failed")
 		}
 	}
 
-	// Upload audio if provided.
 	var audioURL string
-	if f, _, err := r.FormFile("audio"); err == nil {
-		defer f.Close()
-		audioBytes, readErr := io.ReadAll(f)
-		if readErr != nil {
-			return nil, handlerError(http.StatusBadRequest, "could not read audio file")
+	if len(audioBytes) > 0 {
+		var uploadErr error
+		audioURL, uploadErr = app.UploadAudio(ctx, audioBytes)
+		if uploadErr != nil {
+			infra.LoggerFrom(ctx).Warn("replay: audio upload failed", "error", uploadErr)
+			return nil, handlerError(http.StatusInternalServerError, "audio upload failed")
 		}
-		if len(audioBytes) > 0 {
-			app, ok := s.App.(*infra.App)
-			if !ok {
-				return nil, handlerError(http.StatusInternalServerError, "audio storage not available")
-			}
-			var uploadErr error
-			audioURL, uploadErr = app.UploadAudio(ctx, audioBytes)
-			if uploadErr != nil {
-				infra.LoggerFrom(ctx).Warn("replay: audio upload failed", "error", uploadErr)
-				return nil, handlerError(http.StatusInternalServerError, "audio upload failed")
-			}
-		}
-	}
-
-	app, ok := s.App.(*infra.App)
-	if !ok {
-		return nil, handlerError(http.StatusInternalServerError, "app not available")
 	}
 
 	infra.LoggerFrom(ctx).Info("replay: inserting entry",

@@ -13,6 +13,12 @@ import (
 	"google.golang.org/api/iterator"
 )
 
+// firestoreMaxBatchSize is Firestore's hard limit on writes per batch commit.
+const firestoreMaxBatchSize = 500
+
+// firestoreIntValue is satisfied by *firestorepb.Value returned in aggregation results.
+type firestoreIntValue interface{ GetIntegerValue() int64 }
+
 // errSkipEntry is a sentinel returned from mapDoc callbacks to exclude a document
 // from results without treating it as an error.
 var errSkipEntry = errors.New("skip entry")
@@ -274,8 +280,7 @@ func CountEntries(ctx context.Context, env infra.ToolEnv, startDate, endDate *st
 		return 0, fmt.Errorf("count key missing from aggregation result")
 	}
 	// The SDK stores aggregation values as *firestorepb.Value; use GetIntegerValue().
-	type intGetter interface{ GetIntegerValue() int64 }
-	if g, ok := val.(intGetter); ok {
+	if g, ok := val.(firestoreIntValue); ok {
 		return int(g.GetIntegerValue()), nil
 	}
 	// Fallback for direct int64 (future SDK changes).
@@ -294,7 +299,7 @@ func GetUniqueSources(ctx context.Context, env infra.ToolEnv) ([]string, error) 
 	if err != nil {
 		return nil, err
 	}
-	iter := client.Collection(KnowledgeCollection).Where("node_type", "==", NodeTypeLog).Limit(1000).Documents(ctx)
+	iter := client.Collection(KnowledgeCollection).Where("node_type", "==", NodeTypeLog).Select("source").Limit(1000).Documents(ctx)
 	defer iter.Stop()
 	sources := make(map[string]bool)
 	for {
@@ -446,12 +451,17 @@ func DeleteEntries(ctx context.Context, env infra.ToolEnv, entryUUIDs []string) 
 	if err != nil {
 		return err
 	}
-	batch := client.Batch()
-	for _, uuid := range entryUUIDs {
-		batch.Delete(client.Collection(KnowledgeCollection).Doc(uuid))
+	for i := 0; i < len(entryUUIDs); i += firestoreMaxBatchSize {
+		end := min(i+firestoreMaxBatchSize, len(entryUUIDs))
+		batch := client.Batch()
+		for _, uuid := range entryUUIDs[i:end] {
+			batch.Delete(client.Collection(KnowledgeCollection).Doc(uuid))
+		}
+		if _, err = batch.Commit(ctx); err != nil {
+			return fmt.Errorf("delete entries batch: %w", err)
+		}
 	}
-	_, err = batch.Commit(ctx)
-	return err
+	return nil
 }
 
 // GetDatesWithEntries returns sorted dates (YYYY-MM-DD) that have at least one entry.

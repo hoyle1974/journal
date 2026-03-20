@@ -126,14 +126,15 @@ func replayEntry(ctx context.Context, client *http.Client, endpoint, apiKey, arc
 }
 
 func attachFile(w *multipart.Writer, fieldName, path string) error {
-	data, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if err != nil {
-		return fmt.Errorf("read file %q: %w", path, err)
+		return fmt.Errorf("open file %q: %w", path, err)
 	}
+	defer f.Close()
 	part, err := w.CreateFormFile(fieldName, filepath.Base(path))
 	if err != nil {
 		return fmt.Errorf("create form file: %w", err)
 	}
-	_, err = part.Write(data)
+	_, err = io.Copy(part, f)
 	return err
 }
