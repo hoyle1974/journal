@@ -74,6 +74,9 @@ func runReplayJournal(ctx context.Context, _ *infra.App, args []string) {
 		if (i+1)%50 == 0 || i+1 == len(entries) {
 			fmt.Printf("replayed %d/%d entries...\n", i+1, len(entries))
 		}
+		if i+1 < len(entries) {
+			time.Sleep(time.Second)
+		}
 	}
 
 	fmt.Printf("Replay complete: %d entries submitted.\n", len(entries))
