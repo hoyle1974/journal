@@ -87,6 +87,9 @@ var dreamerReportPromptTxt string
 //go:embed tag_consolidator.txt
 var tagConsolidatorTxt string
 
+//go:embed relationship_extractor.txt
+var relationshipExtractorTxt string
+
 var (
 	systemPromptTmpl       = template.Must(template.New("system").Parse(systemPromptTxt))
 	contextAnalyzeTmpl     = template.Must(template.New("context").Parse(contextAnalyzeTxt))
@@ -102,7 +105,8 @@ var (
 	dreamerReportTmpl = template.Must(template.New("dreamerReport").Funcs(template.FuncMap{
 		"join": strings.Join,
 	}).Parse(dreamerReportPromptTxt))
-	tagConsolidatorTmpl = template.Must(template.New("tagConsolidator").Parse(tagConsolidatorTxt))
+	tagConsolidatorTmpl         = template.Must(template.New("tagConsolidator").Parse(tagConsolidatorTxt))
+	relationshipExtractorTmpl   = template.Must(template.New("relationshipExtractor").Parse(relationshipExtractorTxt))
 )
 
 var (
@@ -351,6 +355,20 @@ func BuildTagConsolidator(data TagConsolidatorData) (string, error) {
 	var buf bytes.Buffer
 	if err := tagConsolidatorTmpl.Execute(&buf, data); err != nil {
 		return "", fmt.Errorf("execute tag consolidator: %w", err)
+	}
+	return buf.String(), nil
+}
+
+// RelationshipExtractorData holds the entry content for SPO relationship extraction.
+type RelationshipExtractorData struct {
+	Content string
+}
+
+// BuildRelationshipExtractor executes the relationship-extractor template.
+func BuildRelationshipExtractor(data RelationshipExtractorData) (string, error) {
+	var buf bytes.Buffer
+	if err := relationshipExtractorTmpl.Execute(&buf, data); err != nil {
+		return "", fmt.Errorf("execute relationship extractor: %w", err)
 	}
 	return buf.String(), nil
 }
