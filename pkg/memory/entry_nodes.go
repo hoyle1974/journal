@@ -143,6 +143,29 @@ func GetEntriesAsc(ctx context.Context, env infra.ToolEnv, limit int) ([]Entry, 
 	return getEntriesOrdered(ctx, env, limit, firestore.Asc)
 }
 
+// GetAllLogEntries fetches every node_type="log" entry sorted ascending by timestamp.
+// No limit is applied — intended for admin export operations.
+func GetAllLogEntries(ctx context.Context, env infra.ToolEnv) ([]Entry, error) {
+	if env == nil {
+		return nil, fmt.Errorf("env is required")
+	}
+	client, err := env.Firestore(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("firestore client: %w", err)
+	}
+	query := client.Collection(KnowledgeCollection).
+		Where("node_type", "==", NodeTypeLog).
+		OrderBy("timestamp", firestore.Asc)
+	return infra.QueryDocuments(ctx, query, func(doc *firestore.DocumentSnapshot) (Entry, error) {
+		var e Entry
+		if err := doc.DataTo(&e); err != nil {
+			return Entry{}, fmt.Errorf("decode entry: %w", err)
+		}
+		e.UUID = doc.Ref.ID
+		return e, nil
+	})
+}
+
 // GetEntriesByDateRange fetches entries within a date range.
 func GetEntriesByDateRange(ctx context.Context, env infra.ToolEnv, startDate, endDate string, limit int) ([]Entry, error) {
 	if env == nil {
