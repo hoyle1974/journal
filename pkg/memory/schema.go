@@ -27,6 +27,14 @@ const (
 	NodeTypeIdentity = "identity_anchor"
 	// NodeTypeUserIdentity is for self-referential statements about the user's core identity (name, role, values, traits). Janitor must not delete these.
 	NodeTypeUserIdentity = "user_identity"
+	// NodeTypeLog is for episodic log entries (raw ingest from all channels).
+	NodeTypeLog = "log"
+	// NodeTypeTask is for task/todo items managed by the task engine.
+	NodeTypeTask = "task"
+	// NodeTypeQuery is for logged queries (Q&A pairs) from the FOH loop.
+	NodeTypeQuery = "query"
+	// NodeTypePendingQuestion is for gap/contradiction questions from the Dreamer.
+	NodeTypePendingQuestion = "pending_question"
 )
 
 // IdentityMeta is the metadata schema for identity-anchor nodes (primary user, core values, system directives).
@@ -59,6 +67,14 @@ const (
 	StatusPlanning  = "planning"
 	StatusPending   = "pending"
 	StatusCompleted = "completed"
+)
+
+// Task status values — used by the task engine.
+const (
+	TaskStatusPending   = "pending"
+	TaskStatusActive    = "active"
+	TaskStatusCompleted = "completed"
+	TaskStatusAbandoned = "abandoned"
 )
 
 // Preference category and sentiment.
