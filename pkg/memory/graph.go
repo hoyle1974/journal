@@ -3,8 +3,6 @@ package memory
 import (
 	"context"
 	"fmt"
-
-	"github.com/jackstrohm/jot/internal/infra"
 )
 
 // GraphExpandResult contains the seed node plus its immediate graph neighbourhood:
@@ -26,39 +24,33 @@ type GraphExpandResult struct {
 //
 // hops is reserved for future multi-hop traversal; currently only 1-hop is supported.
 // limitPerEdge caps each of the three neighbour sets.
-func GraphExpand(ctx context.Context, env infra.ToolEnv, seedID string, hops, limitPerEdge int) (*GraphExpandResult, error) {
-	if env == nil {
-		return nil, fmt.Errorf("env required")
-	}
+func (s *Store) GraphExpand(ctx context.Context, seedID string, hops, limitPerEdge int) (*GraphExpandResult, error) {
 	if seedID == "" {
 		return nil, fmt.Errorf("seedID required")
 	}
 
-	ctx, span := infra.StartSpan(ctx, "memory.graph_expand")
-	defer span.End()
-	span.SetAttributes(map[string]string{"seed_id": seedID, "hops": fmt.Sprintf("%d", hops)})
 	if limitPerEdge <= 0 {
 		limitPerEdge = 10
 	}
 
 	// Fetch the seed node with its entity_links.
-	seed, err := GetKnowledgeNodeByID(ctx, env, seedID)
+	// TODO(batch-2): GetKnowledgeNodeByID will be converted to a Store method; pass nil env for now.
+	seed, err := GetKnowledgeNodeByID(ctx, nil, seedID)
 	if err != nil {
-		span.RecordError(err)
 		return nil, fmt.Errorf("fetch seed node: %w", err)
 	}
 
 	// Outgoing edges: nodes where object_uuid == seedID (seed is the subject of an SPO triple).
-	outgoing, err := QueryOutgoingEdges(ctx, env, seedID, limitPerEdge)
+	// TODO(batch-2): QueryOutgoingEdges will be converted to a Store method; pass nil env for now.
+	outgoing, err := QueryOutgoingEdges(ctx, nil, seedID, limitPerEdge)
 	if err != nil {
-		span.RecordError(err)
 		return nil, fmt.Errorf("query outgoing edges: %w", err)
 	}
 
 	// Incoming edges: nodes that reference seedID in their entity_links array.
-	incoming, err := QueryNodesLinkingTo(ctx, env, seedID, limitPerEdge)
+	// TODO(batch-2): QueryNodesLinkingTo will be converted to a Store method; pass nil env for now.
+	incoming, err := QueryNodesLinkingTo(ctx, nil, seedID, limitPerEdge)
 	if err != nil {
-		span.RecordError(err)
 		return nil, fmt.Errorf("query incoming edges: %w", err)
 	}
 
@@ -69,9 +61,9 @@ func GraphExpand(ctx context.Context, env infra.ToolEnv, seedID string, hops, li
 		if len(ids) > limitPerEdge {
 			ids = ids[:limitPerEdge]
 		}
-		linked, err = GetKnowledgeNodesByIDs(ctx, env, ids)
+		// TODO(batch-2): GetKnowledgeNodesByIDs will be converted to a Store method; pass nil env for now.
+		linked, err = GetKnowledgeNodesByIDs(ctx, nil, ids)
 		if err != nil {
-			span.RecordError(err)
 			return nil, fmt.Errorf("fetch linked nodes: %w", err)
 		}
 	}
@@ -85,7 +77,7 @@ func GraphExpand(ctx context.Context, env infra.ToolEnv, seedID string, hops, li
 		linked = []KnowledgeNode{}
 	}
 
-	infra.LoggerFrom(ctx).Info("graph expand complete",
+	s.log.Info("graph expand complete",
 		"seed_id", seedID,
 		"outgoing", len(outgoing),
 		"incoming", len(incoming),

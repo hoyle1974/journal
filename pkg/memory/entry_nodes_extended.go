@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	"cloud.google.com/go/firestore"
-	"github.com/jackstrohm/jot/internal/infra"
 	"google.golang.org/api/iterator"
 )
 
@@ -17,35 +16,28 @@ type EntryWithAnalysis struct {
 }
 
 // GetEntriesWithAnalysisByDateRange fetches entries in the date range and parses journal_analysis from each doc.
-func GetEntriesWithAnalysisByDateRange(ctx context.Context, env infra.ToolEnv, startDate, endDate string, limit int) ([]EntryWithAnalysis, error) {
-	if env == nil {
-		return nil, fmt.Errorf("env is required")
-	}
-	client, err := env.Firestore(ctx)
-	if err != nil {
-		return nil, err
-	}
+func (s *Store) GetEntriesWithAnalysisByDateRange(ctx context.Context, startDate, endDate string, limit int) ([]EntryWithAnalysis, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 200
 	}
 	startDate = padDateStart(startDate)
 	endDate = padDateEnd(endDate)
-	query := client.Collection(KnowledgeCollection).
+	query := s.db.Collection(KnowledgeCollection).
 		Where("node_type", "==", NodeTypeLog).
 		Where("timestamp", ">=", startDate).
 		Where("timestamp", "<=", endDate).
 		OrderBy("timestamp", firestore.Desc).
 		Limit(limit)
-	result, err := infra.QueryDocuments(ctx, query, func(doc *firestore.DocumentSnapshot) (EntryWithAnalysis, error) {
+	result, err := queryDocuments(ctx, query, func(doc *firestore.DocumentSnapshot) (EntryWithAnalysis, error) {
 		data := doc.Data()
 		e := Entry{
 			UUID:      doc.Ref.ID,
-			Content:   infra.GetStringField(data, "content"),
-			Source:    infra.GetStringField(data, "source"),
-			Timestamp: infra.GetStringField(data, "timestamp"),
+			Content:   getStringField(data, "content"),
+			Source:    getStringField(data, "source"),
+			Timestamp: getStringField(data, "timestamp"),
 		}
 		var analysis *JournalAnalysis
-		if raw := infra.GetStringField(data, "journal_analysis"); raw != "" {
+		if raw := getStringField(data, "journal_analysis"); raw != "" {
 			var a JournalAnalysis
 			if jsonErr := json.Unmarshal([]byte(raw), &a); jsonErr == nil {
 				a.SourceID = e.UUID
@@ -61,27 +53,16 @@ func GetEntriesWithAnalysisByDateRange(ctx context.Context, env infra.ToolEnv, s
 		return EntryWithAnalysis{Entry: e, Analysis: analysis}, nil
 	})
 	if err != nil {
-		return nil, infra.WrapFirestoreIndexError(err)
+		return nil, wrapFirestoreIndexError(err)
 	}
 	return result, nil
 }
 
 // QuerySimilarEntries performs a KNN vector search on journal entries.
-func QuerySimilarEntries(ctx context.Context, env infra.ToolEnv, queryVector []float32, limit int) ([]Entry, error) {
-	if env == nil {
-		return nil, fmt.Errorf("env is required")
-	}
-
-	ctx, span := infra.StartSpan(ctx, "entries.query_similar")
-	defer span.End()
-	client, err := env.Firestore(ctx)
-	if err != nil {
-		return nil, err
-	}
-
+func (s *Store) QuerySimilarEntries(ctx context.Context, queryVector []float32, limit int) ([]Entry, error) {
 	const distanceResultField = "_vector_distance"
 	opts := &firestore.FindNearestOptions{DistanceResultField: distanceResultField}
-	vectorQuery := client.Collection(KnowledgeCollection).
+	vectorQuery := s.db.Collection(KnowledgeCollection).
 		Where("node_type", "==", NodeTypeLog).
 		FindNearest("embedding", firestore.Vector32(queryVector), limit, firestore.DistanceMeasureCosine, opts)
 	iter := vectorQuery.Documents(ctx)
@@ -95,19 +76,18 @@ func QuerySimilarEntries(ctx context.Context, env infra.ToolEnv, queryVector []f
 			break
 		}
 		if err != nil {
-			infra.LogVectorSearchFailed(ctx, KnowledgeCollection, err, 0)
-			span.RecordError(err)
+			s.logVectorSearchFailed(KnowledgeCollection, err, 0)
 			return nil, err
 		}
 		data := doc.Data()
-		content := infra.GetStringField(data, "content")
+		content := getStringField(data, "content")
 		entries = append(entries, Entry{
 			UUID:                   doc.Ref.ID,
 			Content:                content,
-			Source:                 infra.GetStringField(data, "source"),
-			Timestamp:              infra.GetStringField(data, "timestamp"),
-			ImageURL:               infra.GetStringField(data, "image_url"),
-			ParsedImageDescription: infra.GetStringField(data, "parsed_image_description"),
+			Source:                 getStringField(data, "source"),
+			Timestamp:              getStringField(data, "timestamp"),
+			ImageURL:               getStringField(data, "image_url"),
+			ParsedImageDescription: getStringField(data, "parsed_image_description"),
 		})
 		score := 0.0
 		if v, ok := data[distanceResultField]; ok {
@@ -125,31 +105,19 @@ func QuerySimilarEntries(ctx context.Context, env infra.ToolEnv, queryVector []f
 			}
 		}
 		scores = append(scores, score)
-		infra.LogFoundEntry(ctx, doc.Ref.ID, score, content)
+		s.logFoundEntry(doc.Ref.ID, score, content)
 	}
-	infra.LogRAGQuality(ctx, limit, scores)
-	span.SetAttributes(map[string]string{"results_count": fmt.Sprintf("%d", len(entries))})
+	s.logRAGQuality(limit, scores)
 	return entries, nil
 }
 
 // BackfillEntryEmbeddings finds entries without embeddings, generates them, and updates docs.
-func BackfillEntryEmbeddings(ctx context.Context, env infra.ToolEnv, limit int) (int, error) {
-	if env == nil {
-		return 0, fmt.Errorf("env is required")
-	}
-
-	ctx, span := infra.StartSpan(ctx, "entries.backfill_embeddings")
-	defer span.End()
-	client, err := env.Firestore(ctx)
-	if err != nil {
-		return 0, err
-	}
-	projectID := env.Config().GoogleCloudProject
+func (s *Store) BackfillEntryEmbeddings(ctx context.Context, limit int) (int, error) {
 	if limit <= 0 || limit > 50 {
 		limit = 20
 	}
 
-	iter := client.Collection(KnowledgeCollection).
+	iter := s.db.Collection(KnowledgeCollection).
 		Where("node_type", "==", NodeTypeLog).
 		OrderBy("timestamp", firestore.Asc).
 		Limit(500).
@@ -169,25 +137,24 @@ func BackfillEntryEmbeddings(ctx context.Context, env infra.ToolEnv, limit int) 
 		if _, has := data["embedding"]; has {
 			continue
 		}
-		content := infra.GetStringField(data, "content")
+		content := getStringField(data, "content")
 		if content == "" {
 			continue
 		}
-		vector, err := infra.GenerateEmbedding(ctx, projectID, content, infra.EmbedTaskRetrievalDocument)
+		vector, err := s.embedder.GenerateEmbedding(ctx, content, EmbedTaskRetrievalDocument)
 		if err != nil {
-			infra.LoggerFrom(ctx).Warn("backfill embedding failed", "doc", doc.Ref.ID, "error", err)
+			s.log.Warn("backfill embedding failed", "doc", doc.Ref.ID, "error", err)
 			continue
 		}
-		_, err = client.Collection(KnowledgeCollection).Doc(doc.Ref.ID).Update(ctx, []firestore.Update{
+		_, err = s.db.Collection(KnowledgeCollection).Doc(doc.Ref.ID).Update(ctx, []firestore.Update{
 			{Path: "embedding", Value: firestore.Vector32(vector)},
 		})
 		if err != nil {
-			infra.LoggerFrom(ctx).Warn("backfill update failed", "doc", doc.Ref.ID, "error", err)
+			s.log.Warn("backfill update failed", "doc", doc.Ref.ID, "error", err)
 			continue
 		}
 		processed++
-		infra.LoggerFrom(ctx).Debug("backfill embedded entry", "doc", doc.Ref.ID)
+		s.log.Debug("backfill embedded entry", "doc", doc.Ref.ID)
 	}
-	span.SetAttributes(map[string]string{"processed": fmt.Sprintf("%d", processed)})
 	return processed, nil
 }

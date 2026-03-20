@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"strings"
 	"unicode/utf8"
-
-	"github.com/jackstrohm/jot/pkg/utils"
 )
 
 const (
@@ -18,7 +16,7 @@ const (
 
 // TruncateTimestamp truncates ts for display (date 10 or datetime 19 runes).
 func TruncateTimestamp(ts string, maxLen int) string {
-	return utils.TruncateString(ts, maxLen)
+	return truncateString(ts, maxLen)
 }
 
 // FormatEntriesForContext formats entries into a readable string for LLM context.
@@ -33,13 +31,13 @@ func FormatEntriesForContext(entries []Entry, maxChars int) string {
 		if ts == "" {
 			ts = "(no date)"
 		} else {
-			ts = utils.TruncateString(ts, 19)
+			ts = truncateString(ts, 19)
 		}
-		content := utils.SanitizePrompt(e.Content)
+		content := sanitizePrompt(e.Content)
 		line := fmt.Sprintf("[%s] (%s) %s", ts, e.Source, content)
 		if e.ImageURL != "" {
 			if e.ParsedImageDescription != "" {
-				desc := utils.SanitizePrompt(e.ParsedImageDescription)
+				desc := sanitizePrompt(e.ParsedImageDescription)
 				line += fmt.Sprintf("\n[Attached Image Content: %s]", desc)
 			} else {
 				line += "\n[Attached image]"
