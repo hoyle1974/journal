@@ -9,9 +9,7 @@ import (
 
 	"cloud.google.com/go/firestore"
 	"github.com/jackstrohm/jot/internal/infra"
-	"github.com/jackstrohm/jot/pkg/journal"
 	"github.com/jackstrohm/jot/pkg/memory"
-	"github.com/jackstrohm/jot/pkg/task"
 	"github.com/jackstrohm/jot/pkg/utils"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -55,7 +53,7 @@ func ProcessEntry(ctx context.Context, app *infra.App, entryUUID, content, times
 
 	// Log when this entry is linked to an image (e.g. Telegram photo); helps debug caption vs placeholder "Photo".
 	if client, err := app.Firestore(ctx); err == nil {
-		if doc, err := client.Collection(journal.EntriesCollection).Doc(entryUUID).Get(ctx); err == nil {
+		if doc, err := client.Collection(memory.EntriesCollection).Doc(entryUUID).Get(ctx); err == nil {
 			if imageID := infra.GetStringField(doc.Data(), "image_file_id"); imageID != "" {
 				infra.LoggerFrom(ctx).Info("process-entry: entry has linked image", "entry_uuid", entryUUID, "image_file_id", imageID)
 			}
@@ -73,12 +71,12 @@ func ProcessEntry(ctx context.Context, app *infra.App, entryUUID, content, times
 	var taskContent string
 	if parsed != nil && parsed.FutureCommitment >= AgencyTaskCommitmentThreshold && len(strings.TrimSpace(parsed.CommitmentIntent)) >= MinCommitmentIntentLen {
 		taskContent = strings.TrimSpace(parsed.CommitmentIntent)
-		t := &task.Task{
-			Content:          taskContent,
-			Status:           task.StatusPending,
-			JournalEntryIDs:  []string{entryUUID},
+		t := &memory.Task{
+			Content:         taskContent,
+			Status:          memory.TaskStatusPending,
+			JournalEntryIDs: []string{entryUUID},
 		}
-		if taskUUID, createErr := task.CreateTask(ctx, app, t); createErr != nil {
+		if taskUUID, createErr := memory.CreateTask(ctx, app, t); createErr != nil {
 			infra.LoggerFrom(ctx).Warn("process-entry: agency task create failed", "entry_uuid", entryUUID, "error", createErr)
 		} else {
 			infra.LoggerFrom(ctx).Info("process-entry: agency task created", "entry_uuid", entryUUID, "task_uuid", taskUUID, "content", taskContent)
@@ -95,7 +93,7 @@ func ProcessEntry(ctx context.Context, app *infra.App, entryUUID, content, times
 	infra.LoggerFrom(ctx).Debug("process-entry: context detection done", "entry_uuid", entryUUID, "contexts_linked", contextCount, "reason", "link entry to active contexts")
 
 	t2 := time.Now()
-	analysis, err := journal.AnalyzeJournalEntry(ctx, app, content, entryUUID, timestamp)
+	analysis, err := memory.AnalyzeJournalEntry(ctx, app, content, entryUUID, timestamp)
 	llm += time.Since(t2)
 	if err != nil {
 		infra.LoggerFrom(ctx).Warn("journal analysis failed", "entry_uuid", entryUUID, "error", err)
@@ -199,7 +197,7 @@ func updateEntryWithRetry(ctx context.Context, client *firestore.Client, entryUU
 		400 * time.Millisecond, 800 * time.Millisecond, 1600 * time.Millisecond,
 		3200 * time.Millisecond, 3200 * time.Millisecond,
 	}
-	ref := client.Collection(journal.EntriesCollection).Doc(entryUUID)
+	ref := client.Collection(memory.EntriesCollection).Doc(entryUUID)
 	var lastErr error
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if attempt > 0 && backoff[attempt] > 0 {

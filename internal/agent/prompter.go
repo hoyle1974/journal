@@ -6,12 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"cloud.google.com/go/firestore"
 	"github.com/jackstrohm/jot/internal/infra"
 	"github.com/jackstrohm/jot/internal/prompts"
-	"github.com/jackstrohm/jot/pkg/journal"
 	"github.com/jackstrohm/jot/pkg/memory"
-	"github.com/jackstrohm/jot/pkg/task"
 	"github.com/jackstrohm/jot/pkg/utils"
 )
 
@@ -66,13 +63,9 @@ func BuildSystemPrompt(ctx context.Context, env infra.ToolEnv) (string, error) {
 	}
 
 	// 2. Recent Conversation
-	var client *firestore.Client
+	var queries []memory.QueryLog
 	if env != nil {
-		client, _ = env.Firestore(ctx)
-	}
-	var queries []journal.QueryLog
-	if client != nil {
-		queries, _ = journal.GetRecentQueries(ctx, client, 5)
+		queries, _ = memory.GetRecentQueries(ctx, env, 5)
 	}
 	recentConversation := formatConversationSection(queries)
 	recentConversationWrapped := recentConversation
@@ -91,9 +84,9 @@ func BuildSystemPrompt(ctx context.Context, env infra.ToolEnv) (string, error) {
 	sourceCodeBlock := prompts.SourceCodeBlock()
 
 	// 4. Knowledge Gaps
-	var gapQueries []journal.QueryLog
-	if client != nil {
-		gapQueries, _ = journal.GetRecentGapQueries(ctx, client, 3)
+	var gapQueries []memory.QueryLog
+	if env != nil {
+		gapQueries, _ = memory.GetRecentGapQueries(ctx, env, 3)
 	}
 	knowledgeGapBlock := formatKnowledgeGapSection(gapQueries)
 	knowledgeGapBlockWrapped := knowledgeGapBlock
@@ -102,7 +95,7 @@ func BuildSystemPrompt(ctx context.Context, env infra.ToolEnv) (string, error) {
 	}
 
 	// 5. Open Tasks (root)
-	roots, _ := task.GetOpenRootTasks(ctx, env, 15)
+	roots, _ := memory.GetOpenRootTasks(ctx, env, 15)
 	openTodoBlock := formatTodoSection(roots)
 	openTodoBlockWrapped := openTodoBlock
 	if openTodoBlock != "" {
@@ -184,7 +177,7 @@ func formatContextSection(items []ActiveContextItem) string {
 }
 
 // formatConversationSection builds the RECENT CONVERSATION block with --- and ## header; HH:MM, User/Asst lines.
-func formatConversationSection(queries []journal.QueryLog) string {
+func formatConversationSection(queries []memory.QueryLog) string {
 	if len(queries) == 0 {
 		return ""
 	}
@@ -209,7 +202,7 @@ func formatAlertsSection(signals string) string {
 }
 
 // formatKnowledgeGapSection builds the KNOWLEDGE GAPS block with --- and ## header.
-func formatKnowledgeGapSection(gapQueries []journal.QueryLog) string {
+func formatKnowledgeGapSection(gapQueries []memory.QueryLog) string {
 	if len(gapQueries) == 0 {
 		return ""
 	}
@@ -222,7 +215,7 @@ func formatKnowledgeGapSection(gapQueries []journal.QueryLog) string {
 
 // formatTodoSection builds the OPEN TASKS (ROOT) block with --- and ## header; full task UUID + content.
 // Full UUIDs are required so update_task_status/update_task find the Firestore document (doc ID is the full UUID).
-func formatTodoSection(roots []task.Task) string {
+func formatTodoSection(roots []memory.Task) string {
 	if len(roots) == 0 {
 		return ""
 	}
@@ -236,14 +229,14 @@ func formatTodoSection(roots []task.Task) string {
 // buildActiveProjectBlock finds the most recently created open root task that has pending subtasks and
 // formats a PROJECT STATUS block for injection into the system prompt.
 // Checks up to the first 3 root tasks to bound the number of Firestore calls.
-func buildActiveProjectBlock(ctx context.Context, env infra.ToolEnv, roots []task.Task) string {
+func buildActiveProjectBlock(ctx context.Context, env infra.ToolEnv, roots []memory.Task) string {
 	limit := 3
 	if len(roots) < limit {
 		limit = len(roots)
 	}
 	for i := 0; i < limit; i++ {
 		parent := roots[i]
-		children, err := task.GetChildTasks(ctx, env, parent.UUID, 10)
+		children, err := memory.GetChildTasks(ctx, env, parent.UUID, 10)
 		if err != nil || len(children) == 0 {
 			continue
 		}

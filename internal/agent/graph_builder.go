@@ -7,7 +7,6 @@ import (
 
 	"github.com/jackstrohm/jot/internal/infra"
 	"github.com/jackstrohm/jot/internal/prompts"
-	"github.com/jackstrohm/jot/pkg/journal"
 	"github.com/jackstrohm/jot/pkg/memory"
 	"github.com/jackstrohm/jot/pkg/utils"
 )
@@ -43,7 +42,7 @@ func parseSPOLines(output string) []memory.SPOTriple {
 // journal_entry_ids. Runs synchronously within resolveTimeout. Failures are logged and swallowed —
 // this is a best-effort enrichment step. If no node exists for an entity, it is skipped (node
 // creation happens via the Dreamer or explicit upsert_knowledge tool calls).
-func ResolveAndLinkEntities(ctx context.Context, app *infra.App, entryUUID string, entities []journal.Entity) {
+func ResolveAndLinkEntities(ctx context.Context, app *infra.App, entryUUID string, entities []memory.Entity) {
 	ctx, cancel := context.WithTimeout(ctx, resolveTimeout)
 	defer cancel()
 
