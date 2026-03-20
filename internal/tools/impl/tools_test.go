@@ -1,10 +1,12 @@
 package impl
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	"github.com/jackstrohm/jot/pkg/journal"
+	"github.com/jackstrohm/jot/pkg/memory"
 	"github.com/jackstrohm/jot/pkg/utils"
 )
 
@@ -214,5 +216,72 @@ func TestEncodeDecode(t *testing.T) {
 	}
 	if !strings.Contains(result, "  ") {
 		t.Errorf("json_format expected indented JSON, got: %s", result)
+	}
+}
+
+func TestFormatKnowledgeNodesIncludesUUID(t *testing.T) {
+	nodes := []memory.KnowledgeNode{
+		{
+			UUID:      "abc-123",
+			Content:   "Alice works at Google",
+			NodeType:  "fact",
+			Timestamp: "2024-01-15T10:00:00Z",
+		},
+		{
+			UUID:     "def-456",
+			Content:  "Bob prefers dark chocolate",
+			NodeType: "preference",
+		},
+	}
+	result := formatKnowledgeNodes(context.Background(), nil, nodes)
+	if !strings.Contains(result, "   UUID: abc-123") {
+		t.Errorf("expected UUID line for abc-123, got:\n%s", result)
+	}
+	if !strings.Contains(result, "   UUID: def-456") {
+		t.Errorf("expected UUID line for def-456, got:\n%s", result)
+	}
+}
+
+func TestFormatGraphExpandResult(t *testing.T) {
+	seed := &memory.KnowledgeNodeWithLinks{
+		KnowledgeNode: memory.KnowledgeNode{
+			UUID:     "seed-uuid-001",
+			Content:  "Alice is a software engineer",
+			NodeType: "person",
+		},
+		EntityLinks: []string{"linked-uuid-002"},
+	}
+	result := &memory.GraphExpandResult{
+		Seed: seed,
+		Outgoing: []memory.KnowledgeNode{
+			{UUID: "out-001", Content: "Alice works_at Google", NodeType: "fact", Predicate: "works_at", ObjectUUID: "google-uuid"},
+		},
+		Incoming: []memory.KnowledgeNode{
+			{UUID: "in-001", Content: "Bob knows Alice", NodeType: "fact"},
+		},
+		Linked: []memory.KnowledgeNode{
+			{UUID: "linked-uuid-002", Content: "Google is a tech company", NodeType: "fact"},
+		},
+	}
+
+	formatted := formatGraphExpandResult(result)
+
+	checks := []string{
+		"seed-uuid-001",
+		"Alice is a software engineer",
+		"Outgoing edges",
+		"out-001",
+		"works_at",
+		"Incoming edges",
+		"in-001",
+		"Bob knows Alice",
+		"Directly linked nodes",
+		"linked-uuid-002",
+		"Google is a tech company",
+	}
+	for _, check := range checks {
+		if !strings.Contains(formatted, check) {
+			t.Errorf("formatGraphExpandResult missing %q in output:\n%s", check, formatted)
+		}
 	}
 }

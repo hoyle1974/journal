@@ -208,6 +208,7 @@ func RunQueryWithDebug(ctx context.Context, app FOHEnv, question, source string,
 					"get_entries_by_date_range": true, "query_entities": true, "wikipedia": true,
 					"web_search": true, "list_knowledge": true,
 					"consult_anthropologist": true, "consult_architect": true, "consult_executive": true, "consult_philosopher": true,
+					"graph_expand": true,
 				}
 				if searchTools[discoveredToolName] {
 					searchToolCallCount++
@@ -440,6 +441,7 @@ func RunQueryWithDebug(ctx context.Context, app FOHEnv, question, source string,
 			"get_entries_by_date_range": true, "query_entities": true, "wikipedia": true,
 			"web_search": true, "list_knowledge": true,
 			"consult_anthropologist": true, "consult_architect": true, "consult_executive": true, "consult_philosopher": true,
+			"graph_expand": true,
 		}
 		for _, r := range results {
 			toolCalls = append(toolCalls, map[string]interface{}{
@@ -455,6 +457,21 @@ func RunQueryWithDebug(ctx context.Context, app FOHEnv, question, source string,
 					Response: map[string]any{"result": utils.SanitizePrompt(r.result.Result)},
 				},
 			})
+
+			// Graph RAG: after semantic_search, auto-expand the top result nodes 1 hop and
+			// inject the subgraph context so the LLM has richer entity information.
+			if r.fcName == "semantic_search" && r.result.Success {
+				if graphCtx := ExpandSearchResultsToSubgraph(ctx, app, r.result.Result); graphCtx != "" {
+					functionResponses = append(functionResponses, &genai.Part{
+						FunctionResponse: &genai.FunctionResponse{
+							Name:     "graph_expand",
+							Response: map[string]any{"result": graphCtx},
+						},
+					})
+					retrievedContent.WriteString(graphCtx)
+					retrievedContent.WriteString("\n\n")
+				}
+			}
 
 			if searchTools[r.fcName] {
 				searchToolCalled = true

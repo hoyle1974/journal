@@ -88,6 +88,9 @@ func formatKnowledgeNodes(ctx context.Context, client *firestore.Client, nodes [
 			}
 		}
 		lines = append(lines, line)
+		if n.UUID != "" {
+			lines = append(lines, fmt.Sprintf("   UUID: %s", n.UUID))
+		}
 		if n.Metadata != "" && n.Metadata != "{}" {
 			lines = append(lines, fmt.Sprintf("   Metadata: %s", n.Metadata))
 		}
