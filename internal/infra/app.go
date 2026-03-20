@@ -11,7 +11,6 @@ import (
 	gcs "cloud.google.com/go/storage"
 	"github.com/jackstrohm/jot/internal/config"
 	"github.com/jackstrohm/jot/pkg/storage"
-	"google.golang.org/api/option"
 	"google.golang.org/genai"
 	"github.com/panjf2000/ants/v2"
 )
@@ -268,7 +267,7 @@ func NewApp(ctx context.Context, cfg *config.Config, gdocLog GDocLogFunc, gemini
 	}
 
 	if cfg.ImagesBucket != "" {
-		gcsClient, err := gcs.NewClient(ctx, option.WithQuotaProject(cfg.GoogleCloudProject))
+		gcsClient, err := gcs.NewClient(ctx)
 		if err != nil {
 			app.Logger.Warn("GCS client for image upload failed, image attach disabled", "bucket", cfg.ImagesBucket, "error", err)
 		} else {
