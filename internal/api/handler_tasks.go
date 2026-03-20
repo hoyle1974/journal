@@ -13,7 +13,7 @@ import (
 	"github.com/jackstrohm/jot/internal/agent"
 	"github.com/jackstrohm/jot/internal/gdoc"
 	"github.com/jackstrohm/jot/internal/infra"
-	"github.com/jackstrohm/jot/pkg/journal"
+	"github.com/jackstrohm/jot/pkg/memory"
 	"github.com/jackstrohm/jot/pkg/sms"
 	"github.com/jackstrohm/jot/pkg/telegram"
 	"github.com/jackstrohm/jot/pkg/utils"
@@ -193,10 +193,8 @@ func handleProcessTelegramQuery(s *Server, w http.ResponseWriter, r *http.Reques
 		}
 		// Image with generated caption: return the caption to the user and confirm log (skip FOH).
 		// Save a query log so the image event appears in the recent conversation context for future queries.
-		if fsClient, fsErr := s.App.Firestore(ctx); fsErr == nil {
-			if _, saveErr := journal.SaveQuery(ctx, fsClient, "[Photo]", data.Body, "telegram", false); saveErr != nil {
-				infra.LoggerFrom(ctx).Warn("process-telegram-query: save query log for image failed", "chat_id", data.ChatID, "error", saveErr)
-			}
+		if _, saveErr := memory.SaveQuery(ctx, s.App.(*infra.App), "[Photo]", data.Body, "telegram", false); saveErr != nil {
+			infra.LoggerFrom(ctx).Warn("process-telegram-query: save query log for image failed", "chat_id", data.ChatID, "error", saveErr)
 		}
 		response := data.Body + "\n\nLogged."
 		if err := s.Telegram.SendMessage(ctx, data.ChatID, response); err != nil {
@@ -244,10 +242,8 @@ func handleProcessTelegramQuery(s *Server, w http.ResponseWriter, r *http.Reques
 		} else {
 			ctx = agent.WithEntryAlreadyAdded(ctx, entryUUID)
 			if audioURL != "" {
-				if fsClient, fsErr := app.Firestore(ctx); fsErr == nil {
-					if updateErr := journal.UpdateEntryAudio(ctx, fsClient, entryUUID, audioURL, transcript); updateErr != nil {
-						infra.LoggerFrom(ctx).Warn("process-telegram-query: update entry audio fields failed", "chat_id", data.ChatID, "error", updateErr)
-					}
+				if updateErr := memory.UpdateEntryAudio(ctx, app, entryUUID, audioURL, transcript); updateErr != nil {
+					infra.LoggerFrom(ctx).Warn("process-telegram-query: update entry audio fields failed", "chat_id", data.ChatID, "error", updateErr)
 				}
 			}
 		}
@@ -301,12 +297,7 @@ func sendTelegramResponse(ctx context.Context, s *Server, chatID int64, response
 
 	// Fetch the entry's image_url from Firestore.
 	app := s.App.(*infra.App)
-	fsClient, err := app.Firestore(ctx)
-	if err != nil {
-		infra.LoggerFrom(ctx).Error("process-telegram-query: firestore unavailable for image retrieval", "chat_id", chatID, "error", err)
-		return sendFallback(ctx, s, chatID, caption)
-	}
-	entry, err := journal.GetEntry(ctx, fsClient, entryUUID)
+	entry, err := memory.GetEntry(ctx, app, entryUUID)
 	if err != nil || entry == nil || entry.ImageURL == "" {
 		infra.LoggerFrom(ctx).Warn("process-telegram-query: image entry not found, falling back to text", "chat_id", chatID, "entry_uuid", entryUUID)
 		return sendFallback(ctx, s, chatID, caption)

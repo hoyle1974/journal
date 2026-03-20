@@ -7,7 +7,7 @@ import (
 
 	"github.com/jackstrohm/jot/internal/agent"
 	"github.com/jackstrohm/jot/internal/infra"
-	"github.com/jackstrohm/jot/pkg/journal"
+	"github.com/jackstrohm/jot/pkg/memory"
 	"github.com/jackstrohm/jot/tools"
 )
 
@@ -42,15 +42,12 @@ func registerSpecialistTools() {
 					return tools.MissingParam("query")
 				}
 				journalCtx := ""
-				client, _ := env.Firestore(ctx)
-				if client != nil {
-					if entries, err := journal.GetEntries(ctx, client, 5); err == nil && len(entries) > 0 {
-						var lines []string
-						for _, e := range entries {
-							lines = append(lines, fmt.Sprintf("[%s] %s", e.Timestamp, e.Content))
-						}
-						journalCtx = strings.Join(lines, "\n")
+				if entries, err := memory.GetEntries(ctx, env, 5); err == nil && len(entries) > 0 {
+					var lines []string
+					for _, e := range entries {
+						lines = append(lines, fmt.Sprintf("[%s] %s", e.Timestamp, e.Content))
 					}
+					journalCtx = strings.Join(lines, "\n")
 				}
 				out, err := agent.RunSpecialist(ctx, env, dom, &agent.SpecialistInput{
 					UserMessage: a.Query,

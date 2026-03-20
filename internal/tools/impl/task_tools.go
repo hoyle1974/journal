@@ -6,7 +6,7 @@ import (
 
 	"github.com/jackstrohm/jot/internal/agent"
 	"github.com/jackstrohm/jot/internal/infra"
-	"github.com/jackstrohm/jot/pkg/task"
+	"github.com/jackstrohm/jot/pkg/memory"
 	"github.com/jackstrohm/jot/tools"
 )
 
@@ -76,18 +76,18 @@ func registerTaskTools() {
 			if a.Content == "" {
 				return tools.MissingParam("content")
 			}
-			t := &task.Task{
+			t := &memory.Task{
 				Content:      a.Content,
 				ParentID:     a.ParentID,
 				DueDate:      a.DueDate,
 				SystemPrompt: a.SystemPrompt,
-				Status:       task.StatusPending,
+				Status:       memory.TaskStatusPending,
 			}
 			if cur := agent.CurrentEntryUUIDFrom(ctx); cur != "" {
 				t.JournalEntryIDs = []string{cur}
 			}
 
-			uuid, err := task.CreateTask(ctx, env, t)
+			uuid, err := memory.CreateTask(ctx, env, t)
 			if err != nil {
 				return tools.Fail("Error creating task: %v", err)
 			}
@@ -108,7 +108,7 @@ func registerTaskTools() {
 			if a.TaskID == "" {
 				return tools.MissingParam("task_id")
 			}
-			t, err := task.GetTask(ctx, env, a.TaskID)
+			t, err := memory.GetTask(ctx, env, a.TaskID)
 			if err != nil {
 				return tools.Fail("Error fetching task: %v", err)
 			}
@@ -138,7 +138,7 @@ func registerTaskTools() {
 			if a.TaskID == "" {
 				return tools.MissingParam("task_id")
 			}
-			opts := &task.UpdateTaskOpts{}
+			opts := &memory.UpdateTaskOpts{}
 			if a.Content != "" {
 				opts.Content = &a.Content
 			}
@@ -169,7 +169,7 @@ func registerTaskTools() {
 			if !hasEdit {
 				return tools.Fail("provide at least one field to update: content, parent_id, due_date, system_prompt, or add/remove journal/memory IDs")
 			}
-			err := task.UpdateTask(ctx, env, a.TaskID, opts)
+			err := memory.UpdateTask(ctx, env, a.TaskID, opts)
 			if err != nil {
 				return tools.Fail("Error updating task: %v", err)
 			}
@@ -190,11 +190,11 @@ func registerTaskTools() {
 			if a.Status == "" {
 				return tools.MissingParam("status")
 			}
-			if (a.Status == task.StatusCompleted || a.Status == task.StatusAbandoned) && a.Reasoning == "" {
+			if (a.Status == memory.TaskStatusCompleted || a.Status == memory.TaskStatusAbandoned) && a.Reasoning == "" {
 				return tools.Fail("reasoning is required when marking a task as completed or abandoned")
 			}
 
-			err := task.UpdateTaskStatus(ctx, env, a.TaskID, a.Status, a.Reasoning)
+			err := memory.UpdateTaskStatus(ctx, env, a.TaskID, a.Status, a.Reasoning)
 			if err != nil {
 				return tools.Fail("Error updating task: %v", err)
 			}
@@ -213,10 +213,10 @@ func registerTaskTools() {
 			limit := clampInt(a.Limit, 10, 1, 20)
 			statusFilter := a.Status
 
-			var tasks []task.Task
+			var tasks []memory.Task
 			var err error
 			if query == "" {
-				tasks, err = task.GetOpenRootTasks(ctx, env, limit*2)
+				tasks, err = memory.GetOpenRootTasks(ctx, env, limit*2)
 				if err != nil {
 					return tools.Fail("Error listing tasks: %v", err)
 				}
@@ -228,14 +228,14 @@ func registerTaskTools() {
 				if err != nil {
 					return tools.Fail("Error generating embedding: %v", err)
 				}
-				tasks, err = task.QuerySimilarTasks(ctx, env, vec, limit*2)
+				tasks, err = memory.QuerySimilarTasks(ctx, env, vec, limit*2)
 				if err != nil {
 					return tools.Fail("Error searching tasks: %v", err)
 				}
 			}
 
 			if statusFilter != "" {
-				norm := task.NormalizeStatus(statusFilter) // pending, active, completed, abandoned
+				norm := memory.NormalizeTaskStatus(statusFilter) // pending, active, completed, abandoned
 				filtered := tasks[:0]
 				for _, t := range tasks {
 					if t.Status == norm {
@@ -253,7 +253,7 @@ func registerTaskTools() {
 			if len(tasks) == 0 {
 				return tools.OK("No tasks found.")
 			}
-			return tools.OK("Found %d task(s):\n%s", len(tasks), task.FormatTasksForContext(tasks, 8000))
+			return tools.OK("Found %d task(s):\n%s", len(tasks), memory.FormatTasksForContext(tasks, 8000))
 		},
 	})
 
@@ -270,7 +270,7 @@ func registerTaskTools() {
 			if env == nil {
 				return tools.Fail("No app in context")
 			}
-			result, err := task.BrainstormSubtasks(ctx, env, a.TaskID)
+			result, err := memory.BrainstormSubtasks(ctx, env, a.TaskID)
 			if err != nil {
 				return tools.Fail("Error decomposing task: %v", err)
 			}

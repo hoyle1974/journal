@@ -10,7 +10,6 @@ import (
 
 	"github.com/jackstrohm/jot/internal/agent"
 	"github.com/jackstrohm/jot/internal/infra"
-	"github.com/jackstrohm/jot/pkg/journal"
 	"github.com/jackstrohm/jot/pkg/memory"
 )
 
@@ -23,11 +22,7 @@ func runBackfillLinks(ctx context.Context, app *infra.App, args []string) {
 	_ = fs.Parse(args)
 
 	cfg := app.Config()
-	client, err := app.Firestore(ctx)
-	if err != nil {
-		log.Fatalf("firestore: %v", err)
-	}
-	entries, err := journal.GetEntriesAsc(ctx, client, *limit)
+	entries, err := memory.GetEntriesAsc(ctx, app, *limit)
 	if err != nil {
 		log.Fatalf("get entries: %v", err)
 	}

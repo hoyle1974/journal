@@ -10,7 +10,7 @@ import (
 	"google.golang.org/api/iterator"
 
 	"github.com/jackstrohm/jot/internal/infra"
-	"github.com/jackstrohm/jot/pkg/journal"
+	"github.com/jackstrohm/jot/pkg/memory"
 )
 
 func runCleanTest(ctx context.Context, app *infra.App, args []string) {
@@ -28,7 +28,7 @@ func runCleanTest(ctx context.Context, app *infra.App, args []string) {
 		log.Fatalf("Firestore: %v", err)
 	}
 
-	iter := client.Collection(journal.EntriesCollection).
+	iter := client.Collection(memory.EntriesCollection).
 		Where("source", "==", *source).
 		Documents(ctx)
 	defer iter.Stop()

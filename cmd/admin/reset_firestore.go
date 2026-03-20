@@ -15,19 +15,14 @@ import (
 	"google.golang.org/api/iterator"
 
 	"github.com/jackstrohm/jot/internal/infra"
-	"github.com/jackstrohm/jot/pkg/journal"
 	"github.com/jackstrohm/jot/pkg/memory"
-	"github.com/jackstrohm/jot/pkg/task"
 )
 
 // firestoreCollections lists all Firestore collection names used by the app.
+// In the unified schema, entries, knowledge nodes, tasks, and queries are all stored in KnowledgeCollection ("journal").
 var firestoreCollections = []string{
-	memory.KnowledgeCollection,   // knowledge_nodes
-	task.TasksCollection,         // tasks
-	infra.SystemCollection,       // _system
-	memory.PendingQuestionsCollection, // pending_questions
-	journal.EntriesCollection,    // entries
-	journal.QueriesCollection,    // queries
+	memory.KnowledgeCollection, // journal (unified collection for entries, knowledge, tasks, queries)
+	infra.SystemCollection,     // _system
 }
 
 func runResetFirestore(ctx context.Context, app *infra.App, _ []string) {

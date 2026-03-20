@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/jackstrohm/jot/internal/infra"
-	"github.com/jackstrohm/jot/pkg/journal"
+	"github.com/jackstrohm/jot/pkg/memory"
 	"github.com/jackstrohm/jot/tools"
 )
 
@@ -37,11 +37,7 @@ func registerImageTools() {
 			if a.EntryUUID == "" {
 				return tools.MissingParam("entry_uuid")
 			}
-			client, err := env.Firestore(ctx)
-			if err != nil {
-				return tools.Fail("Error: %v", err)
-			}
-			entry, err := journal.GetEntry(ctx, client, a.EntryUUID)
+			entry, err := memory.GetEntry(ctx, env, a.EntryUUID)
 			if err != nil {
 				return tools.Fail("Could not find entry %q: %v", a.EntryUUID, err)
 			}
@@ -52,7 +48,7 @@ func registerImageTools() {
 			if desc == "" {
 				desc = "(no description available)"
 			}
-			ts := journal.TruncateTimestamp(entry.Timestamp, journal.DateTimeDisplayLen)
+			ts := memory.TruncateTimestamp(entry.Timestamp, memory.DateTimeDisplayLen)
 			sentinel := ImageSentinel(a.EntryUUID)
 			return tools.OK("Image found from %s. Description: %s\n\nInclude this token verbatim in your answer to deliver the image: %s", ts, desc, sentinel)
 		},
