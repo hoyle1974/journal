@@ -68,20 +68,28 @@ func InsertPendingQuestions(ctx context.Context, env infra.ToolEnv, questions []
 		if q.CreatedAt == "" {
 			q.CreatedAt = now
 		}
-		_, err = client.Collection(PendingQuestionsCollection).Doc(q.UUID).Set(ctx, map[string]interface{}{
-			"question":            q.Question,
-			"kind":                q.Kind,
-			"context":             q.Context,
-			"source_entry_ids":    q.SourceEntryIDs,
-			"created_at":          q.CreatedAt,
-			"resolved_at":         q.ResolvedAt,
-			"answer":              q.Answer,
-			"embedding":           q.Embedding,
-			"node_type":           NodeTypePendingQuestion,
-			"significance_weight": 0.1,
-		})
-		if err != nil {
-			return fmt.Errorf("insert pending question: %w", err)
+	}
+
+	for i := 0; i < len(questions); i += firestoreMaxBatchSize {
+		end := min(i+firestoreMaxBatchSize, len(questions))
+		batch := client.Batch()
+		for _, q := range questions[i:end] {
+			ref := client.Collection(PendingQuestionsCollection).Doc(q.UUID)
+			batch.Set(ref, map[string]any{
+				"question":            q.Question,
+				"kind":                q.Kind,
+				"context":             q.Context,
+				"source_entry_ids":    q.SourceEntryIDs,
+				"created_at":          q.CreatedAt,
+				"resolved_at":         q.ResolvedAt,
+				"answer":              q.Answer,
+				"embedding":           q.Embedding,
+				"node_type":           NodeTypePendingQuestion,
+				"significance_weight": 0.1,
+			})
+		}
+		if _, err = batch.Commit(ctx); err != nil {
+			return fmt.Errorf("insert pending questions batch: %w", err)
 		}
 	}
 	return nil

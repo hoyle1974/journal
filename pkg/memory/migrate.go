@@ -22,7 +22,6 @@ func MigrateKnowledgeMetadata(ctx context.Context, client *firestore.Client, col
 	updated := 0
 	batch := client.Batch()
 	batchCount := 0
-	const batchSize = 500
 
 	for {
 		doc, err := iter.Next()
@@ -101,7 +100,7 @@ func MigrateKnowledgeMetadata(ctx context.Context, client *firestore.Client, col
 		batch.Update(doc.Ref, updates)
 		batchCount++
 
-		if batchCount >= batchSize {
+		if batchCount >= firestoreMaxBatchSize {
 			if _, err := batch.Commit(ctx); err != nil {
 				return updated, fmt.Errorf("batch commit: %w", err)
 			}
