@@ -223,7 +223,8 @@ func registerKnowledgeTools() {
 			infra.LoggerFrom(ctx).Debug("get_entity_network root node loaded", "uuid", full.UUID, "content", full.Content)
 
 			// 1-hop traversal: run four lookups in parallel.
-			var discovered, linked, incomingEdges, outgoingEdges []memory.KnowledgeNode
+			var discovered, incomingEdges, outgoingEdges []memory.KnowledgeNode
+		var linked []memory.KnowledgeNodeWithLinks
 			var wg sync.WaitGroup
 			wg.Add(4)
 			go func() {
@@ -260,7 +261,7 @@ func registerKnowledgeTools() {
 			for _, n := range linked {
 				if n.UUID != "" && !seen[n.UUID] {
 					seen[n.UUID] = true
-					merged = append(merged, n)
+					merged = append(merged, n.KnowledgeNode)
 				}
 			}
 			for _, n := range incomingEdges {

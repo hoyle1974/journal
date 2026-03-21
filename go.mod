@@ -98,3 +98,5 @@ require (
 	google.golang.org/genproto/googleapis/api v0.0.0-20260203192932-546029d2fa20 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260226221140-a57be14db171 // indirect
 )
+
+replace github.com/hoyle1974/memory => ../memory
