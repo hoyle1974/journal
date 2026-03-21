@@ -15,7 +15,7 @@ JOT is a single-user "Agentic Second Brain." It creates a high-fidelity bridge b
 
 | Collection   | Purpose              | Logic                                                                 |
 |--------------|----------------------|-----------------------------------------------------------------------|
-| `journal`    | Episodic Memory      | Raw journal logs (`node_type: log`). Every user input is logged here first. Also stores task nodes (`node_type: task`), query/gap nodes (`node_type: query`), and pending-question nodes (`node_type: pending_question`). Unified collection via `pkg/memory`. |
+| `journal`    | Episodic Memory      | Raw journal logs (`node_type: log`). Every user input is logged here first. Also stores task nodes (`node_type: task`), query/gap nodes (`node_type: query`), and pending-question nodes (`node_type: pending_question`). Unified collection via `github.com/hoyle1974/memory`. |
 | `journal`    | Semantic Memory      | Distilled facts (`node_type: person|project|goal|preference|...`). Vector embeddings; context nodes (e.g. `user_profile`, `latest_dream`, `system_evolution`) also live here with significance_weight >= 0.7. |
 | `contexts`   | Active Contexts      | Named, typed (permanent/auto) context nodes for active projects, plans, and living context. |
 | `_system`    | State                | `dream_run`, `deploy_meta`, `sync_lock`, `sync_state`, `sync_debounce`, `onboarding`. |
@@ -70,7 +70,7 @@ Domains: **relationship** (Anthropologist), **work** (Architect), **task** (Exec
 
 ## 5. Engineering Patterns (see also `.cursorrules`)
 
-- **App / DI:** Prefer passing `*infra.App` (or env structs like `FOHEnv`) explicitly. Avoid hiding app in `context.Context` except at the outermost request boundary. Passing the entire application container through context (`infra.GetApp(ctx)`) is a **leaky abstraction**: it breaks module boundaries by allowing deeply nested functions to reach into the context and extract arbitrary dependencies they have not explicitly declared, bypassing proper module encapsulation. Legacy use of `infra.GetApp(ctx)` remains in some packages (e.g. tools, pkg/memory) where refactoring would be large; new code must pass app or narrow interfaces explicitly.
+- **App / DI:** Prefer passing `*infra.App` (or env structs like `FOHEnv`) explicitly. Avoid hiding app in `context.Context` except at the outermost request boundary. Passing the entire application container through context (`infra.GetApp(ctx)`) is a **leaky abstraction**: it breaks module boundaries by allowing deeply nested functions to reach into the context and extract arbitrary dependencies they have not explicitly declared, bypassing proper module encapsulation. Legacy use of `infra.GetApp(ctx)` remains in some packages (e.g. tools) where refactoring would be large; new code must pass app or narrow interfaces explicitly.
 - **Logging:** Use `LoggerFrom(ctx)` for all logs; no raw `slog` or `fmt.Print`. Debug logs must not truncate content.
 - **Tools:** Register via `tools.Register` in `init()`; keep implementations in domain-specific files (e.g. `journal_tools.go`, `web_tools.go`).
 - **Prompt safety:** Wrap user-origin strings in `<user_data>` via `WrapAsUserData()`. Parse LLM output as key/value lines (e.g. `pkg/utils.ParseKeyValueMap`); no JSON from LLM responses.
