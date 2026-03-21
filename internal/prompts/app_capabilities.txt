@@ -55,7 +55,7 @@ Jot is a personal journaling and memory system. It ingests journal entries, extr
 - The Dreamer automatically extracts SPO triples from specialist outputs and writes `predicate` + `object_value` to Firestore on each fact write.
 - **Ingest-time SPO extraction**: At write time, `ExtractAndStoreRelationships` calls the LLM (background goroutine, ~1-2s) to extract SPO triples from new journal entries and stores them as generic knowledge nodes. Subject and object entities are looked up and linked bidirectionally.
 - The `upsert_knowledge` tool supports optional `predicate` and `object_value` parameters so FOH can also write relational facts end-to-end.
-- `get_entity_network` uses 1-hop traversal (`QueryNodesLinkingTo`, `QueryOutgoingEdges`) to surface SPO edges.
+- `get_entity_network` uses 1-hop traversal (`QueryNodesLinkingTo`, `QueryIncomingSPOEdges`, and node-intrinsic `ObjectUUID`) to surface SPO edges.
 
 ## Data terms
 - **Gold**: Permanent, high-value facts for semantic memory.

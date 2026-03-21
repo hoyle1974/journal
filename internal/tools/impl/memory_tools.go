@@ -244,8 +244,8 @@ func registerKnowledgeTools() {
 			}()
 			go func() {
 				defer wg.Done()
-				// Outgoing SPO edges: relational nodes where this entity is the subject (object_uuid == root UUID).
-				outgoingEdges, _ = env.MemoryStore().QueryOutgoingEdges(ctx, full.UUID, 20)
+				// Incoming SPO edges: relational nodes that point to this entity as their object (object_uuid == root UUID).
+				outgoingEdges, _ = env.MemoryStore().QueryIncomingSPOEdges(ctx, full.UUID, 20)
 			}()
 			wg.Wait()
 
