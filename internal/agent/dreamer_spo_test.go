@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jackstrohm/jot/pkg/memory"
+	"github.com/hoyle1974/memory"
 )
 
 // TestMergeDreamerFactsSPOFields verifies that the SPO enrichment logic inside

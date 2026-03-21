@@ -19,7 +19,7 @@ import (
 	"time"
 
 	"github.com/jackstrohm/jot/internal/timeout"
-	"github.com/jackstrohm/jot/pkg/memory"
+	"github.com/hoyle1974/memory"
 	"github.com/joho/godotenv"
 )
 

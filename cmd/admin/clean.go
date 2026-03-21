@@ -10,7 +10,7 @@ import (
 	"google.golang.org/api/iterator"
 
 	"github.com/jackstrohm/jot/internal/infra"
-	"github.com/jackstrohm/jot/pkg/memory"
+	"github.com/hoyle1974/memory"
 )
 
 func runCleanTest(ctx context.Context, app *infra.App, args []string) {

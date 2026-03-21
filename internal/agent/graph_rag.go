@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/jackstrohm/jot/internal/infra"
-	"github.com/jackstrohm/jot/pkg/memory"
+	"github.com/hoyle1974/memory"
 )
 
 // extractUUIDsFromSearchResult parses "   UUID: <id>" lines from formatKnowledgeNodes output.
