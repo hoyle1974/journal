@@ -1,8 +1,17 @@
 package agent
 
 import (
+	"context"
 	"testing"
 )
+
+func TestExpandSearchResultsToSubgraph_NilEnv(t *testing.T) {
+	// Verifies that a nil env returns "" without panicking.
+	result := ExpandSearchResultsToSubgraph(context.Background(), nil, "", nil)
+	if result != "" {
+		t.Errorf("expected empty string for nil env, got %q", result)
+	}
+}
 
 func TestExtractUUIDsFromSearchResult_Valid(t *testing.T) {
 	input := "1. [person] [2026-01-01] Jeff\n   UUID: abc-123\n\n2. [place] [2026-01-01] The Park\n   UUID: def-456\n"

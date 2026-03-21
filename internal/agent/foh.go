@@ -461,7 +461,8 @@ func RunQueryWithDebug(ctx context.Context, app FOHEnv, question, source string,
 			// Graph RAG: after semantic_search, auto-expand the top result nodes 1 hop and
 			// inject the subgraph context so the LLM has richer entity information.
 			if r.fcName == "semantic_search" && r.result.Success {
-				if graphCtx := ExpandSearchResultsToSubgraph(ctx, app, r.result.Result); graphCtx != "" {
+				vec, _ := infra.GenerateEmbedding(ctx, app.Config().GoogleCloudProject, question, infra.EmbedTaskRetrievalQuery)
+				if graphCtx := ExpandSearchResultsToSubgraph(ctx, app, r.result.Result, vec); graphCtx != "" {
 					functionResponses = append(functionResponses, &genai.Part{
 						FunctionResponse: &genai.FunctionResponse{
 							Name:     "graph_expand",

@@ -2,11 +2,9 @@ package agent
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"github.com/jackstrohm/jot/internal/infra"
-	"github.com/hoyle1974/memory"
 )
 
 // extractUUIDsFromSearchResult parses "   UUID: <id>" lines from formatKnowledgeNodes output.
@@ -28,35 +26,15 @@ func extractUUIDsFromSearchResult(result string) []string {
 	return uuids
 }
 
-// formatGraphRAGContext renders a GraphExpandResult as a compact GRAPH CONTEXT block
-// for automatic injection into the FOH context after semantic_search.
-func formatGraphRAGContext(seedID string, r *memory.GraphExpandResult) string {
-	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("GRAPH CONTEXT for %s [%s]:\n", r.Seed.Content, r.Seed.NodeType))
-	writeNodes := func(label string, nodes []memory.KnowledgeNode) {
-		if len(nodes) == 0 {
-			return
-		}
-		sb.WriteString(label + ":\n")
-		for _, n := range nodes {
-			line := fmt.Sprintf("  [%s] %s", n.NodeType, n.Content)
-			if n.Predicate != "" {
-				line += fmt.Sprintf(" (%s)", n.Predicate)
-			}
-			sb.WriteString(line + "\n")
-		}
-	}
-	writeNodes("Related (outgoing SPO)", r.Outgoing)
-	writeNodes("Referenced by", r.Incoming)
-	writeNodes("Linked entities", r.Linked)
-	return strings.TrimRight(sb.String(), "\n")
-}
-
 // ExpandSearchResultsToSubgraph parses node UUIDs from a semantic_search result string,
-// traverses 1 hop from each (capped at 3 seed nodes), and returns a combined GRAPH CONTEXT
-// block for injection into the LLM's next turn. Returns empty string if no UUIDs found or
-// all traversals fail.
-func ExpandSearchResultsToSubgraph(ctx context.Context, env infra.ToolEnv, searchResult string) string {
+// traverses 1 hop from each (capped at 3 seed nodes), and returns a combined Markdown
+// subgraph for injection into the LLM's next turn.
+// queryVector is the embedding of the user's query (from the semantic_search step).
+// A nil queryVector disables semantic pruning (hard cap only).
+func ExpandSearchResultsToSubgraph(ctx context.Context, env infra.ToolEnv, searchResult string, queryVector []float32) string {
+	if ctx == nil || env == nil {
+		return ""
+	}
 	ctx, span := infra.StartSpan(ctx, "agent.graph_rag_expand")
 	defer span.End()
 
@@ -70,12 +48,12 @@ func ExpandSearchResultsToSubgraph(ctx context.Context, env infra.ToolEnv, searc
 
 	var parts []string
 	for _, id := range uuids {
-		result, err := env.MemoryStore().GraphExpand(ctx, id, 1, 8)
+		sg, err := env.MemoryStore().GraphExpand(ctx, id, queryVector, 1, 8)
 		if err != nil {
 			infra.LoggerFrom(ctx).Debug("graph_rag expand error", "uuid", id, "error", err)
 			continue
 		}
-		parts = append(parts, formatGraphRAGContext(id, result))
+		parts = append(parts, sg.ToMarkdown(id))
 	}
 
 	if len(parts) == 0 {
