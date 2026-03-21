@@ -120,7 +120,7 @@ func RunGapDetection(ctx context.Context, app *infra.App, journalContext string,
 			SourceEntryIDs: entryUUIDs,
 		})
 	}
-	return app.Memory.InsertPendingQuestions(ctx, questions)
+	return app.Memory.Agent().InsertPendingQuestions(ctx, questions)
 }
 
 // RunProfileSynthesis merges new persona facts into the permanent user_profile context node.

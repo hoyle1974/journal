@@ -93,7 +93,7 @@ func ProcessEntry(ctx context.Context, app *infra.App, entryUUID, content, times
 	infra.LoggerFrom(ctx).Debug("process-entry: context detection done", "entry_uuid", entryUUID, "contexts_linked", contextCount, "reason", "link entry to active contexts")
 
 	t2 := time.Now()
-	analysis, err := app.Memory.AnalyzeJournalEntry(ctx, content, entryUUID, timestamp)
+	analysis, err := app.Memory.Agent().AnalyzeJournalEntry(ctx, content, entryUUID, timestamp)
 	llm += time.Since(t2)
 	if err != nil {
 		infra.LoggerFrom(ctx).Warn("journal analysis failed", "entry_uuid", entryUUID, "error", err)
