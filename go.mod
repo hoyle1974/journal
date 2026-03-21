@@ -15,7 +15,7 @@ require (
 	github.com/go-playground/validator/v10 v10.30.1
 	github.com/go-shiori/go-readability v0.0.0-20251205110129-5db1dc9836f0
 	github.com/google/uuid v1.6.0
-	github.com/hoyle1974/memory v0.1.0
+	github.com/hoyle1974/memory v0.1.1-0.20260321170054-eacd4d81b3bd
 	github.com/joho/godotenv v1.5.1
 	github.com/martinlindhe/unit v0.0.0-20230420213220-4adfd7d0a0d6
 	github.com/panjf2000/ants/v2 v2.11.5
@@ -98,5 +98,3 @@ require (
 	google.golang.org/genproto/googleapis/api v0.0.0-20260203192932-546029d2fa20 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260226221140-a57be14db171 // indirect
 )
-
-replace github.com/hoyle1974/memory => ../memory
