@@ -38,6 +38,15 @@ type ToolEnv interface {
 	Firestore(ctx context.Context) (*firestore.Client, error)
 	Dispatch(ctx context.Context, req *LLMRequest) (*genai.GenerateContentResponse, error)
 	MemoryStore() *memory.Store
+
+	// Domain-specific accessors — prefer these over MemoryStore() for new code.
+	MemoryEntries()   memory.EntryStore
+	MemoryKnowledge() memory.KnowledgeStore
+	MemoryGraph()     memory.GraphStore
+	MemoryTasks()     memory.TaskStore
+	MemoryContexts()  memory.ContextStore
+	MemoryAgent()     memory.AgentOps
+	MemoryAdmin()     memory.AdminOps
 }
 
 // App holds runtime dependencies (Firestore, Gemini, Logger, worker pools).
@@ -116,6 +125,27 @@ func (a *App) Config() *config.Config {
 func (a *App) MemoryStore() *memory.Store {
 	return a.Memory
 }
+
+// MemoryEntries returns the EntryStore domain view of the memory store.
+func (a *App) MemoryEntries()   memory.EntryStore     { return a.Memory.Entries() }
+
+// MemoryKnowledge returns the KnowledgeStore domain view of the memory store.
+func (a *App) MemoryKnowledge() memory.KnowledgeStore { return a.Memory.Knowledge() }
+
+// MemoryGraph returns the GraphStore domain view of the memory store.
+func (a *App) MemoryGraph()     memory.GraphStore     { return a.Memory.Graph() }
+
+// MemoryTasks returns the TaskStore domain view of the memory store.
+func (a *App) MemoryTasks()     memory.TaskStore      { return a.Memory.Tasks() }
+
+// MemoryContexts returns the ContextStore domain view of the memory store.
+func (a *App) MemoryContexts()  memory.ContextStore   { return a.Memory.Contexts() }
+
+// MemoryAgent returns the AgentOps domain view of the memory store.
+func (a *App) MemoryAgent()     memory.AgentOps       { return a.Memory.Agent() }
+
+// MemoryAdmin returns the AdminOps domain view of the memory store.
+func (a *App) MemoryAdmin()     memory.AdminOps       { return a.Memory.Admin() }
 
 // App returns the app for use when the full *App is required (e.g. AddEntryAndEnqueue, EnqueueSaveQuery, ProcessEntry).
 // Satisfies agent.FOHEnv and similar interfaces that need to pass *App explicitly.
