@@ -8,7 +8,7 @@ import (
 
 	"github.com/jackstrohm/jot/internal/agent"
 	"github.com/jackstrohm/jot/internal/infra"
-	"github.com/jackstrohm/jot/pkg/memory"
+	"github.com/hoyle1974/memory"
 	"github.com/jackstrohm/jot/pkg/utils"
 	"github.com/jackstrohm/jot/tools"
 )
@@ -77,13 +77,13 @@ func registerKnowledgeTools() {
 					Predicate:   predicate,
 					ObjectValue: strings.TrimSpace(a.ObjectValue),
 				}
-				id, err := memory.UpsertSemanticMemoryPreembeddedWithSPO(ctx, env, a.Content, a.NodeType, "thought", 0.7, nil, entryIDs, nil, spo)
+				id, err := env.MemoryStore().UpsertSemanticMemoryPreembeddedWithSPO(ctx, a.Content, a.NodeType, "thought", 0.7, nil, entryIDs, nil, spo)
 				if err != nil {
 					return tools.Fail("Error: %v", err)
 				}
 				return tools.OK("Knowledge node stored successfully (ID: %s)", id)
 			}
-			id, err := memory.UpsertKnowledge(ctx, env, a.Content, a.NodeType, metadata, entryIDs)
+			id, err := env.MemoryStore().UpsertKnowledge(ctx, a.Content, a.NodeType, metadata, entryIDs)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
@@ -122,16 +122,16 @@ func registerKnowledgeTools() {
 			// Single-pass vector search: significance_weight >= 0.7 pre-filter routes directly to
 			// semantic knowledge (Gold), excluding low-value gravel and raw log entries.
 			const semanticMinSignificance = 0.7
-			vectorNodes, vecErr := memory.QuerySimilarSemanticNodes(ctx, env, queryVec, candidateLimit, semanticMinSignificance)
+			vectorNodes, vecErr := env.MemoryStore().QuerySimilarSemanticNodes(ctx, queryVec, candidateLimit, semanticMinSignificance)
 			if vecErr != nil {
 				infra.LogVectorSearchFailed(ctx, "journal(semantic)", vecErr, 0)
 				vectorNodes = nil
 			}
 			// Keyword fallback on the same unified collection for exact-match safety.
-			keywordNodes, _ := memory.SearchKnowledgeNodes(ctx, env, a.Query, candidateLimit)
+			keywordNodes, _ := env.MemoryStore().SearchKnowledgeNodes(ctx, a.Query, candidateLimit)
 
 			fusedNodes := memory.FuseKnowledgeNodes(vectorNodes, keywordNodes, limit*2)
-			nodes, _ := memory.RerankNodes(ctx, env, a.Query, fusedNodes, limit)
+			nodes, _ := env.MemoryStore().RerankNodes(ctx, a.Query, fusedNodes, limit)
 
 			if vecErr != nil && len(nodes) == 0 {
 				return tools.Fail("Error: semantic search failed (vector: %v)", vecErr)
@@ -163,7 +163,7 @@ func registerKnowledgeTools() {
 			if err != nil {
 				return tools.Fail("Error generating embedding: %v", err)
 			}
-			nodes, err := memory.QuerySimilarNodes(ctx, env, queryVec, limit)
+			nodes, err := env.MemoryStore().QuerySimilarNodes(ctx, queryVec, limit)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
@@ -209,14 +209,14 @@ func registerKnowledgeTools() {
 			}
 			span.SetAttributes(map[string]string{"entity_name": entityName})
 
-			node, err := memory.FindEntityNodeByName(ctx, env, entityName)
+			node, err := env.MemoryStore().FindEntityNodeByName(ctx, entityName)
 			if err != nil {
 				return tools.Fail("Error finding entity: %v", err)
 			}
 			if node == nil {
 				return tools.OK("No profile found for '%s'. Try semantic_search for related facts.", entityName)
 			}
-			full, err := memory.GetKnowledgeNodeByID(ctx, env, node.UUID)
+			full, err := env.MemoryStore().GetKnowledgeNodeByID(ctx, node.UUID)
 			if err != nil {
 				return tools.Fail("Error loading entity: %v", err)
 			}
@@ -228,23 +228,23 @@ func registerKnowledgeTools() {
 			wg.Add(4)
 			go func() {
 				defer wg.Done()
-				discovered, _ = memory.DiscoverRelatedNodes(ctx, env, entityName, 10)
+				discovered, _ = env.MemoryStore().DiscoverRelatedNodes(ctx, entityName, 10)
 			}()
 			go func() {
 				defer wg.Done()
 				if len(full.EntityLinks) > 0 {
-					linked, _ = memory.GetKnowledgeNodesByIDs(ctx, env, full.EntityLinks)
+					linked, _ = env.MemoryStore().GetKnowledgeNodesByIDs(ctx, full.EntityLinks)
 				}
 			}()
 			go func() {
 				defer wg.Done()
 				// Incoming edges: nodes whose entity_links reference this entity's UUID.
-				incomingEdges, _ = memory.QueryNodesLinkingTo(ctx, env, full.UUID, 20)
+				incomingEdges, _ = env.MemoryStore().QueryNodesLinkingTo(ctx, full.UUID, 20)
 			}()
 			go func() {
 				defer wg.Done()
 				// Outgoing SPO edges: relational nodes where this entity is the subject (object_uuid == root UUID).
-				outgoingEdges, _ = memory.QueryOutgoingEdges(ctx, env, full.UUID, 20)
+				outgoingEdges, _ = env.MemoryStore().QueryOutgoingEdges(ctx, full.UUID, 20)
 			}()
 			wg.Wait()
 
@@ -295,7 +295,7 @@ func registerKnowledgeTools() {
 					allParts = append(allParts, fmt.Sprintf("JOURNAL: ... and %d more entries", len(full.JournalEntryIDs)-5))
 					break
 				}
-				e, err := memory.GetEntry(ctx, env, eid)
+				e, err := env.MemoryStore().GetEntry(ctx, eid)
 				if err != nil || e == nil {
 					continue
 				}
@@ -341,7 +341,7 @@ func registerSignalTools() {
 		Execute: func(ctx context.Context, env infra.ToolEnv, args any) tools.Result {
 			a := args.(*checkProactiveSignalsArgs)
 			limit := clampInt(a.Limit, 5, 1, 10)
-			signals, err := memory.GetActiveSignals(ctx, env, limit)
+			signals, err := env.MemoryStore().GetActiveSignals(ctx, limit)
 			if err != nil {
 				return tools.Fail("Error fetching signals: %v", err)
 			}

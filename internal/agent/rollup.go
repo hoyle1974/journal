@@ -8,7 +8,6 @@ import (
 
 	"github.com/jackstrohm/jot/internal/infra"
 	"github.com/jackstrohm/jot/internal/prompts"
-	"github.com/jackstrohm/jot/pkg/memory"
 	"github.com/jackstrohm/jot/pkg/utils"
 	"google.golang.org/genai"
 )
@@ -92,7 +91,7 @@ func runRollUpLLM(ctx context.Context, app *infra.App, periodLabel, analysesText
 }
 
 func getEntriesWithAnalysisForRollup(ctx context.Context, env infra.ToolEnv, start, end string, limit int) (analysesText string, sourceIDs []string, err error) {
-	withAnalyses, err := memory.GetEntriesWithAnalysisByDateRange(ctx, env, start, end, limit)
+	withAnalyses, err := env.MemoryStore().GetEntriesWithAnalysisByDateRange(ctx, start, end, limit)
 	if err != nil {
 		return "", nil, err
 	}
@@ -115,7 +114,7 @@ func getEntriesWithAnalysisForRollup(ctx context.Context, env infra.ToolEnv, sta
 }
 
 func getWeeklySummariesForRollup(ctx context.Context, app *infra.App, startDate, endDate string, limit int) (contentText string, sourceIDs []string, err error) {
-	nodes, err := memory.GetWeeklySummaryNodesInRange(ctx, app, startDate, endDate, limit)
+	nodes, err := app.Memory.GetWeeklySummaryNodesInRange(ctx, startDate, endDate, limit)
 	if err != nil {
 		return "", nil, err
 	}
@@ -162,7 +161,7 @@ func RunWeeklyRollup(ctx context.Context, app *infra.App) (int, error) {
 		return 0, err
 	}
 
-	_, err = memory.UpsertSemanticMemory(ctx, app, content, NodeTypeWeeklySummary, "thought", RollUpSignificance, nil, sourceIDs)
+	_, err = app.Memory.UpsertSemanticMemory(ctx, content, NodeTypeWeeklySummary, "thought", RollUpSignificance, nil, sourceIDs)
 	if err != nil {
 		return 0, fmt.Errorf("weekly rollup upsert: %w", err)
 	}
@@ -203,7 +202,7 @@ func RunMonthlyRollup(ctx context.Context, app *infra.App) (int, error) {
 		return 0, err
 	}
 
-	_, err = memory.UpsertSemanticMemory(ctx, app, content, NodeTypeMonthlySummary, "thought", RollUpSignificance, nil, allSourceIDs)
+	_, err = app.Memory.UpsertSemanticMemory(ctx, content, NodeTypeMonthlySummary, "thought", RollUpSignificance, nil, allSourceIDs)
 	if err != nil {
 		return 0, fmt.Errorf("monthly rollup upsert: %w", err)
 	}

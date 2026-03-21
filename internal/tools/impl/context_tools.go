@@ -8,7 +8,7 @@ import (
 
 	"github.com/jackstrohm/jot/internal/agent"
 	"github.com/jackstrohm/jot/internal/infra"
-	"github.com/jackstrohm/jot/pkg/memory"
+	"github.com/hoyle1974/memory"
 	"github.com/jackstrohm/jot/pkg/utils"
 	"github.com/jackstrohm/jot/tools"
 )
@@ -56,7 +56,7 @@ func registerContextTools() {
 		Execute: func(ctx context.Context, env infra.ToolEnv, args any) tools.Result {
 			a := args.(*listContextsArgs)
 			limit := clampInt(a.Limit, 10, 1, 20)
-			contexts, metas, err := memory.GetActiveContexts(ctx, env, limit)
+			contexts, metas, err := env.MemoryStore().GetActiveContexts(ctx, limit)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
@@ -86,7 +86,7 @@ func registerContextTools() {
 				contextType = "auto"
 			}
 
-			existing, _, err := memory.FindContextByName(ctx, env, a.Name)
+			existing, _, err := env.MemoryStore().FindContextByName(ctx, a.Name)
 			if err == nil && existing != nil {
 				return tools.Fail("Context '%s' already exists.", a.Name)
 			}
@@ -95,7 +95,7 @@ func registerContextTools() {
 			if cur := agent.CurrentEntryUUIDFrom(ctx); cur != "" {
 				sourceEntries = []string{cur}
 			}
-			uuid, err := memory.CreateContext(ctx, env, a.Name, a.Description, contextType, nil, sourceEntries)
+			uuid, err := env.MemoryStore().CreateContext(ctx, a.Name, a.Description, contextType, nil, sourceEntries)
 			if err != nil {
 				return tools.Fail("Error creating context: %v", err)
 			}
@@ -124,7 +124,7 @@ func registerContextTools() {
 				boost = 0.1
 			}
 
-			node, meta, err := memory.FindContextByName(ctx, env, a.Name)
+			node, meta, err := env.MemoryStore().FindContextByName(ctx, a.Name)
 			if err != nil || node == nil {
 				return tools.Fail("Context '%s' not found.", a.Name)
 			}
@@ -133,7 +133,7 @@ func registerContextTools() {
 			if cur := agent.CurrentEntryUUIDFrom(ctx); cur != "" {
 				newSourceEntry = &cur
 			}
-			err = memory.TouchContext(ctx, env, node.UUID, newSourceEntry, boost)
+			err = env.MemoryStore().TouchContext(ctx, node.UUID, newSourceEntry, boost)
 			if err != nil {
 				return tools.Fail("Error touching context: %v", err)
 			}
@@ -156,7 +156,7 @@ func registerContextTools() {
 				return tools.MissingParam("context_id")
 			}
 
-			err := memory.DeleteContext(ctx, env, a.ContextID)
+			err := env.MemoryStore().DeleteContext(ctx, a.ContextID)
 			if err != nil {
 				return tools.Fail("Error deleting context: %v", err)
 			}
@@ -172,7 +172,7 @@ func registerSystemEvolutionTools() {
 		Category:    "context",
 		Args:        &tools.NoArgs{},
 		Execute: func(ctx context.Context, env infra.ToolEnv, args any) tools.Result {
-			node, _, err := memory.FindContextByName(ctx, env, "system_evolution")
+			node, _, err := env.MemoryStore().FindContextByName(ctx, "system_evolution")
 			if err != nil {
 				return tools.Fail("Error finding system_evolution context: %v", err)
 			}
@@ -210,7 +210,7 @@ func registerProjectStatusTools() {
 			if err != nil {
 				return tools.Fail("Error finding project: %v", err)
 			}
-			nodes, err := memory.QuerySimilarNodes(ctx, env, vec, 5)
+			nodes, err := env.MemoryStore().QuerySimilarNodes(ctx, vec, 5)
 			if err != nil {
 				return tools.Fail("Error querying knowledge: %v", err)
 			}
@@ -225,7 +225,7 @@ func registerProjectStatusTools() {
 			if err != nil {
 				return tools.Fail("Date range error: %v", err)
 			}
-			withAnalyses, err := memory.GetEntriesWithAnalysisByDateRange(ctx, env, startStr, endStr, 100)
+			withAnalyses, err := env.MemoryStore().GetEntriesWithAnalysisByDateRange(ctx, startStr, endStr, 100)
 			if err != nil {
 				return tools.Fail("Error fetching journal entries: %v", err)
 			}
@@ -299,14 +299,14 @@ func registerProjectStatusTools() {
 			if a.Status == "" {
 				return tools.MissingParam("status")
 			}
-			node, err := memory.FindProjectOrGoalByName(ctx, env, a.ProjectName)
+			node, err := env.MemoryStore().FindProjectOrGoalByName(ctx, a.ProjectName)
 			if err != nil {
 				return tools.Fail("Error finding project: %v", err)
 			}
 			if node == nil {
 				return tools.Fail("Project '%s' not found.", a.ProjectName)
 			}
-			if err := memory.UpdateProjectStatus(ctx, env, node.UUID, a.Status); err != nil {
+			if err := env.MemoryStore().UpdateProjectStatus(ctx, node.UUID, a.Status); err != nil {
 				return tools.Fail("Failed to update status: %v", err)
 			}
 			return tools.OK("Project '%s' is now marked as %s.", a.ProjectName, a.Status)

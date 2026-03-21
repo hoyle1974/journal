@@ -5,7 +5,6 @@ import (
 
 	"github.com/jackstrohm/jot/internal/api"
 	"github.com/jackstrohm/jot/internal/infra"
-	"github.com/jackstrohm/jot/pkg/memory"
 )
 
 // MemoryService handles memory and knowledge operations for the API.
@@ -20,13 +19,13 @@ func NewMemoryService(env infra.ToolEnv) *MemoryService {
 
 // InitializePermanentContexts ensures permanent context nodes exist.
 func (m *MemoryService) InitializePermanentContexts(ctx context.Context) error {
-	return memory.InitializePermanentContexts(ctx, m.env)
+	return m.env.MemoryStore().InitializePermanentContexts(ctx)
 }
 
 // DecayContexts decays stale context weights.
 func (m *MemoryService) DecayContexts(ctx context.Context) (int, error) {
 	infra.LoggerFrom(ctx).Info("function call", "fn", "DecayContexts")
-	count, err := memory.DecayContexts(ctx, m.env)
+	count, err := m.env.MemoryStore().DecayContexts(ctx)
 	if err != nil {
 		infra.LoggerFrom(ctx).Error("function result", "fn", "DecayContexts", "error", err.Error())
 		return 0, err
@@ -38,7 +37,7 @@ func (m *MemoryService) DecayContexts(ctx context.Context) (int, error) {
 // GetUnresolvedPendingQuestions returns pending questions for the API (api type).
 func (m *MemoryService) GetUnresolvedPendingQuestions(ctx context.Context, limit int) ([]api.PendingQuestion, error) {
 	infra.LoggerFrom(ctx).Info("function call", "fn", "GetUnresolvedPendingQuestions", "limit", limit)
-	qs, err := memory.GetUnresolvedPendingQuestions(ctx, m.env, limit)
+	qs, err := m.env.MemoryStore().GetUnresolvedPendingQuestions(ctx, limit)
 	if err != nil {
 		infra.LoggerFrom(ctx).Error("function result", "fn", "GetUnresolvedPendingQuestions", "error", err.Error())
 		return nil, err
@@ -61,7 +60,7 @@ func (m *MemoryService) GetUnresolvedPendingQuestions(ctx context.Context, limit
 // ResolvePendingQuestion marks a question resolved.
 func (m *MemoryService) ResolvePendingQuestion(ctx context.Context, id, answer string) error {
 	infra.LoggerFrom(ctx).Info("function call", "fn", "ResolvePendingQuestion", "id", id, "answer_length", len(answer))
-	if err := memory.ResolvePendingQuestion(ctx, m.env, id, answer); err != nil {
+	if err := m.env.MemoryStore().ResolvePendingQuestion(ctx, id, answer); err != nil {
 		infra.LoggerFrom(ctx).Error("function result", "fn", "ResolvePendingQuestion", "id", id, "error", err.Error())
 		return err
 	}

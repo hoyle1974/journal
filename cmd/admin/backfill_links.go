@@ -10,7 +10,6 @@ import (
 
 	"github.com/jackstrohm/jot/internal/agent"
 	"github.com/jackstrohm/jot/internal/infra"
-	"github.com/jackstrohm/jot/pkg/memory"
 )
 
 const distanceThreshold = 0.15
@@ -22,7 +21,7 @@ func runBackfillLinks(ctx context.Context, app *infra.App, args []string) {
 	_ = fs.Parse(args)
 
 	cfg := app.Config()
-	entries, err := memory.GetEntriesAsc(ctx, app, *limit)
+	entries, err := app.Memory.GetEntriesAsc(ctx, *limit)
 	if err != nil {
 		log.Fatalf("get entries: %v", err)
 	}
@@ -48,7 +47,7 @@ func runBackfillLinks(ctx context.Context, app *infra.App, args []string) {
 			continue
 		}
 
-		existing, err := memory.FindNearestWithThreshold(ctx, app, vec, distanceThreshold)
+		existing, err := app.Memory.FindNearestWithThreshold(ctx, vec, distanceThreshold)
 		if err != nil {
 			log.Printf("[%d/%d] %s find-nearest error: %v", i+1, len(entries), e.UUID, err)
 			errors++
@@ -62,7 +61,7 @@ func runBackfillLinks(ctx context.Context, app *infra.App, args []string) {
 			}
 			if action == "update" {
 				if !*dryRun {
-					if err := memory.AppendJournalEntryIDsToNode(ctx, app, existing.UUID, []string{e.UUID}); err != nil {
+					if err := app.Memory.AppendJournalEntryIDsToNode(ctx, existing.UUID, []string{e.UUID}); err != nil {
 						log.Printf("[%d/%d] %s append link error: %v", i+1, len(entries), e.UUID, err)
 						errors++
 						continue
@@ -78,7 +77,7 @@ func runBackfillLinks(ctx context.Context, app *infra.App, args []string) {
 					} else if extract.Domain == "work" {
 						nodeType = "project"
 					}
-					if _, err := memory.UpsertSemanticMemory(ctx, app, extract.FactToStore, nodeType, extract.Domain, extract.Significance, nil, []string{e.UUID}); err != nil {
+					if _, err := app.Memory.UpsertSemanticMemory(ctx, extract.FactToStore, nodeType, extract.Domain, extract.Significance, nil, []string{e.UUID}); err != nil {
 						log.Printf("[%d/%d] %s upsert error: %v", i+1, len(entries), e.UUID, err)
 						errors++
 						continue
@@ -95,7 +94,7 @@ func runBackfillLinks(ctx context.Context, app *infra.App, args []string) {
 				} else if extract.Domain == "work" {
 					nodeType = "project"
 				}
-				if _, err := memory.UpsertSemanticMemory(ctx, app, extract.FactToStore, nodeType, extract.Domain, extract.Significance, nil, []string{e.UUID}); err != nil {
+				if _, err := app.Memory.UpsertSemanticMemory(ctx, extract.FactToStore, nodeType, extract.Domain, extract.Significance, nil, []string{e.UUID}); err != nil {
 					log.Printf("[%d/%d] %s upsert error: %v", i+1, len(entries), e.UUID, err)
 					errors++
 					continue

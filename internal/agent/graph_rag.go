@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/jackstrohm/jot/internal/infra"
-	"github.com/jackstrohm/jot/pkg/memory"
+	"github.com/hoyle1974/memory"
 )
 
 // extractUUIDsFromSearchResult parses "   UUID: <id>" lines from formatKnowledgeNodes output.
@@ -70,7 +70,7 @@ func ExpandSearchResultsToSubgraph(ctx context.Context, env infra.ToolEnv, searc
 
 	var parts []string
 	for _, id := range uuids {
-		result, err := memory.GraphExpand(ctx, env, id, 1, 8)
+		result, err := env.MemoryStore().GraphExpand(ctx, id, 1, 8)
 		if err != nil {
 			infra.LoggerFrom(ctx).Debug("graph_rag expand error", "uuid", id, "error", err)
 			continue

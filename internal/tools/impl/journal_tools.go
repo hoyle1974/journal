@@ -8,7 +8,7 @@ import (
 
 	"github.com/jackstrohm/jot/internal/infra"
 	"github.com/jackstrohm/jot/internal/prompts"
-	"github.com/jackstrohm/jot/pkg/memory"
+	"github.com/hoyle1974/memory"
 	"github.com/jackstrohm/jot/pkg/utils"
 	"github.com/jackstrohm/jot/tools"
 )
@@ -88,7 +88,7 @@ func registerJournalTools() {
 					limit = 200
 				}
 			}
-			entries, err := memory.GetEntries(ctx, env, limit)
+			entries, err := env.MemoryStore().GetEntries(ctx, limit)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
@@ -111,7 +111,7 @@ func registerJournalTools() {
 		Execute: func(ctx context.Context, env infra.ToolEnv, args any) tools.Result {
 			a := args.(*getOldestEntriesArgs)
 			count := clampInt(a.Count, 10, 1, 50)
-			entries, err := memory.GetEntriesAsc(ctx, env, count)
+			entries, err := env.MemoryStore().GetEntriesAsc(ctx, count)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
@@ -145,7 +145,7 @@ func registerJournalTools() {
 					fetchLimit = 500
 				}
 			}
-			entries, err := memory.GetEntriesByDateRange(ctx, env, startStr, endStr, fetchLimit)
+			entries, err := env.MemoryStore().GetEntriesByDateRange(ctx, startStr, endStr, fetchLimit)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
@@ -186,7 +186,7 @@ func registerJournalTools() {
 				if err != nil {
 					return tools.Fail("Date range error: %v", err)
 				}
-				withAnalyses, err := memory.GetEntriesWithAnalysisByDateRange(ctx, env, startStr, endStr, 200)
+				withAnalyses, err := env.MemoryStore().GetEntriesWithAnalysisByDateRange(ctx, startStr, endStr, 200)
 				if err != nil {
 					return tools.Fail("Error: %v", err)
 				}
@@ -204,7 +204,7 @@ func registerJournalTools() {
 					}
 				}
 			} else {
-				entries, err = memory.SearchEntries(ctx, env, a.Query, searchLimit)
+				entries, err = env.MemoryStore().SearchEntries(ctx, a.Query, searchLimit)
 				if err != nil {
 					return tools.Fail("Error: %v", err)
 				}
@@ -234,7 +234,7 @@ func registerJournalTools() {
 			if a.EndDate != "" {
 				endDate = &a.EndDate
 			}
-			count, err := memory.CountEntries(ctx, env, startDate, endDate)
+			count, err := env.MemoryStore().CountEntries(ctx, startDate, endDate)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
@@ -259,7 +259,7 @@ func registerJournalTools() {
 		Category:    "journal",
 		Args:        &tools.NoArgs{},
 		Execute: func(ctx context.Context, env infra.ToolEnv, args any) tools.Result {
-			entries, err := memory.GetEntries(ctx, env, 100)
+			entries, err := env.MemoryStore().GetEntries(ctx, 100)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
@@ -291,7 +291,7 @@ func registerJournalTools() {
 				return tools.MissingParam("source")
 			}
 			count := clampInt(a.Count, 10, 1, 50)
-			entries, err := memory.GetEntriesBySource(ctx, env, a.Source, count)
+			entries, err := env.MemoryStore().GetEntriesBySource(ctx, a.Source, count)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
@@ -320,7 +320,7 @@ func registerJournalTools() {
 				if err != nil {
 					return tools.Fail("Invalid timeframe: %v", err)
 				}
-				byDate, err := memory.GetEntriesByDateRange(ctx, env, startStr, endStr, 200)
+				byDate, err := env.MemoryStore().GetEntriesByDateRange(ctx, startStr, endStr, 200)
 				if err != nil {
 					return tools.Fail("Error fetching entries: %v", err)
 				}
@@ -331,7 +331,7 @@ func registerJournalTools() {
 					}
 				}
 			} else {
-				entries, err = memory.SearchEntries(ctx, env, a.Topic, 100)
+				entries, err = env.MemoryStore().SearchEntries(ctx, a.Topic, 100)
 				if err != nil {
 					return tools.Fail("Error searching entries: %v", err)
 				}
@@ -388,7 +388,7 @@ func registerJournalTools() {
 				return tools.Fail("Date range error: %v", err)
 			}
 			limit := clampInt(a.Limit, 50, 1, 200)
-			withAnalyses, err := memory.GetEntriesWithAnalysisByDateRange(ctx, env, startStr, endStr, limit)
+			withAnalyses, err := env.MemoryStore().GetEntriesWithAnalysisByDateRange(ctx, startStr, endStr, limit)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
@@ -447,7 +447,7 @@ func registerJournalTools() {
 			if err != nil {
 				return tools.Fail("Invalid date: %v", err)
 			}
-			withAnalyses, err := memory.GetEntriesWithAnalysisByDateRange(ctx, env, startStr, endStr, 100)
+			withAnalyses, err := env.MemoryStore().GetEntriesWithAnalysisByDateRange(ctx, startStr, endStr, 100)
 			if err != nil {
 				return tools.Fail("Error fetching entries: %v", err)
 			}

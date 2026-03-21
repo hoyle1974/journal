@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/jackstrohm/jot/internal/infra"
-	"github.com/jackstrohm/jot/pkg/memory"
 	"github.com/jackstrohm/jot/tools"
 )
 
@@ -36,7 +35,7 @@ func registerQueryTools() {
 		Execute: func(ctx context.Context, env infra.ToolEnv, args any) tools.Result {
 			a := args.(*getRecentQueriesArgs)
 			count := clampInt(a.Count, 10, 1, 50)
-			queries, err := memory.GetRecentQueries(ctx, env, count)
+			queries, err := env.MemoryStore().GetRecentQueries(ctx, count)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
@@ -59,7 +58,7 @@ func registerQueryTools() {
 				return tools.MissingParam("query")
 			}
 			limit := clampInt(a.Limit, 10, 1, 50)
-			queries, err := memory.SearchQueries(ctx, env, a.Query, limit)
+			queries, err := env.MemoryStore().SearchQueries(ctx, a.Query, limit)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
@@ -89,7 +88,7 @@ func registerQueryTools() {
 				return tools.Fail("Date range error: %v", err)
 			}
 			limit := clampInt(a.Limit, 20, 1, 50)
-			queries, err := memory.GetQueriesByDateRange(ctx, env, startStr, endStr, limit)
+			queries, err := env.MemoryStore().GetQueriesByDateRange(ctx, startStr, endStr, limit)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}

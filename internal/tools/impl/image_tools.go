@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/jackstrohm/jot/internal/infra"
-	"github.com/jackstrohm/jot/pkg/memory"
+	"github.com/hoyle1974/memory"
 	"github.com/jackstrohm/jot/tools"
 )
 
@@ -37,7 +37,7 @@ func registerImageTools() {
 			if a.EntryUUID == "" {
 				return tools.MissingParam("entry_uuid")
 			}
-			entry, err := memory.GetEntry(ctx, env, a.EntryUUID)
+			entry, err := env.MemoryStore().GetEntry(ctx, a.EntryUUID)
 			if err != nil {
 				return tools.Fail("Could not find entry %q: %v", a.EntryUUID, err)
 			}

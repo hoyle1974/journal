@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/jackstrohm/jot/internal/infra"
-	"github.com/jackstrohm/jot/pkg/memory"
+	"github.com/hoyle1974/memory"
 	"github.com/jackstrohm/jot/pkg/utils"
 )
 
@@ -56,7 +56,7 @@ func formatKnowledgeNodes(ctx context.Context, env infra.ToolEnv, nodes []memory
 	}
 	var dateMap map[string]string
 	if env != nil {
-		dateMap, _ = memory.GetEntryDates(ctx, env, allIDs)
+		dateMap, _ = env.MemoryStore().GetEntryDates(ctx, allIDs)
 	}
 
 	var lines []string

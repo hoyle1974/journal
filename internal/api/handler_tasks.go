@@ -13,7 +13,6 @@ import (
 	"github.com/jackstrohm/jot/internal/agent"
 	"github.com/jackstrohm/jot/internal/gdoc"
 	"github.com/jackstrohm/jot/internal/infra"
-	"github.com/jackstrohm/jot/pkg/memory"
 	"github.com/jackstrohm/jot/pkg/sms"
 	"github.com/jackstrohm/jot/pkg/telegram"
 	"github.com/jackstrohm/jot/pkg/utils"
@@ -193,7 +192,7 @@ func handleProcessTelegramQuery(s *Server, w http.ResponseWriter, r *http.Reques
 		}
 		// Image with generated caption: return the caption to the user and confirm log (skip FOH).
 		// Save a query log so the image event appears in the recent conversation context for future queries.
-		if _, saveErr := memory.SaveQuery(ctx, s.App.(*infra.App), "[Photo]", data.Body, "telegram", false); saveErr != nil {
+		if _, saveErr := s.App.(*infra.App).Memory.SaveQuery(ctx, "[Photo]", data.Body, "telegram", false); saveErr != nil {
 			infra.LoggerFrom(ctx).Warn("process-telegram-query: save query log for image failed", "chat_id", data.ChatID, "error", saveErr)
 		}
 		response := data.Body + "\n\nLogged."
@@ -242,7 +241,7 @@ func handleProcessTelegramQuery(s *Server, w http.ResponseWriter, r *http.Reques
 		} else {
 			ctx = agent.WithEntryAlreadyAdded(ctx, entryUUID)
 			if audioURL != "" {
-				if updateErr := memory.UpdateEntryAudio(ctx, app, entryUUID, audioURL, transcript); updateErr != nil {
+				if updateErr := app.Memory.UpdateEntryAudio(ctx, entryUUID, audioURL, transcript); updateErr != nil {
 					infra.LoggerFrom(ctx).Warn("process-telegram-query: update entry audio fields failed", "chat_id", data.ChatID, "error", updateErr)
 				}
 			}
@@ -297,7 +296,7 @@ func sendTelegramResponse(ctx context.Context, s *Server, chatID int64, response
 
 	// Fetch the entry's image_url from Firestore.
 	app := s.App.(*infra.App)
-	entry, err := memory.GetEntry(ctx, app, entryUUID)
+	entry, err := app.Memory.GetEntry(ctx, entryUUID)
 	if err != nil || entry == nil || entry.ImageURL == "" {
 		infra.LoggerFrom(ctx).Warn("process-telegram-query: image entry not found, falling back to text", "chat_id", chatID, "entry_uuid", entryUUID)
 		return sendFallback(ctx, s, chatID, caption)

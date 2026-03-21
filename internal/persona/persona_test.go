@@ -7,11 +7,12 @@ import (
 	"cloud.google.com/go/firestore"
 	"github.com/jackstrohm/jot/internal/config"
 	"github.com/jackstrohm/jot/internal/infra"
+	"github.com/hoyle1974/memory"
 	"google.golang.org/genai"
 )
 
-// stubEnv implements infra.ToolEnv with a configurable Config(). Firestore and
-// Dispatch panic if called — the edge-case paths under test never reach them.
+// stubEnv implements infra.ToolEnv with a configurable Config(). Firestore,
+// Dispatch, and MemoryStore panic if called — the edge-case paths under test never reach them.
 type stubEnv struct{ cfg *config.Config }
 
 func (s *stubEnv) Config() *config.Config { return s.cfg }
@@ -20,6 +21,9 @@ func (s *stubEnv) Firestore(_ context.Context) (*firestore.Client, error) {
 }
 func (s *stubEnv) Dispatch(_ context.Context, _ *infra.LLMRequest) (*genai.GenerateContentResponse, error) {
 	panic("Dispatch called unexpectedly")
+}
+func (s *stubEnv) MemoryStore() *memory.Store {
+	panic("MemoryStore called unexpectedly")
 }
 
 func TestApplyEdgeCases(t *testing.T) {

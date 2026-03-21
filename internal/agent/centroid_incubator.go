@@ -8,7 +8,7 @@ import (
 
 	"cloud.google.com/go/firestore"
 	"github.com/jackstrohm/jot/internal/infra"
-	"github.com/jackstrohm/jot/pkg/memory"
+	"github.com/hoyle1974/memory"
 	"github.com/jackstrohm/jot/pkg/utils"
 	"google.golang.org/api/iterator"
 )
@@ -136,7 +136,7 @@ func nameClusterWithLLM(ctx context.Context, app *infra.App, texts []string) (st
 // has an entity_link to a known context node UUID. We detect this by checking
 // whether FindContextByName returns a context whose UUID is in any node's entity_links.
 func clusterHasActiveContextLink(ctx context.Context, app *infra.App, nodes []centroidNode, contextName string) (bool, string) {
-	existing, _, err := memory.FindContextByName(ctx, app, contextName)
+	existing, _, err := app.Memory.FindContextByName(ctx, contextName)
 	if err != nil || existing == nil {
 		return false, ""
 	}
@@ -244,7 +244,7 @@ func RunCentroidIncubation(ctx context.Context, app *infra.App) error {
 		} else {
 			// Create (or find) the context.
 			var ensureErr error
-			contextUUID, ensureErr = memory.EnsureContextExists(ctx, app, contextName)
+			contextUUID, ensureErr = app.Memory.EnsureContextExists(ctx, contextName)
 			if ensureErr != nil {
 				infra.LoggerFrom(ctx).Warn("centroid incubation: failed to ensure context exists", "cluster_idx", clusterIdx, "context_name", contextName, "error", ensureErr)
 				continue
@@ -256,7 +256,7 @@ func RunCentroidIncubation(ctx context.Context, app *infra.App) error {
 		// Step 3c: Link each node to the context.
 		linksAdded := 0
 		for _, cn := range cluster {
-			if linkErr := memory.AddEntityLink(ctx, app, cn.ID, contextUUID); linkErr != nil {
+			if linkErr := app.Memory.AddEntityLink(ctx, cn.ID, contextUUID); linkErr != nil {
 				infra.LoggerFrom(ctx).Warn("centroid incubation: failed to link node to context", "node_uuid", cn.ID, "context_uuid", contextUUID, "error", linkErr)
 				continue
 			}

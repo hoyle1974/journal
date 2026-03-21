@@ -7,7 +7,6 @@ import (
 
 	"github.com/jackstrohm/jot/internal/agent"
 	"github.com/jackstrohm/jot/internal/infra"
-	"github.com/jackstrohm/jot/pkg/memory"
 )
 
 const (
@@ -40,7 +39,7 @@ func RunJanitor(ctx context.Context, app *infra.App) (int, error) {
 	ctx, span := infra.StartSpan(ctx, "cron.janitor")
 	defer span.End()
 
-	deleted, err := memory.EvictStaleNodes(ctx, app, JanitorWeightThreshold, JanitorStaleDays)
+	deleted, err := app.Memory.EvictStaleNodes(ctx, JanitorWeightThreshold, JanitorStaleDays)
 	if err != nil {
 		span.RecordError(err)
 		return 0, err
@@ -55,7 +54,7 @@ func RunPulseAudit(ctx context.Context, app *infra.App) (*PulseResult, error) {
 	ctx, span := infra.StartSpan(ctx, "cron.pulse_audit")
 	defer span.End()
 
-	r, err := memory.CreatePulseAuditSignals(ctx, app, PulseImportanceThreshold, PulseStaleDays)
+	r, err := app.Memory.CreatePulseAuditSignals(ctx, PulseImportanceThreshold, PulseStaleDays)
 	if err != nil {
 		span.RecordError(err)
 		return nil, err

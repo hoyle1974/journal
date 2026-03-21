@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/jackstrohm/jot/internal/infra"
-	"github.com/jackstrohm/jot/pkg/memory"
+	"github.com/hoyle1974/memory"
 	"github.com/jackstrohm/jot/pkg/system"
 )
 
@@ -49,7 +49,7 @@ func RunFirstRunOnboarding(ctx context.Context, app *infra.App) error {
 			CreatedAt: now,
 		})
 	}
-	if err := memory.InsertPendingQuestions(ctx, app, questions); err != nil {
+	if err := app.Memory.InsertPendingQuestions(ctx, questions); err != nil {
 		return fmt.Errorf("onboarding seed questions: %w", err)
 	}
 	infra.LoggerFrom(ctx).Info("first-run onboarding seeded", "count", len(questions))

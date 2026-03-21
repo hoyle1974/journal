@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/jackstrohm/jot/internal/infra"
-	"github.com/jackstrohm/jot/pkg/memory"
 )
 
 // HandleCountdown manages countdown events (uses knowledge/embedding). env is used for embedding; pass from tool Execute.
@@ -23,7 +22,7 @@ func HandleCountdown(ctx context.Context, env infra.ToolEnv, action, name, dateS
 			return "", fmt.Errorf("invalid date format (use YYYY-MM-DD): %v", err)
 		}
 		metadata := fmt.Sprintf(`{"target_date": "%s"}`, dateStr)
-		id, err := memory.UpsertKnowledge(ctx, env, fmt.Sprintf("Countdown: %s", name), "countdown", metadata, nil)
+		id, err := env.MemoryStore().UpsertKnowledge(ctx, fmt.Sprintf("Countdown: %s", name), "countdown", metadata, nil)
 		if err != nil {
 			return "", err
 		}
@@ -38,7 +37,7 @@ func HandleCountdown(ctx context.Context, env infra.ToolEnv, action, name, dateS
 		if err != nil {
 			return "", err
 		}
-		nodes, err := memory.QuerySimilarNodes(ctx, env, queryVec, 5)
+		nodes, err := env.MemoryStore().QuerySimilarNodes(ctx, queryVec, 5)
 		if err != nil {
 			return "", err
 		}
@@ -64,7 +63,7 @@ func HandleCountdown(ctx context.Context, env infra.ToolEnv, action, name, dateS
 		if err != nil {
 			return "", err
 		}
-		nodes, err := memory.QuerySimilarNodes(ctx, env, queryVec, 20)
+		nodes, err := env.MemoryStore().QuerySimilarNodes(ctx, queryVec, 20)
 		if err != nil {
 			return "", err
 		}
@@ -114,7 +113,7 @@ func HandleBookmark(ctx context.Context, env infra.ToolEnv, action, bookmarkURL,
 			"tags": strings.Split(tags, ","),
 		}
 		metaJSON, _ := json.Marshal(metadata)
-		id, err := memory.UpsertKnowledge(ctx, env, fmt.Sprintf("Bookmark: %s", title), "bookmark", string(metaJSON), nil)
+		id, err := env.MemoryStore().UpsertKnowledge(ctx, fmt.Sprintf("Bookmark: %s", title), "bookmark", string(metaJSON), nil)
 		if err != nil {
 			return "", err
 		}
@@ -132,7 +131,7 @@ func HandleBookmark(ctx context.Context, env infra.ToolEnv, action, bookmarkURL,
 		if err != nil {
 			return "", err
 		}
-		nodes, err := memory.QuerySimilarNodes(ctx, env, queryVec, 10)
+		nodes, err := env.MemoryStore().QuerySimilarNodes(ctx, queryVec, 10)
 		if err != nil {
 			return "", err
 		}
@@ -157,7 +156,7 @@ func HandleBookmark(ctx context.Context, env infra.ToolEnv, action, bookmarkURL,
 		if err != nil {
 			return "", err
 		}
-		nodes, err := memory.QuerySimilarNodes(ctx, env, queryVec, 20)
+		nodes, err := env.MemoryStore().QuerySimilarNodes(ctx, queryVec, 20)
 		if err != nil {
 			return "", err
 		}

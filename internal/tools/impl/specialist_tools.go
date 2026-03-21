@@ -7,7 +7,6 @@ import (
 
 	"github.com/jackstrohm/jot/internal/agent"
 	"github.com/jackstrohm/jot/internal/infra"
-	"github.com/jackstrohm/jot/pkg/memory"
 	"github.com/jackstrohm/jot/tools"
 )
 
@@ -42,7 +41,7 @@ func registerSpecialistTools() {
 					return tools.MissingParam("query")
 				}
 				journalCtx := ""
-				if entries, err := memory.GetEntries(ctx, env, 5); err == nil && len(entries) > 0 {
+				if entries, err := env.MemoryStore().GetEntries(ctx, 5); err == nil && len(entries) > 0 {
 					var lines []string
 					for _, e := range entries {
 						lines = append(lines, fmt.Sprintf("[%s] %s", e.Timestamp, e.Content))

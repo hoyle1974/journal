@@ -10,7 +10,7 @@ import (
 	"google.golang.org/genai"
 	"github.com/jackstrohm/jot/internal/prompts"
 	"github.com/jackstrohm/jot/internal/infra"
-	"github.com/jackstrohm/jot/pkg/memory"
+	"github.com/hoyle1974/memory"
 	"github.com/jackstrohm/jot/pkg/utils"
 	"github.com/jackstrohm/jot/tools"
 )
@@ -36,7 +36,7 @@ func RunGapDetection(ctx context.Context, app *infra.App, journalContext string,
 	if err != nil {
 		return fmt.Errorf("gap detection embedding: %w", err)
 	}
-	nodes, err := memory.QuerySimilarNodes(ctx, app, vec, 15)
+	nodes, err := app.Memory.QuerySimilarNodes(ctx, vec, 15)
 	if err != nil {
 		return fmt.Errorf("gap detection query nodes: %w", err)
 	}
@@ -53,7 +53,7 @@ func RunGapDetection(ctx context.Context, app *infra.App, journalContext string,
 	capabilitiesAndTools := prompts.AppCapabilities() + "\n\n## Existing tools (compact)\n" + tools.GetCompactDirectory()
 
 	// Build the pending questions block for upstream dedup awareness.
-	pendingQs, pErr := memory.GetUnresolvedPendingQuestions(ctx, app, 20)
+	pendingQs, pErr := app.Memory.GetUnresolvedPendingQuestions(ctx, 20)
 	var pendingQuestionsBlock string
 	if pErr != nil {
 		infra.LoggerFrom(ctx).Warn("gap detection: failed to fetch pending questions", "error", pErr)
@@ -120,7 +120,7 @@ func RunGapDetection(ctx context.Context, app *infra.App, journalContext string,
 			SourceEntryIDs: entryUUIDs,
 		})
 	}
-	return memory.InsertPendingQuestions(ctx, app, questions)
+	return app.Memory.InsertPendingQuestions(ctx, questions)
 }
 
 // RunProfileSynthesis merges new persona facts into the permanent user_profile context node.
@@ -132,7 +132,7 @@ func RunProfileSynthesis(ctx context.Context, app *infra.App, personaFacts []str
 		return nil
 	}
 
-	node, _, err := memory.FindContextByName(ctx, app, "user_profile")
+	node, _, err := app.Memory.FindContextByName(ctx, "user_profile")
 	if err != nil || node == nil {
 		return fmt.Errorf("user_profile node not found: %w", err)
 	}
@@ -173,7 +173,7 @@ func RunEvolutionSynthesis(ctx context.Context, env infra.ToolEnv, journalSummar
 	if env == nil {
 		return nil, fmt.Errorf("env required")
 	}
-	queries, err := memory.GetRecentQueries(ctx, env, 50)
+	queries, err := env.MemoryStore().GetRecentQueries(ctx, 50)
 	if err != nil {
 		return nil, fmt.Errorf("get recent queries: %w", err)
 	}
@@ -192,11 +192,11 @@ func RunEvolutionSynthesis(ctx context.Context, env infra.ToolEnv, journalSummar
 
 	// Big Picture: pass user persona and active contexts so the Auditor can reason about mission-level gaps.
 	personaContent := ""
-	if node, _, err := memory.FindContextByName(ctx, env, "user_profile"); err == nil && node != nil && node.Content != "" {
+	if node, _, err := env.MemoryStore().FindContextByName(ctx, "user_profile"); err == nil && node != nil && node.Content != "" {
 		personaContent = node.Content
 	}
 	activeContextsSummary := ""
-	if nodes, metas, err := memory.GetActiveContexts(ctx, env, 10); err == nil && len(nodes) > 0 {
+	if nodes, metas, err := env.MemoryStore().GetActiveContexts(ctx, 10); err == nil && len(nodes) > 0 {
 		var lines []string
 		for i := range nodes {
 			if i >= len(metas) {
@@ -218,7 +218,7 @@ func RunEvolutionSynthesis(ctx context.Context, env infra.ToolEnv, journalSummar
 
 	// EngineerQuestions are no longer written to PendingQuestions; they are passed to the Dream Narrative only.
 
-	node, _, err := memory.FindContextByName(ctx, env, "system_evolution")
+	node, _, err := env.MemoryStore().FindContextByName(ctx, "system_evolution")
 	if err != nil || node == nil {
 		return nil, fmt.Errorf("system_evolution context not found: %w", err)
 	}

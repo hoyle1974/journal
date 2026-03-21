@@ -14,7 +14,7 @@ import (
 	"google.golang.org/api/iterator"
 
 	"github.com/jackstrohm/jot/internal/infra"
-	"github.com/jackstrohm/jot/pkg/memory"
+	"github.com/hoyle1974/memory"
 )
 
 type entryRow struct {
@@ -98,7 +98,7 @@ func runDedupEntries(ctx context.Context, app *infra.App, args []string) {
 			end = len(toDelete)
 		}
 		batch := toDelete[i:end]
-		if err := memory.DeleteEntries(ctx, app, batch); err != nil {
+		if err := app.Memory.DeleteEntries(ctx, batch); err != nil {
 			log.Fatalf("DeleteEntries: %v", err)
 		}
 		log.Printf("Deleted %d entries (batch %d)", len(batch), i/batchLimit+1)

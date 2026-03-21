@@ -6,7 +6,7 @@ import (
 
 	"github.com/jackstrohm/jot/internal/agent"
 	"github.com/jackstrohm/jot/internal/infra"
-	"github.com/jackstrohm/jot/pkg/memory"
+	"github.com/hoyle1974/memory"
 	"github.com/jackstrohm/jot/tools"
 )
 
@@ -87,7 +87,7 @@ func registerTaskTools() {
 				t.JournalEntryIDs = []string{cur}
 			}
 
-			uuid, err := memory.CreateTask(ctx, env, t)
+			uuid, err := env.MemoryStore().CreateTask(ctx, t)
 			if err != nil {
 				return tools.Fail("Error creating task: %v", err)
 			}
@@ -108,7 +108,7 @@ func registerTaskTools() {
 			if a.TaskID == "" {
 				return tools.MissingParam("task_id")
 			}
-			t, err := memory.GetTask(ctx, env, a.TaskID)
+			t, err := env.MemoryStore().GetTask(ctx, a.TaskID)
 			if err != nil {
 				return tools.Fail("Error fetching task: %v", err)
 			}
@@ -169,7 +169,7 @@ func registerTaskTools() {
 			if !hasEdit {
 				return tools.Fail("provide at least one field to update: content, parent_id, due_date, system_prompt, or add/remove journal/memory IDs")
 			}
-			err := memory.UpdateTask(ctx, env, a.TaskID, opts)
+			err := env.MemoryStore().UpdateTask(ctx, a.TaskID, opts)
 			if err != nil {
 				return tools.Fail("Error updating task: %v", err)
 			}
@@ -194,7 +194,7 @@ func registerTaskTools() {
 				return tools.Fail("reasoning is required when marking a task as completed or abandoned")
 			}
 
-			err := memory.UpdateTaskStatus(ctx, env, a.TaskID, a.Status, a.Reasoning)
+			err := env.MemoryStore().UpdateTaskStatus(ctx, a.TaskID, a.Status, a.Reasoning)
 			if err != nil {
 				return tools.Fail("Error updating task: %v", err)
 			}
@@ -216,7 +216,7 @@ func registerTaskTools() {
 			var tasks []memory.Task
 			var err error
 			if query == "" {
-				tasks, err = memory.GetOpenRootTasks(ctx, env, limit*2)
+				tasks, err = env.MemoryStore().GetOpenRootTasks(ctx, limit*2)
 				if err != nil {
 					return tools.Fail("Error listing tasks: %v", err)
 				}
@@ -228,7 +228,7 @@ func registerTaskTools() {
 				if err != nil {
 					return tools.Fail("Error generating embedding: %v", err)
 				}
-				tasks, err = memory.QuerySimilarTasks(ctx, env, vec, limit*2)
+				tasks, err = env.MemoryStore().QuerySimilarTasks(ctx, vec, limit*2)
 				if err != nil {
 					return tools.Fail("Error searching tasks: %v", err)
 				}
@@ -270,7 +270,7 @@ func registerTaskTools() {
 			if env == nil {
 				return tools.Fail("No app in context")
 			}
-			result, err := memory.BrainstormSubtasks(ctx, env, a.TaskID)
+			result, err := env.MemoryStore().BrainstormSubtasks(ctx, a.TaskID)
 			if err != nil {
 				return tools.Fail("Error decomposing task: %v", err)
 			}

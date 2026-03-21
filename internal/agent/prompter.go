@@ -8,7 +8,7 @@ import (
 
 	"github.com/jackstrohm/jot/internal/infra"
 	"github.com/jackstrohm/jot/internal/prompts"
-	"github.com/jackstrohm/jot/pkg/memory"
+	"github.com/hoyle1974/memory"
 	"github.com/jackstrohm/jot/pkg/utils"
 )
 
@@ -35,7 +35,7 @@ func BuildSystemPrompt(ctx context.Context, env infra.ToolEnv) (string, error) {
 
 	// 0. Root Identity (always inject user_profile so the model knows who it is serving)
 	identityBlock := ""
-	if node, _, err := memory.FindContextByName(ctx, env, "user_profile"); err == nil && node != nil && node.Content != "" {
+	if node, _, err := env.MemoryStore().FindContextByName(ctx, "user_profile"); err == nil && node != nil && node.Content != "" {
 		identityBlock = "\n---\n## ROOT IDENTITY (who you are serving)\n# Primary user and context. Use this as the authority for preferences and priorities.\n\n" + strings.TrimSpace(node.Content)
 	}
 	identityWrapped := identityBlock
@@ -44,7 +44,7 @@ func BuildSystemPrompt(ctx context.Context, env infra.ToolEnv) (string, error) {
 	}
 
 	// 1. Active Contexts
-	nodes, metas, _ := memory.GetActiveContexts(ctx, env, 5)
+	nodes, metas, _ := env.MemoryStore().GetActiveContexts(ctx, 5)
 	activeContextItems := make([]ActiveContextItem, 0, len(nodes))
 	for i := range nodes {
 		if i >= len(metas) {
@@ -65,7 +65,7 @@ func BuildSystemPrompt(ctx context.Context, env infra.ToolEnv) (string, error) {
 	// 2. Recent Conversation
 	var queries []memory.QueryLog
 	if env != nil {
-		queries, _ = memory.GetRecentQueries(ctx, env, 5)
+		queries, _ = env.MemoryStore().GetRecentQueries(ctx, 5)
 	}
 	recentConversation := formatConversationSection(queries)
 	recentConversationWrapped := recentConversation
@@ -76,7 +76,7 @@ func BuildSystemPrompt(ctx context.Context, env infra.ToolEnv) (string, error) {
 	// 3. Proactive Alerts
 	proactiveSignals := ""
 	proactiveSignalsWrapped := ""
-	if signals, err := memory.GetActiveSignals(ctx, env, 3); err == nil && signals != "" {
+	if signals, err := env.MemoryStore().GetActiveSignals(ctx, 3); err == nil && signals != "" {
 		proactiveSignals = formatAlertsSection(signals)
 		proactiveSignalsWrapped = utils.WrapAsUserData(proactiveSignals)
 	}
@@ -86,7 +86,7 @@ func BuildSystemPrompt(ctx context.Context, env infra.ToolEnv) (string, error) {
 	// 4. Knowledge Gaps
 	var gapQueries []memory.QueryLog
 	if env != nil {
-		gapQueries, _ = memory.GetRecentGapQueries(ctx, env, 3)
+		gapQueries, _ = env.MemoryStore().GetRecentGapQueries(ctx, 3)
 	}
 	knowledgeGapBlock := formatKnowledgeGapSection(gapQueries)
 	knowledgeGapBlockWrapped := knowledgeGapBlock
@@ -95,7 +95,7 @@ func BuildSystemPrompt(ctx context.Context, env infra.ToolEnv) (string, error) {
 	}
 
 	// 5. Open Tasks (root)
-	roots, _ := memory.GetOpenRootTasks(ctx, env, 15)
+	roots, _ := env.MemoryStore().GetOpenRootTasks(ctx, 15)
 	openTodoBlock := formatTodoSection(roots)
 	openTodoBlockWrapped := openTodoBlock
 	if openTodoBlock != "" {
@@ -236,7 +236,7 @@ func buildActiveProjectBlock(ctx context.Context, env infra.ToolEnv, roots []mem
 	}
 	for i := 0; i < limit; i++ {
 		parent := roots[i]
-		children, err := memory.GetChildTasks(ctx, env, parent.UUID, 10)
+		children, err := env.MemoryStore().GetChildTasks(ctx, parent.UUID, 10)
 		if err != nil || len(children) == 0 {
 			continue
 		}

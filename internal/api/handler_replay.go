@@ -7,7 +7,6 @@ import (
 
 	"github.com/jackstrohm/jot/internal/agent"
 	"github.com/jackstrohm/jot/internal/infra"
-	"github.com/jackstrohm/jot/pkg/memory"
 )
 
 // handleReplay accepts a multipart form with content, source, timestamp, and optional
@@ -97,7 +96,7 @@ func handleReplay(s *Server, w http.ResponseWriter, r *http.Request) (any, error
 
 	// Persist audio URL and transcript (content IS the transcript for audio entries).
 	if audioURL != "" {
-		if updateErr := memory.UpdateEntryAudio(ctx, app, entryUUID, audioURL, content); updateErr != nil {
+		if updateErr := app.Memory.UpdateEntryAudio(ctx, entryUUID, audioURL, content); updateErr != nil {
 			infra.LoggerFrom(ctx).Warn("replay: UpdateEntryAudio failed", "entry_uuid", entryUUID, "error", updateErr)
 		}
 	}
