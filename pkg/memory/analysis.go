@@ -5,10 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"google.golang.org/genai"
-	"github.com/jackstrohm/jot/internal/prompts"
-	"github.com/jackstrohm/jot/internal/infra"
-	"github.com/jackstrohm/jot/pkg/utils"
+	memoryprompts "github.com/jackstrohm/jot/pkg/memory/prompts"
 )
 
 const (
@@ -51,9 +48,9 @@ type JournalAnalysis struct {
 	SourceID  string     `json:"source_id"`
 }
 
-// parseKeyValueAnalysis parses key/value + list sections (no JSON) into structured fields using the generic K/V parser.
+// parseKeyValueAnalysis parses key/value + list sections into structured fields.
 func parseKeyValueAnalysis(text string) (summary, mood, category string, tags []string, entities []Entity, openLoops []OpenLoop, err error) {
-	simple, sections := utils.ParseKeyValueMap(text)
+	simple, sections := parseKeyValueMap(text)
 	summary = simple["summary"]
 	mood = simple["mood"]
 	category = simple["category"]
@@ -93,51 +90,40 @@ func parseKeyValueAnalysis(text string) (summary, mood, category string, tags []
 	return summary, mood, category, tags, entities, openLoops, nil
 }
 
-// AnalyzeJournalEntry uses Gemini with key/value output (no JSON schema) to analyze a journal entry.
-// env supplies config and LLM dispatch; pass explicitly from the caller (e.g. ToolEnv).
-func AnalyzeJournalEntry(ctx context.Context, env infra.ToolEnv, entryContent, entryUUID, entryTimestamp string) (*JournalAnalysis, error) {
-	ctx, span := infra.StartSpan(ctx, "memory.analyze")
-	defer span.End()
-
+// AnalyzeJournalEntry uses the LLM to analyze a journal entry.
+func (s *Store) AnalyzeJournalEntry(ctx context.Context, entryContent, entryUUID, entryTimestamp string) (*JournalAnalysis, error) {
 	if len(entryContent) < 20 {
 		return nil, nil
-	}
-	if env == nil || env.Config() == nil {
-		infra.LoggerFrom(ctx).Warn("journal analysis skipped", "reason", "no env or config")
-		return nil, fmt.Errorf("no env or config")
 	}
 
 	entryDate := entryTimestamp
 	if len(entryDate) > dateDisplayLen {
-		entryDate = utils.TruncateString(entryDate, dateDisplayLen)
+		entryDate = truncateString(entryDate, dateDisplayLen)
 	}
 	if entryDate == "" {
 		entryDate = "unknown"
 	}
 
-	prompt, err := prompts.BuildJournalAnalyze(prompts.JournalAnalyzeData{
+	prompt, err := memoryprompts.BuildJournalAnalyze(memoryprompts.JournalAnalyzeData{
 		EntryID:   entryUUID,
 		Date:      entryDate,
-		EntryText: utils.WrapAsUserData(utils.SanitizePrompt(entryContent)),
+		EntryText: wrapAsUserData(sanitizePrompt(entryContent)),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("build journal analyze prompt: %w", err)
 	}
-	req := &infra.LLMRequest{
-		Parts:     []*genai.Part{{Text: prompt}},
-		Model:     env.Config().GeminiModel,
-		GenConfig: &infra.GenConfig{MaxOutputTokens: 512},
-	}
-	resp, err := env.Dispatch(ctx, req)
+	text, err := s.llm.Dispatch(ctx, LLMRequest{
+		UserPrompt: prompt,
+		MaxTokens:  512,
+	})
 	if err != nil {
-		infra.LoggerFrom(ctx).Warn("journal analysis failed", "error", err)
+		s.log.Warn("journal analysis failed", "error", err)
 		return nil, fmt.Errorf("journal analysis: %w", err)
 	}
 
-	text := strings.TrimSpace(infra.ExtractText(resp))
-	summary, mood, category, tags, entities, openLoops, parseErr := parseKeyValueAnalysis(text)
+	summary, mood, category, tags, entities, openLoops, parseErr := parseKeyValueAnalysis(strings.TrimSpace(text))
 	if parseErr != nil {
-		infra.LoggerFrom(ctx).Warn("failed to parse journal analysis response", "error", parseErr)
+		s.log.Warn("failed to parse journal analysis response", "error", parseErr)
 		return nil, fmt.Errorf("journal analysis parse: %w", parseErr)
 	}
 	if len([]rune(summary)) > maxSummaryRunes {
@@ -167,7 +153,6 @@ func AnalyzeJournalEntry(ctx context.Context, env infra.ToolEnv, entryContent, e
 }
 
 // sanitizeTag returns a tag suitable for storage, or empty string to drop.
-// Drops tags that are over maxTagLen, have more than maxTagWords, or contain sentence-like or reasoning content.
 func sanitizeTag(t string) string {
 	t = strings.TrimSpace(t)
 	if t == "" {
@@ -179,7 +164,6 @@ func sanitizeTag(t string) string {
 	if strings.Contains(t, ". ") {
 		return ""
 	}
-	// Drop meta-commentary / reasoning (e.g. "drop-off - status? not for gideon")
 	if strings.Contains(t, "?") || strings.Contains(t, " - ") {
 		return ""
 	}

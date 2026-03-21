@@ -3,12 +3,9 @@ package memory
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"time"
 
 	"cloud.google.com/go/firestore"
-	"github.com/jackstrohm/jot/internal/infra"
-	"github.com/jackstrohm/jot/pkg/utils"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -16,9 +13,9 @@ import (
 // PendingQuestionsCollection is the Firestore collection name for pending questions.
 const PendingQuestionsCollection = KnowledgeCollection
 
-// TelegramQuestionStateCollection tracks which pending question is currently being
-// asked to each Telegram chat. Documents are keyed by string(chat_id).
-const TelegramQuestionStateCollection = "telegram_question_state"
+// ActiveQuestionStateCollection tracks which pending question is currently being
+// asked to each client. Documents are keyed by clientID string.
+const ActiveQuestionStateCollection = "telegram_question_state"
 
 // PendingQuestion is a gap or contradiction detected during Dreamer synthesis, to be clarified by the user.
 type PendingQuestion struct {
@@ -34,19 +31,13 @@ type PendingQuestion struct {
 }
 
 // InsertPendingQuestions writes one or more pending questions to Firestore.
-func InsertPendingQuestions(ctx context.Context, env infra.ToolEnv, questions []PendingQuestion) error {
+func (s *Store) InsertPendingQuestions(ctx context.Context, questions []PendingQuestion) error {
 	if len(questions) == 0 {
 		return nil
 	}
-	if env == nil {
-		return fmt.Errorf("env required")
-	}
-
-	ctx, span := infra.StartSpan(ctx, "pending.insertPendingQuestions")
-	defer span.End()
 
 	// Filter out duplicates before writing.
-	filtered, err := filterDuplicatePendingQuestions(ctx, env, questions)
+	filtered, err := s.filterDuplicatePendingQuestions(ctx, questions)
 	if err != nil {
 		return fmt.Errorf("filter duplicate questions: %w", err)
 	}
@@ -55,15 +46,11 @@ func InsertPendingQuestions(ctx context.Context, env infra.ToolEnv, questions []
 	}
 	questions = filtered
 
-	client, err := env.Firestore(ctx)
-	if err != nil {
-		return fmt.Errorf("firestore: %w", err)
-	}
 	now := time.Now().Format(time.RFC3339)
 	for i := range questions {
 		q := &questions[i]
 		if q.UUID == "" {
-			q.UUID = infra.GenerateUUID()
+			q.UUID = generateUUID()
 		}
 		if q.CreatedAt == "" {
 			q.CreatedAt = now
@@ -72,9 +59,9 @@ func InsertPendingQuestions(ctx context.Context, env infra.ToolEnv, questions []
 
 	for i := 0; i < len(questions); i += firestoreMaxBatchSize {
 		end := min(i+firestoreMaxBatchSize, len(questions))
-		batch := client.Batch()
+		batch := s.db.Batch()
 		for _, q := range questions[i:end] {
-			ref := client.Collection(PendingQuestionsCollection).Doc(q.UUID)
+			ref := s.db.Collection(PendingQuestionsCollection).Doc(q.UUID)
 			batch.Set(ref, map[string]any{
 				"question":            q.Question,
 				"kind":                q.Kind,
@@ -96,15 +83,8 @@ func InsertPendingQuestions(ctx context.Context, env infra.ToolEnv, questions []
 }
 
 // GetPendingQuestion fetches a single pending question by its UUID.
-func GetPendingQuestion(ctx context.Context, env infra.ToolEnv, uuid string) (*PendingQuestion, error) {
-	if env == nil {
-		return nil, fmt.Errorf("env required")
-	}
-	client, err := env.Firestore(ctx)
-	if err != nil {
-		return nil, err
-	}
-	doc, err := client.Collection(PendingQuestionsCollection).Doc(uuid).Get(ctx)
+func (s *Store) GetPendingQuestion(ctx context.Context, uuid string) (*PendingQuestion, error) {
+	doc, err := s.db.Collection(PendingQuestionsCollection).Doc(uuid).Get(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -117,45 +97,34 @@ func GetPendingQuestion(ctx context.Context, env infra.ToolEnv, uuid string) (*P
 }
 
 // GetUnresolvedPendingQuestions returns pending questions that have not been resolved, newest first.
-func GetUnresolvedPendingQuestions(ctx context.Context, env infra.ToolEnv, limit int) ([]PendingQuestion, error) {
-	if env == nil {
-		return nil, fmt.Errorf("env required")
-	}
-
-	ctx, span := infra.StartSpan(ctx, "pending.getUnresolvedPendingQuestions")
-	defer span.End()
-
-	client, err := env.Firestore(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("firestore: %w", err)
-	}
+func (s *Store) GetUnresolvedPendingQuestions(ctx context.Context, limit int) ([]PendingQuestion, error) {
 	if limit <= 0 {
 		limit = 20
 	}
-	query := client.Collection(PendingQuestionsCollection).
+	query := s.db.Collection(PendingQuestionsCollection).
 		Where("node_type", "==", NodeTypePendingQuestion).
 		OrderBy("created_at", firestore.Desc).
 		Limit(100)
-	out, err := infra.QueryDocuments(ctx, query, func(doc *firestore.DocumentSnapshot) (PendingQuestion, error) {
+	out, err := queryDocuments(ctx, query, func(doc *firestore.DocumentSnapshot) (PendingQuestion, error) {
 		data := doc.Data()
-		if infra.GetStringField(data, "resolved_at") != "" {
+		if getStringField(data, "resolved_at") != "" {
 			return PendingQuestion{}, errSkipEntry
 		}
 		q := PendingQuestion{
 			UUID:       doc.Ref.ID,
-			Question:   infra.GetStringField(data, "question"),
-			Kind:       infra.GetStringField(data, "kind"),
-			Context:    infra.GetStringField(data, "context"),
-			CreatedAt:  infra.GetStringField(data, "created_at"),
-			ResolvedAt: infra.GetStringField(data, "resolved_at"),
-			Answer:     infra.GetStringField(data, "answer"),
-			Embedding:  infra.GetFloat32SliceField(data, "embedding"),
+			Question:   getStringField(data, "question"),
+			Kind:       getStringField(data, "kind"),
+			Context:    getStringField(data, "context"),
+			CreatedAt:  getStringField(data, "created_at"),
+			ResolvedAt: getStringField(data, "resolved_at"),
+			Answer:     getStringField(data, "answer"),
+			Embedding:  getFloat32SliceField(data, "embedding"),
 		}
-		q.SourceEntryIDs = infra.GetStringSliceField(data, "source_entry_ids")
+		q.SourceEntryIDs = getStringSliceField(data, "source_entry_ids")
 		return q, nil
 	})
 	if err != nil {
-		return nil, infra.WrapFirestoreIndexError(err)
+		return nil, wrapFirestoreIndexError(err)
 	}
 	if len(out) > limit {
 		out = out[:limit]
@@ -164,70 +133,54 @@ func GetUnresolvedPendingQuestions(ctx context.Context, env infra.ToolEnv, limit
 }
 
 // GetRecentlyResolvedPendingQuestions returns pending questions resolved after `since`, newest first.
-// Used by the dedup filter to avoid re-asking recently answered questions.
-// Scans at most 200 documents server-side (created_at DESC); client-side filters resolved_at != "".
-func GetRecentlyResolvedPendingQuestions(ctx context.Context, env infra.ToolEnv, since time.Time) ([]PendingQuestion, error) {
-	if env == nil {
-		return nil, fmt.Errorf("env required")
-	}
-
-	ctx, span := infra.StartSpan(ctx, "pending.getRecentlyResolvedPendingQuestions")
-	defer span.End()
-
-	client, err := env.Firestore(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("firestore: %w", err)
-	}
+func (s *Store) GetRecentlyResolvedPendingQuestions(ctx context.Context, since time.Time) ([]PendingQuestion, error) {
 	sinceStr := since.Format(time.RFC3339)
-	query := client.Collection(PendingQuestionsCollection).
+	query := s.db.Collection(PendingQuestionsCollection).
 		Where("node_type", "==", NodeTypePendingQuestion).
 		Where("created_at", ">=", sinceStr).
 		OrderBy("created_at", firestore.Desc).
 		Limit(200)
-	out, err := infra.QueryDocuments(ctx, query, func(doc *firestore.DocumentSnapshot) (PendingQuestion, error) {
+	out, err := queryDocuments(ctx, query, func(doc *firestore.DocumentSnapshot) (PendingQuestion, error) {
 		data := doc.Data()
-		if infra.GetStringField(data, "resolved_at") == "" {
+		if getStringField(data, "resolved_at") == "" {
 			return PendingQuestion{}, errSkipEntry
 		}
 		q := PendingQuestion{
 			UUID:       doc.Ref.ID,
-			Question:   infra.GetStringField(data, "question"),
-			Kind:       infra.GetStringField(data, "kind"),
-			Context:    infra.GetStringField(data, "context"),
-			CreatedAt:  infra.GetStringField(data, "created_at"),
-			ResolvedAt: infra.GetStringField(data, "resolved_at"),
-			Answer:     infra.GetStringField(data, "answer"),
-			Embedding:  infra.GetFloat32SliceField(data, "embedding"),
+			Question:   getStringField(data, "question"),
+			Kind:       getStringField(data, "kind"),
+			Context:    getStringField(data, "context"),
+			CreatedAt:  getStringField(data, "created_at"),
+			ResolvedAt: getStringField(data, "resolved_at"),
+			Answer:     getStringField(data, "answer"),
+			Embedding:  getFloat32SliceField(data, "embedding"),
 		}
-		q.SourceEntryIDs = infra.GetStringSliceField(data, "source_entry_ids")
+		q.SourceEntryIDs = getStringSliceField(data, "source_entry_ids")
 		return q, nil
 	})
 	if err != nil {
-		return nil, infra.WrapFirestoreIndexError(err)
+		return nil, wrapFirestoreIndexError(err)
 	}
 	return out, nil
 }
 
 const dedupSimilarityThreshold = 0.85
 
-// filterDuplicatePendingQuestions removes candidates that are semantically similar
-// to existing pending questions (unresolved or resolved within 30 days).
-// If the embedding API fails, all candidates are returned unfiltered (best-effort).
-func filterDuplicatePendingQuestions(ctx context.Context, env infra.ToolEnv, candidates []PendingQuestion) ([]PendingQuestion, error) {
+// filterDuplicatePendingQuestions removes candidates semantically similar to existing questions.
+func (s *Store) filterDuplicatePendingQuestions(ctx context.Context, candidates []PendingQuestion) ([]PendingQuestion, error) {
 	if len(candidates) == 0 {
 		return candidates, nil
 	}
 
-	// Fetch the comparison set.
-	unresolved, err := GetUnresolvedPendingQuestions(ctx, env, 100)
+	unresolved, err := s.GetUnresolvedPendingQuestions(ctx, 100)
 	if err != nil {
-		infra.LoggerFrom(ctx).Warn("dedup: failed to fetch unresolved questions, skipping dedup", "error", err)
+		s.log.Warn("dedup: failed to fetch unresolved questions, skipping dedup", "error", err)
 		return candidates, nil
 	}
 	since := time.Now().AddDate(0, 0, -30)
-	resolved, err := GetRecentlyResolvedPendingQuestions(ctx, env, since)
+	resolved, err := s.GetRecentlyResolvedPendingQuestions(ctx, since)
 	if err != nil {
-		infra.LoggerFrom(ctx).Warn("dedup: failed to fetch resolved questions, skipping dedup", "error", err)
+		s.log.Warn("dedup: failed to fetch resolved questions, skipping dedup", "error", err)
 		return candidates, nil
 	}
 
@@ -241,32 +194,29 @@ func filterDuplicatePendingQuestions(ctx context.Context, env infra.ToolEnv, can
 		return candidates, nil
 	}
 
-	// Embed all candidates in one batch.
-	projectID := env.Config().GoogleCloudProject
 	texts := make([]string, len(candidates))
 	for i, c := range candidates {
 		texts[i] = c.Question
 	}
-	vecs, err := infra.GenerateEmbeddingsBatch(ctx, projectID, texts, infra.EmbedTaskRetrievalDocument)
+	vecs, err := s.embedder.GenerateEmbeddingsBatch(ctx, texts, EmbedTaskRetrievalDocument)
 	if err != nil {
-		infra.LoggerFrom(ctx).Warn("dedup: embedding failed, inserting all candidates unfiltered", "error", err)
+		s.log.Warn("dedup: embedding failed, inserting all candidates unfiltered", "error", err)
 		return candidates, nil
 	}
 	for i := range candidates {
 		candidates[i].Embedding = vecs[i]
 	}
 
-	// Compare each candidate against every existing question.
 	kept := make([]PendingQuestion, 0, len(candidates))
 	for _, c := range candidates {
 		duplicate := false
 		for _, ex := range existing {
 			if len(ex.Embedding) == 0 {
-				continue // no stored embedding; can't compare
+				continue
 			}
-			sim := utils.CosineSimilarity(c.Embedding, ex.Embedding)
+			sim := cosineSimilarity(c.Embedding, ex.Embedding)
 			if sim >= dedupSimilarityThreshold {
-				infra.LoggerFrom(ctx).Info("dedup: dropping similar question",
+				s.log.Info("dedup: dropping similar question",
 					"candidate", c.Question,
 					"matched", ex.Question,
 					"similarity", sim,
@@ -283,24 +233,15 @@ func filterDuplicatePendingQuestions(ctx context.Context, env infra.ToolEnv, can
 }
 
 // ResolvePendingQuestion sets resolved_at and answer for a pending question.
-// If the question has kind "onboarding", the answer is also upserted as a user_identity
-// knowledge node in a goroutine (non-blocking). env supplies Firestore and Config; pass from the caller.
-func ResolvePendingQuestion(ctx context.Context, env infra.ToolEnv, uuid, answer string) error {
-	if env == nil {
-		return fmt.Errorf("env required")
-	}
-	client, err := env.Firestore(ctx)
-	if err != nil {
-		return err
-	}
-	ref := client.Collection(PendingQuestionsCollection).Doc(uuid)
+func (s *Store) ResolvePendingQuestion(ctx context.Context, uuid, answer string) error {
+	ref := s.db.Collection(PendingQuestionsCollection).Doc(uuid)
 	doc, getErr := ref.Get(ctx)
 	var kind string
 	if getErr == nil {
-		kind = infra.GetStringField(doc.Data(), "kind")
+		kind = getStringField(doc.Data(), "kind")
 	}
 	now := time.Now().Format(time.RFC3339)
-	_, err = ref.Update(ctx, []firestore.Update{
+	_, err := ref.Update(ctx, []firestore.Update{
 		{Path: "resolved_at", Value: now},
 		{Path: "answer", Value: answer},
 	})
@@ -309,74 +250,51 @@ func ResolvePendingQuestion(ctx context.Context, env infra.ToolEnv, uuid, answer
 	}
 	if kind == "onboarding" && answer != "" {
 		bgCtx := context.WithoutCancel(ctx)
-		envCopy := env
+		sCopy := s
 		go func() {
-			if _, upErr := UpsertSemanticMemory(bgCtx, envCopy, answer, "user_identity", "selfmodel", 1.0, nil, nil); upErr != nil {
-				infra.LoggerFrom(bgCtx).Warn("onboarding answer upsert failed", "error", upErr)
+			if _, upErr := sCopy.UpsertSemanticMemory(bgCtx, answer, "user_identity", "selfmodel", 1.0, nil, nil); upErr != nil {
+				sCopy.log.Warn("onboarding answer upsert failed", "error", upErr)
 			}
 		}()
 	}
 	return nil
 }
 
-// GetTelegramActiveQuestion returns the pending question currently being asked to
-// the given Telegram chat, or nil if none is active or the question was already resolved.
-func GetTelegramActiveQuestion(ctx context.Context, env infra.ToolEnv, chatID int64) (*PendingQuestion, error) {
-	if env == nil {
-		return nil, fmt.Errorf("env required")
-	}
-	client, err := env.Firestore(ctx)
-	if err != nil {
-		return nil, err
-	}
-	doc, err := client.Collection(TelegramQuestionStateCollection).Doc(strconv.FormatInt(chatID, 10)).Get(ctx)
+// GetActiveQuestion returns the pending question currently being asked to the given client,
+// or nil if none is active or the question was already resolved.
+func (s *Store) GetActiveQuestion(ctx context.Context, clientID string) (*PendingQuestion, error) {
+	doc, err := s.db.Collection(ActiveQuestionStateCollection).Doc(clientID).Get(ctx)
 	if err != nil {
 		if status.Code(err) == codes.NotFound {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("get telegram question state: %w", err)
+		return nil, fmt.Errorf("get active question state: %w", err)
 	}
-	questionUUID := infra.GetStringField(doc.Data(), "question_uuid")
+	questionUUID := getStringField(doc.Data(), "question_uuid")
 	if questionUUID == "" {
 		return nil, nil
 	}
-	q, err := GetPendingQuestion(ctx, env, questionUUID)
+	q, err := s.GetPendingQuestion(ctx, questionUUID)
 	if err != nil {
 		return nil, fmt.Errorf("get active question: %w", err)
 	}
-	// If it was already resolved by another client, treat as no active question.
 	if q.ResolvedAt != "" {
 		return nil, nil
 	}
 	return q, nil
 }
 
-// SetTelegramActiveQuestion records that questionUUID is the question currently
-// being asked to chatID. Overwrites any previous state.
-func SetTelegramActiveQuestion(ctx context.Context, env infra.ToolEnv, chatID int64, questionUUID string) error {
-	if env == nil {
-		return fmt.Errorf("env required")
-	}
-	client, err := env.Firestore(ctx)
-	if err != nil {
-		return err
-	}
-	_, err = client.Collection(TelegramQuestionStateCollection).Doc(strconv.FormatInt(chatID, 10)).Set(ctx, map[string]any{
+// SetActiveQuestion records that questionUUID is the question currently being asked to clientID.
+func (s *Store) SetActiveQuestion(ctx context.Context, clientID, questionUUID string) error {
+	_, err := s.db.Collection(ActiveQuestionStateCollection).Doc(clientID).Set(ctx, map[string]any{
 		"question_uuid": questionUUID,
 		"set_at":        time.Now().Format(time.RFC3339),
 	})
 	return err
 }
 
-// ClearTelegramActiveQuestion removes the active question state for chatID.
-func ClearTelegramActiveQuestion(ctx context.Context, env infra.ToolEnv, chatID int64) error {
-	if env == nil {
-		return fmt.Errorf("env required")
-	}
-	client, err := env.Firestore(ctx)
-	if err != nil {
-		return err
-	}
-	_, err = client.Collection(TelegramQuestionStateCollection).Doc(strconv.FormatInt(chatID, 10)).Delete(ctx)
+// ClearActiveQuestion removes the active question state for clientID.
+func (s *Store) ClearActiveQuestion(ctx context.Context, clientID string) error {
+	_, err := s.db.Collection(ActiveQuestionStateCollection).Doc(clientID).Delete(ctx)
 	return err
 }

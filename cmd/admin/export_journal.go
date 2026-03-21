@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 
 	"github.com/jackstrohm/jot/internal/infra"
-	"github.com/jackstrohm/jot/pkg/memory"
 	"github.com/jackstrohm/jot/pkg/storage"
 )
 
@@ -46,7 +45,7 @@ func runExportJournal(ctx context.Context, app *infra.App, args []string) {
 		log.Fatalf("create audio dir: %v", err)
 	}
 
-	entries, err := memory.GetAllLogEntries(ctx, app)
+	entries, err := app.Memory.GetAllLogEntries(ctx)
 	if err != nil {
 		log.Fatalf("fetch entries: %v", err)
 	}

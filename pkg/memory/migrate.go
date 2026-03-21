@@ -11,11 +11,17 @@ import (
 	"google.golang.org/api/iterator"
 )
 
+
 // MigrateKnowledgeMetadata iterates over all documents in the given Firestore collection
 // (knowledge_nodes), normalizes metadata for registered node types, and merges top-level
 // archive_summary into metadata for project/goal nodes. When dryRun is true, no writes
 // are performed. Returns the number of documents updated and any error.
-func MigrateKnowledgeMetadata(ctx context.Context, client *firestore.Client, collection string, dryRun bool) (int, error) {
+// MigrateKnowledgeMetadata iterates over all knowledge_nodes documents, normalizes metadata
+// for registered node types, and merges top-level archive_summary into metadata for
+// project/goal nodes. When dryRun is true, no writes are performed.
+func (s *Store) MigrateKnowledgeMetadata(ctx context.Context, dryRun bool) (int, error) {
+	client := s.db
+	collection := KnowledgeCollection
 	iter := client.Collection(collection).Documents(ctx)
 	defer iter.Stop()
 

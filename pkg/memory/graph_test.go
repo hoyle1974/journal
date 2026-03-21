@@ -4,35 +4,15 @@ import (
 	"context"
 	"testing"
 
-	"cloud.google.com/go/firestore"
-	"github.com/jackstrohm/jot/internal/config"
-	"github.com/jackstrohm/jot/internal/infra"
 	"github.com/jackstrohm/jot/pkg/memory"
-	"google.golang.org/genai"
 )
-
-// stubEnv satisfies infra.ToolEnv with nil returns (no real Firestore).
-type stubEnv struct{}
-
-func (s *stubEnv) Config() *config.Config { return &config.Config{} }
-func (s *stubEnv) Firestore(_ context.Context) (*firestore.Client, error) {
-	return nil, nil
-}
-func (s *stubEnv) Dispatch(_ context.Context, _ *infra.LLMRequest) (*genai.GenerateContentResponse, error) {
-	return nil, nil
-}
 
 func TestGraphExpandValidation(t *testing.T) {
 	ctx := context.Background()
+	s := memory.New(nil, nil, nil)
 
-	// nil env should return an error
-	_, err := memory.GraphExpand(ctx, nil, "some-uuid", 1, 10)
-	if err == nil {
-		t.Fatal("expected error for nil env, got nil")
-	}
-
-	// empty seedID should return an error
-	_, err = memory.GraphExpand(ctx, &stubEnv{}, "", 1, 10)
+	// empty seedID should return an error (validated before touching db)
+	_, err := s.GraphExpand(ctx, "", 1, 10)
 	if err == nil {
 		t.Fatal("expected error for empty seedID, got nil")
 	}

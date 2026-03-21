@@ -33,36 +33,28 @@ func (s *Store) GraphExpand(ctx context.Context, seedID string, hops, limitPerEd
 		limitPerEdge = 10
 	}
 
-	// Fetch the seed node with its entity_links.
-	// TODO(batch-2): GetKnowledgeNodeByID will be converted to a Store method; pass nil env for now.
-	seed, err := GetKnowledgeNodeByID(ctx, nil, seedID)
+	seed, err := s.GetKnowledgeNodeByID(ctx, seedID)
 	if err != nil {
 		return nil, fmt.Errorf("fetch seed node: %w", err)
 	}
 
-	// Outgoing edges: nodes where object_uuid == seedID (seed is the subject of an SPO triple).
-	// TODO(batch-2): QueryOutgoingEdges will be converted to a Store method; pass nil env for now.
-	outgoing, err := QueryOutgoingEdges(ctx, nil, seedID, limitPerEdge)
+	outgoing, err := s.QueryOutgoingEdges(ctx, seedID, limitPerEdge)
 	if err != nil {
 		return nil, fmt.Errorf("query outgoing edges: %w", err)
 	}
 
-	// Incoming edges: nodes that reference seedID in their entity_links array.
-	// TODO(batch-2): QueryNodesLinkingTo will be converted to a Store method; pass nil env for now.
-	incoming, err := QueryNodesLinkingTo(ctx, nil, seedID, limitPerEdge)
+	incoming, err := s.QueryNodesLinkingTo(ctx, seedID, limitPerEdge)
 	if err != nil {
 		return nil, fmt.Errorf("query incoming edges: %w", err)
 	}
 
-	// Linked nodes: fetch the nodes pointed to by seed.EntityLinks.
 	var linked []KnowledgeNode
 	if len(seed.EntityLinks) > 0 {
 		ids := seed.EntityLinks
 		if len(ids) > limitPerEdge {
 			ids = ids[:limitPerEdge]
 		}
-		// TODO(batch-2): GetKnowledgeNodesByIDs will be converted to a Store method; pass nil env for now.
-		linked, err = GetKnowledgeNodesByIDs(ctx, nil, ids)
+		linked, err = s.GetKnowledgeNodesByIDs(ctx, ids)
 		if err != nil {
 			return nil, fmt.Errorf("fetch linked nodes: %w", err)
 		}

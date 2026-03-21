@@ -10,6 +10,8 @@ import (
 	"cloud.google.com/go/firestore"
 	gcs "cloud.google.com/go/storage"
 	"github.com/jackstrohm/jot/internal/config"
+	"github.com/jackstrohm/jot/pkg/memory"
+	memorygem "github.com/jackstrohm/jot/pkg/memory/gemini"
 	"github.com/jackstrohm/jot/pkg/storage"
 	"google.golang.org/genai"
 	"github.com/panjf2000/ants/v2"
@@ -35,11 +37,13 @@ type ToolEnv interface {
 	Config() *config.Config
 	Firestore(ctx context.Context) (*firestore.Client, error)
 	Dispatch(ctx context.Context, req *LLMRequest) (*genai.GenerateContentResponse, error)
+	MemoryStore() *memory.Store
 }
 
 // App holds runtime dependencies (Firestore, Gemini, Logger, worker pools).
 type App struct {
 	Logger *slog.Logger
+	Memory *memory.Store
 	cfg    *config.Config
 
 	firestoreClient        *firestore.Client
@@ -106,6 +110,11 @@ func (a *App) DreamerModel() string {
 // Config returns the config used to create the app (for callers that need project, API keys, etc.).
 func (a *App) Config() *config.Config {
 	return a.cfg
+}
+
+// Memory returns the memory store for the app.
+func (a *App) MemoryStore() *memory.Store {
+	return a.Memory
 }
 
 // App returns the app for use when the full *App is required (e.g. AddEntryAndEnqueue, EnqueueSaveQuery, ProcessEntry).
@@ -265,6 +274,12 @@ func NewApp(ctx context.Context, cfg *config.Config, gdocLog GDocLogFunc, gemini
 	if app.geminiErr != nil {
 		return app, app.geminiErr
 	}
+
+	app.Memory = memory.New(
+		app.firestoreClient,
+		memorygem.NewEmbedder(cfg.GoogleCloudProject),
+		memorygem.NewDispatcher(app.geminiClient, app.effectiveGeminiModel),
+	)
 
 	if cfg.ImagesBucket != "" {
 		gcsClient, err := gcs.NewClient(ctx)

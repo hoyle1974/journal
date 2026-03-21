@@ -3,7 +3,6 @@ package memory
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 
 	"cloud.google.com/go/firestore"
 	"google.golang.org/api/iterator"

@@ -11,7 +11,6 @@ import (
 	"google.golang.org/genai"
 	"github.com/jackstrohm/jot/internal/prompts"
 	"github.com/jackstrohm/jot/internal/infra"
-	"github.com/jackstrohm/jot/pkg/memory"
 	"github.com/jackstrohm/jot/pkg/utils"
 	"golang.org/x/sync/errgroup"
 )
@@ -40,7 +39,7 @@ func RunEvaluatorExtract(ctx context.Context, app *infra.App, content string) (*
 	}
 	systemPrompt := prompts.Evaluator() + prompts.DataSafety()
 	prompt := ""
-	node, _, err := memory.FindContextByName(ctx, app, "user_profile")
+	node, _, err := app.Memory.FindContextByName(ctx, "user_profile")
 	if err == nil && node != nil && node.Content != "" {
 		profile := node.Content
 		prompt = fmt.Sprintf("Relevant user preferences/facts (use when assigning domain and significance):\n%s\n\n",
@@ -122,7 +121,7 @@ func RunEvaluator(ctx context.Context, app *infra.App, content, entryUUID, times
 		}
 		bgCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
-		if _, err := memory.UpsertSemanticMemory(bgCtx, app, parsed.FactToStore, nodeType, parsed.Domain, parsed.Significance, nil, []string{entryUUID}); err != nil {
+		if _, err := app.Memory.UpsertSemanticMemory(bgCtx, parsed.FactToStore, nodeType, parsed.Domain, parsed.Significance, nil, []string{entryUUID}); err != nil {
 			infra.LoggerFrom(ctx).Warn("evaluator upsert failed", "error", err)
 		} else {
 			factStored = true
@@ -160,7 +159,7 @@ func runProactiveInsight(ctx context.Context, app *infra.App, entryUUID, entryCo
 	}
 	bgCtx, cancel2 := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel2()
-	if _, err := memory.UpsertSemanticMemory(bgCtx, app, summary, "thought", "selfmodel", 0.9, nil, []string{entryUUID}); err != nil {
+	if _, err := app.Memory.UpsertSemanticMemory(bgCtx, summary, "thought", "selfmodel", 0.9, nil, []string{entryUUID}); err != nil {
 		infra.LoggerFrom(ctx).Debug("proactive insight upsert failed", "entry_uuid", entryUUID, "error", err)
 		return
 	}

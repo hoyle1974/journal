@@ -76,7 +76,7 @@ func ProcessEntry(ctx context.Context, app *infra.App, entryUUID, content, times
 			Status:          memory.TaskStatusPending,
 			JournalEntryIDs: []string{entryUUID},
 		}
-		if taskUUID, createErr := memory.CreateTask(ctx, app, t); createErr != nil {
+		if taskUUID, createErr := app.Memory.CreateTask(ctx, t); createErr != nil {
 			infra.LoggerFrom(ctx).Warn("process-entry: agency task create failed", "entry_uuid", entryUUID, "error", createErr)
 		} else {
 			infra.LoggerFrom(ctx).Info("process-entry: agency task created", "entry_uuid", entryUUID, "task_uuid", taskUUID, "content", taskContent)
@@ -84,7 +84,7 @@ func ProcessEntry(ctx context.Context, app *infra.App, entryUUID, content, times
 	}
 
 	t1 := time.Now()
-	contextUUIDs, err := memory.DetectOrCreateContext(ctx, app, content, entryUUID)
+	contextUUIDs, err := app.Memory.DetectOrCreateContext(ctx, content, entryUUID)
 	firestoreWrite += time.Since(t1)
 	if err != nil {
 		infra.LoggerFrom(ctx).Warn("context detection failed", "error", err)
@@ -93,7 +93,7 @@ func ProcessEntry(ctx context.Context, app *infra.App, entryUUID, content, times
 	infra.LoggerFrom(ctx).Debug("process-entry: context detection done", "entry_uuid", entryUUID, "contexts_linked", contextCount, "reason", "link entry to active contexts")
 
 	t2 := time.Now()
-	analysis, err := memory.AnalyzeJournalEntry(ctx, app, content, entryUUID, timestamp)
+	analysis, err := app.Memory.AnalyzeJournalEntry(ctx, content, entryUUID, timestamp)
 	llm += time.Since(t2)
 	if err != nil {
 		infra.LoggerFrom(ctx).Warn("journal analysis failed", "entry_uuid", entryUUID, "error", err)

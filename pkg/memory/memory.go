@@ -3,6 +3,7 @@ package memory
 import (
 	"io"
 	"log/slog"
+	"sync"
 
 	"cloud.google.com/go/firestore"
 )
@@ -10,10 +11,11 @@ import (
 // Store is the memory layer for jot's GraphRAG system.
 // Construct with New(); all methods require a context.
 type Store struct {
-	db       *firestore.Client
-	embedder Embedder
-	llm      LLMDispatcher
-	log      *slog.Logger
+	db            *firestore.Client
+	embedder      Embedder
+	llm           LLMDispatcher
+	log           *slog.Logger
+	permanentOnce sync.Once
 }
 
 // Option configures a Store at construction time.

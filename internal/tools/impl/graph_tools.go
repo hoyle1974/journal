@@ -33,7 +33,7 @@ func registerGraphTools() {
 			}
 			limitPerEdge := clampInt(a.LimitPerEdge, 10, 1, 20)
 
-			result, err := memory.GraphExpand(ctx, env, a.NodeID, hops, limitPerEdge)
+			result, err := env.MemoryStore().GraphExpand(ctx, a.NodeID, hops, limitPerEdge)
 			if err != nil {
 				return tools.Fail("graph_expand error: %v", err)
 			}

@@ -25,7 +25,7 @@ func NewJournalService(env infra.ToolEnv, cfg *config.Config) *JournalService {
 // SaveQuery saves a Q&A to the journal. Exposed for api handlers.
 func (j *JournalService) SaveQuery(ctx context.Context, question, answer, source string, isGap bool) (string, error) {
 	infra.LoggerFrom(ctx).Info("function call", "fn", "SaveQuery", "source", source, "is_gap", isGap, "question_preview", utils.TruncateString(question, 60))
-	id, err := memory.SaveQuery(ctx, j.env, question, answer, source, isGap)
+	id, err := j.env.MemoryStore().SaveQuery(ctx, question, answer, source, isGap)
 	if err != nil {
 		infra.LoggerFrom(ctx).Error("function result", "fn", "SaveQuery", "error", err.Error())
 		return "", err
@@ -37,7 +37,7 @@ func (j *JournalService) SaveQuery(ctx context.Context, question, answer, source
 // GetEntry returns a single entry by UUID.
 func (j *JournalService) GetEntry(ctx context.Context, uuid string) (*api.Entry, error) {
 	infra.LoggerFrom(ctx).Info("function call", "fn", "GetEntry", "uuid", uuid)
-	entry, err := memory.GetEntry(ctx, j.env, uuid)
+	entry, err := j.env.MemoryStore().GetEntry(ctx, uuid)
 	if err != nil {
 		infra.LoggerFrom(ctx).Warn("function result", "fn", "GetEntry", "uuid", uuid, "error", err.Error())
 		return nil, err
@@ -49,7 +49,7 @@ func (j *JournalService) GetEntry(ctx context.Context, uuid string) (*api.Entry,
 // GetEntries returns recent entries up to limit.
 func (j *JournalService) GetEntries(ctx context.Context, limit int) ([]api.Entry, error) {
 	infra.LoggerFrom(ctx).Info("function call", "fn", "GetEntries", "limit", limit)
-	entries, err := memory.GetEntries(ctx, j.env, limit)
+	entries, err := j.env.MemoryStore().GetEntries(ctx, limit)
 	if err != nil {
 		infra.LoggerFrom(ctx).Error("function result", "fn", "GetEntries", "error", err.Error())
 		return nil, err
@@ -72,7 +72,7 @@ func journalEntryToAPI(e *memory.Entry) *api.Entry {
 // UpdateEntry updates an entry's content.
 func (j *JournalService) UpdateEntry(ctx context.Context, uuid, content string) error {
 	infra.LoggerFrom(ctx).Info("function call", "fn", "UpdateEntry", "uuid", uuid, "content_length", len(content))
-	err := memory.UpdateEntry(ctx, j.env, uuid, content)
+	err := j.env.MemoryStore().UpdateEntry(ctx, uuid, content)
 	if err != nil {
 		infra.LoggerFrom(ctx).Error("function result", "fn", "UpdateEntry", "uuid", uuid, "error", err.Error())
 		return err
@@ -84,7 +84,7 @@ func (j *JournalService) UpdateEntry(ctx context.Context, uuid, content string) 
 // DeleteEntries deletes entries by UUIDs.
 func (j *JournalService) DeleteEntries(ctx context.Context, uuids []string) error {
 	infra.LoggerFrom(ctx).Info("function call", "fn", "DeleteEntries", "uuid_count", len(uuids))
-	err := memory.DeleteEntries(ctx, j.env, uuids)
+	err := j.env.MemoryStore().DeleteEntries(ctx, uuids)
 	if err != nil {
 		infra.LoggerFrom(ctx).Error("function result", "fn", "DeleteEntries", "error", err.Error())
 		return err
@@ -99,7 +99,7 @@ func (j *JournalService) BackfillEntryEmbeddings(ctx context.Context, limit int)
 	if j.cfg == nil {
 		return 0, errors.New("config required for backfill")
 	}
-	processed, err := memory.BackfillEntryEmbeddings(ctx, j.env, limit)
+	processed, err := j.env.MemoryStore().BackfillEntryEmbeddings(ctx, limit)
 	if err != nil {
 		infra.LoggerFrom(ctx).Error("function result", "fn", "BackfillEntryEmbeddings", "error", err.Error())
 		return 0, err

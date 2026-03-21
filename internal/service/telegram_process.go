@@ -46,7 +46,8 @@ func handlePendingQuestion(ctx context.Context, app *infra.App, chatID int64, te
 	isSkip := text == "/skip" || strings.EqualFold(text, "skip")
 
 	// Check for an in-flight question (one we already sent to this chat).
-	active, err := memory.GetTelegramActiveQuestion(ctx, app, chatID)
+	clientID := fmt.Sprintf("%d", chatID)
+	active, err := app.Memory.GetActiveQuestion(ctx, clientID)
 	if err != nil {
 		infra.LoggerFrom(ctx).Warn("telegram: could not check active question, proceeding to FOH", "chat_id", chatID, "error", err)
 		return "", false
@@ -55,7 +56,7 @@ func handlePendingQuestion(ctx context.Context, app *infra.App, chatID int64, te
 	if active != nil {
 		if !isSkip {
 			// Resolve the active question with the user's answer.
-			if resolveErr := memory.ResolvePendingQuestion(ctx, app, active.UUID, text); resolveErr != nil {
+			if resolveErr := app.Memory.ResolvePendingQuestion(ctx, active.UUID, text); resolveErr != nil {
 				infra.LoggerFrom(ctx).Error("telegram: resolve pending question failed", "chat_id", chatID, "uuid", active.UUID, "error", resolveErr)
 			} else {
 				infra.LoggerFrom(ctx).Info("telegram: pending question resolved", "chat_id", chatID, "uuid", active.UUID)
@@ -64,7 +65,7 @@ func handlePendingQuestion(ctx context.Context, app *infra.App, chatID int64, te
 			infra.LoggerFrom(ctx).Info("telegram: pending question skipped", "chat_id", chatID, "uuid", active.UUID)
 		}
 		// Clear the in-flight state regardless of skip or answer.
-		if clearErr := memory.ClearTelegramActiveQuestion(ctx, app, chatID); clearErr != nil {
+		if clearErr := app.Memory.ClearActiveQuestion(ctx, clientID); clearErr != nil {
 			infra.LoggerFrom(ctx).Warn("telegram: clear active question failed", "chat_id", chatID, "error", clearErr)
 		}
 		// Check if there are more questions to ask.
@@ -72,7 +73,7 @@ func handlePendingQuestion(ctx context.Context, app *infra.App, chatID int64, te
 	}
 
 	// No active question — check if there are any unresolved questions at all.
-	questions, err := memory.GetUnresolvedPendingQuestions(ctx, app, 1)
+	questions, err := app.Memory.GetUnresolvedPendingQuestions(ctx, 1)
 	if err != nil {
 		infra.LoggerFrom(ctx).Warn("telegram: could not check pending questions, proceeding to FOH", "chat_id", chatID, "error", err)
 		return "", false
@@ -83,7 +84,7 @@ func handlePendingQuestion(ctx context.Context, app *infra.App, chatID int64, te
 
 	// Ask the first pending question and store it as active.
 	q := questions[0]
-	if setErr := memory.SetTelegramActiveQuestion(ctx, app, chatID, q.UUID); setErr != nil {
+	if setErr := app.Memory.SetActiveQuestion(ctx, clientID, q.UUID); setErr != nil {
 		infra.LoggerFrom(ctx).Warn("telegram: set active question failed, proceeding to FOH", "chat_id", chatID, "error", setErr)
 		return "", false
 	}
@@ -94,12 +95,13 @@ func handlePendingQuestion(ctx context.Context, app *infra.App, chatID int64, te
 // askNextOrDone checks for the next unresolved question. If one exists, asks it and
 // returns the formatted prompt. If none remain, returns a "all done" confirmation.
 func askNextOrDone(ctx context.Context, app *infra.App, chatID int64) (string, bool) {
-	questions, err := memory.GetUnresolvedPendingQuestions(ctx, app, 1)
+	questions, err := app.Memory.GetUnresolvedPendingQuestions(ctx, 1)
 	if err != nil || len(questions) == 0 {
 		return "Got it! You're all set.", true
 	}
 	q := questions[0]
-	if setErr := memory.SetTelegramActiveQuestion(ctx, app, chatID, q.UUID); setErr != nil {
+	clientID := fmt.Sprintf("%d", chatID)
+	if setErr := app.Memory.SetActiveQuestion(ctx, clientID, q.UUID); setErr != nil {
 		infra.LoggerFrom(ctx).Warn("telegram: set next active question failed", "chat_id", chatID, "error", setErr)
 		return "Got it! You're all set.", true
 	}

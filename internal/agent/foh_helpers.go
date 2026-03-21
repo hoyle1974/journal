@@ -9,7 +9,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackstrohm/jot/internal/infra"
-	"github.com/jackstrohm/jot/pkg/memory"
 )
 
 var imageSentinelRE = regexp.MustCompile(`\[SEND_IMAGE:[^\]]+\]`)
@@ -28,7 +27,7 @@ func AddEntryAndEnqueue(ctx context.Context, app *infra.App, content, source str
 	if app == nil {
 		return "", fmt.Errorf("app required for AddEntryAndEnqueue")
 	}
-	entryUUID, err := memory.AddEntry(ctx, app, content, source, timestamp, imageURL)
+	entryUUID, err := app.Memory.AddEntry(ctx, content, source, timestamp, imageURL)
 	if err != nil {
 		return "", err
 	}

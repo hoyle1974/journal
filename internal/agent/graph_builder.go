@@ -53,7 +53,7 @@ func ResolveAndLinkEntities(ctx context.Context, app *infra.App, entryUUID strin
 		if strings.TrimSpace(ent.Name) == "" {
 			continue
 		}
-		node, err := memory.FindEntityNodeByName(ctx, app, ent.Name)
+		node, err := app.Memory.FindEntityNodeByName(ctx, ent.Name)
 		if err != nil {
 			infra.LoggerFrom(ctx).Debug("resolve_entities find error", "entity", ent.Name, "error", err)
 			continue
@@ -62,7 +62,7 @@ func ResolveAndLinkEntities(ctx context.Context, app *infra.App, entryUUID strin
 			infra.LoggerFrom(ctx).Debug("resolve_entities no match", "entity", ent.Name, "type", ent.Type)
 			continue
 		}
-		if err := memory.AppendJournalEntryIDsToNode(ctx, app, node.UUID, []string{entryUUID}); err != nil {
+		if err := app.Memory.AppendJournalEntryIDsToNode(ctx, node.UUID, []string{entryUUID}); err != nil {
 			infra.LoggerFrom(ctx).Debug("resolve_entities link failed", "entity", ent.Name, "node", node.UUID, "error", err)
 			continue
 		}
@@ -109,8 +109,8 @@ func ExtractAndStoreRelationships(ctx context.Context, app *infra.App, entryUUID
 		// e.g. "Gloria works_at Anthropic"
 		nodeContent := triple.Subject + " " + triple.Predicate + " " + triple.Object
 
-		subjNode, _ := memory.FindEntityNodeByName(ctx, app, triple.Subject)
-		objNode, _ := memory.FindEntityNodeByName(ctx, app, triple.Object)
+		subjNode, _ := app.Memory.FindEntityNodeByName(ctx, triple.Subject)
+		objNode, _ := app.Memory.FindEntityNodeByName(ctx, triple.Object)
 
 		entityLinks := []string{entryUUID}
 		if subjNode != nil {
@@ -134,7 +134,7 @@ func ExtractAndStoreRelationships(ctx context.Context, app *infra.App, entryUUID
 			metaJSON = "{}"
 		}
 
-		spoUUID, err := memory.UpsertKnowledge(ctx, app, nodeContent, memory.NodeTypeGeneric, metaJSON, entityLinks)
+		spoUUID, err := app.Memory.UpsertKnowledge(ctx, nodeContent, memory.NodeTypeGeneric, metaJSON, entityLinks)
 		if err != nil {
 			infra.LoggerFrom(ctx).Debug("relationship upsert failed", "triple", nodeContent, "error", err)
 			continue
@@ -143,7 +143,7 @@ func ExtractAndStoreRelationships(ctx context.Context, app *infra.App, entryUUID
 
 		// Link subject node back to this SPO node for bidirectional traversal.
 		if subjNode != nil {
-			if err := memory.AddEntityLink(ctx, app, subjNode.UUID, spoUUID); err != nil {
+			if err := app.Memory.AddEntityLink(ctx, subjNode.UUID, spoUUID); err != nil {
 				infra.LoggerFrom(ctx).Debug("spo subject backlink failed", "error", err)
 			}
 		}

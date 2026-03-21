@@ -6,31 +6,16 @@ import (
 	"strings"
 
 	"cloud.google.com/go/firestore"
-	"github.com/jackstrohm/jot/internal/infra"
-	"github.com/jackstrohm/jot/pkg/utils"
 	"google.golang.org/api/iterator"
 )
 
 // GetOpenRootTasks returns root-level tasks (no parent) that are pending or active, newest first.
-// env supplies Firestore; pass from the caller (e.g. ToolEnv).
-func GetOpenRootTasks(ctx context.Context, env infra.ToolEnv, limit int) ([]Task, error) {
-	ctx, span := infra.StartSpan(ctx, "tasks.get_open_roots")
-	defer span.End()
-
+func (s *Store) GetOpenRootTasks(ctx context.Context, limit int) ([]Task, error) {
 	if limit <= 0 || limit > 50 {
 		limit = 25
 	}
 
-	if env == nil {
-		return nil, fmt.Errorf("env required")
-	}
-	client, err := env.Firestore(ctx)
-	if err != nil {
-		span.RecordError(err)
-		return nil, fmt.Errorf("firestore client: %w", err)
-	}
-
-	iter := client.Collection(KnowledgeCollection).
+	iter := s.db.Collection(KnowledgeCollection).
 		Where("node_type", "==", NodeTypeTask).
 		OrderBy("timestamp", firestore.Desc).
 		Limit(100).
@@ -44,12 +29,11 @@ func GetOpenRootTasks(ctx context.Context, env infra.ToolEnv, limit int) ([]Task
 			break
 		}
 		if err != nil {
-			span.RecordError(err)
 			return nil, fmt.Errorf("iterate tasks: %w", err)
 		}
 		var t Task
 		if err := doc.DataTo(&t); err != nil {
-			infra.LoggerFrom(ctx).Warn("GetOpenRootTasks: skipping task document", "doc_id", doc.Ref.ID, "error", err)
+			s.log.Warn("GetOpenRootTasks: skipping task document", "doc_id", doc.Ref.ID, "error", err)
 			continue
 		}
 		t.UUID = doc.Ref.ID
@@ -65,28 +49,14 @@ func GetOpenRootTasks(ctx context.Context, env infra.ToolEnv, limit int) ([]Task
 		}
 	}
 
-	span.SetAttributes(map[string]string{"results_count": fmt.Sprintf("%d", len(tasks))})
 	return tasks, nil
 }
 
 // QuerySimilarTasks performs a KNN vector search on the journal collection filtered to node_type=task.
-// env supplies Firestore; pass from the caller (e.g. ToolEnv).
-func QuerySimilarTasks(ctx context.Context, env infra.ToolEnv, queryVector []float32, limit int) ([]Task, error) {
-	ctx, span := infra.StartSpan(ctx, "tasks.query_similar")
-	defer span.End()
-
-	if env == nil {
-		return nil, fmt.Errorf("env required")
-	}
-	client, err := env.Firestore(ctx)
-	if err != nil {
-		span.RecordError(err)
-		return nil, fmt.Errorf("firestore client: %w", err)
-	}
-
+func (s *Store) QuerySimilarTasks(ctx context.Context, queryVector []float32, limit int) ([]Task, error) {
 	const distanceResultField = "_vector_distance"
 	opts := &firestore.FindNearestOptions{DistanceResultField: distanceResultField}
-	vectorQuery := client.Collection(KnowledgeCollection).
+	vectorQuery := s.db.Collection(KnowledgeCollection).
 		Where("node_type", "==", NodeTypeTask).
 		FindNearest("embedding", firestore.Vector32(queryVector), limit, firestore.DistanceMeasureCosine, opts)
 	iter := vectorQuery.Documents(ctx)
@@ -99,20 +69,18 @@ func QuerySimilarTasks(ctx context.Context, env infra.ToolEnv, queryVector []flo
 			break
 		}
 		if err != nil {
-			infra.LogVectorSearchFailed(ctx, KnowledgeCollection, err, 0)
-			span.RecordError(err)
+			s.logVectorSearchFailed(KnowledgeCollection, err, 0)
 			return nil, fmt.Errorf("iterate tasks: %w", err)
 		}
 		var t Task
 		if err := doc.DataTo(&t); err != nil {
-			infra.LoggerFrom(ctx).Warn("QuerySimilarTasks: skipping task document", "doc_id", doc.Ref.ID, "error", err)
+			s.log.Warn("QuerySimilarTasks: skipping task document", "doc_id", doc.Ref.ID, "error", err)
 			continue
 		}
 		t.UUID = doc.Ref.ID
 		tasks = append(tasks, t)
 	}
 
-	span.SetAttributes(map[string]string{"results_count": fmt.Sprintf("%d", len(tasks))})
 	return tasks, nil
 }
 
@@ -129,7 +97,7 @@ func FormatTasksForContext(tasks []Task, maxChars int) string {
 		if due == "" {
 			due = "(not set)"
 		}
-		line := fmt.Sprintf("[%s] status=%s due=%s | %s", t.UUID, t.Status, due, utils.TruncateString(t.Content, 120))
+		line := fmt.Sprintf("[%s] status=%s due=%s | %s", t.UUID, t.Status, due, truncateString(t.Content, 120))
 		if n+len(line) > maxChars {
 			break
 		}

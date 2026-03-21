@@ -5,24 +5,11 @@ import (
 	"testing"
 )
 
-func TestCreateTask_NilEnv(t *testing.T) {
-	_, err := CreateTask(context.Background(), nil, &Task{Content: "test"})
-	if err == nil {
-		t.Fatal("expected error for nil env, got nil")
-	}
-}
-
 func TestCreateTask_EmptyContent(t *testing.T) {
-	_, err := CreateTask(context.Background(), nil, &Task{})
+	s := New(nil, nil, nil)
+	_, err := s.CreateTask(context.Background(), &Task{})
 	if err == nil {
 		t.Fatal("expected error for empty content, got nil")
-	}
-}
-
-func TestGetTask_NilEnv(t *testing.T) {
-	_, err := GetTask(context.Background(), nil, "some-uuid")
-	if err == nil {
-		t.Fatal("expected error for nil env, got nil")
 	}
 }
 

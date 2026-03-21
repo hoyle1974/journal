@@ -55,16 +55,14 @@ func (s *Store) PromoteIncubatingClusters(ctx context.Context, tagMapping map[st
 		if len(days) < IncubationMinDistinctDays {
 			continue
 		}
-		// TODO(batch-2): FindContextByName will be converted to a Store method; pass nil env for now.
-		existing, _, err := FindContextByName(ctx, nil, themeName)
+		existing, _, err := s.FindContextByName(ctx, themeName)
 		if err != nil {
 			s.log.Warn("incubation find context failed", "theme", themeName, "error", err)
 			continue
 		}
 		if existing != nil {
 			// Touch to boost relevance so it stays in active contexts.
-			// TODO(batch-2): TouchContext will be converted to a Store method; pass nil env for now.
-			if touchErr := TouchContext(ctx, nil, existing.UUID, nil, 0.05); touchErr != nil {
+			if touchErr := s.TouchContext(ctx, existing.UUID, nil, 0.05); touchErr != nil {
 				s.log.Debug("incubation touch failed", "theme", themeName, "error", touchErr)
 			} else {
 				promoted++
@@ -74,8 +72,7 @@ func (s *Store) PromoteIncubatingClusters(ctx context.Context, tagMapping map[st
 		}
 		// Create new context with a short placeholder; it will be refined as more entries link.
 		content := fmt.Sprintf("Recurring theme from journal (appeared %d days in the last %d days): %s.", len(days), IncubationLastNDays, themeName)
-		// TODO(batch-2): CreateContext will be converted to a Store method; pass nil env for now.
-		if _, createErr := CreateContext(ctx, nil, themeName, content, "auto", nil, nil); createErr != nil {
+		if _, createErr := s.CreateContext(ctx, themeName, content, "auto", nil, nil); createErr != nil {
 			s.log.Warn("incubation create context failed", "theme", themeName, "error", createErr)
 			continue
 		}

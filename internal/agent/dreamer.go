@@ -219,7 +219,7 @@ func dreamerWriteMergedFacts(ctx context.Context, app *infra.App, merged []merge
 					ObjectValue: fact.ObjectValue,
 				}
 			}
-			if _, upsertErr := memory.UpsertSemanticMemoryPreembeddedWithSPO(gctx, app, fact.Content, fact.NodeType, fact.Domain, fact.Weight, nil, entryUUIDs, fact.Vector, spo); upsertErr != nil {
+			if _, upsertErr := app.Memory.UpsertSemanticMemoryPreembeddedWithSPO(gctx, fact.Content, fact.NodeType, fact.Domain, fact.Weight, nil, entryUUIDs, fact.Vector, spo); upsertErr != nil {
 				infra.LoggerFrom(gctx).Warn("dreamer upsert failed", "domain", fact.Domain, "fact", utils.TruncateString(fact.Content, 50), "error", upsertErr)
 				return nil // soft error
 			}
@@ -248,7 +248,7 @@ func dreamerSynthesizeContexts(ctx context.Context, app *infra.App, contextUUIDs
 	for uuid := range contextUUIDs {
 		u := uuid
 		g.Go(func() error {
-			meta, metaErr := memory.GetContextMetadata(gctx, app, u)
+			meta, metaErr := app.Memory.GetContextMetadata(gctx, u)
 			if metaErr != nil {
 				infra.LoggerFrom(gctx).Warn("dreamer get context metadata failed", "context_uuid", u, "error", metaErr)
 				return nil
@@ -257,12 +257,12 @@ func dreamerSynthesizeContexts(ctx context.Context, app *infra.App, contextUUIDs
 				mu.Lock()
 				skippedLazy++
 				mu.Unlock()
-				if touchErr := memory.TouchContext(gctx, app, u, nil, 0); touchErr != nil {
+				if touchErr := app.Memory.TouchContext(gctx, u, nil, 0); touchErr != nil {
 					infra.LoggerFrom(gctx).Debug("dreamer touch context skipped", "context_uuid", u, "error", touchErr)
 				}
 				return nil
 			}
-			if synthErr := memory.SynthesizeContext(gctx, app, u); synthErr != nil {
+			if synthErr := app.Memory.SynthesizeContext(gctx, u); synthErr != nil {
 				infra.LoggerFrom(gctx).Warn("dreamer context synthesis failed", "context_uuid", u, "error", synthErr)
 				return nil
 			}
@@ -361,7 +361,7 @@ func runDreamerTaskPhase(ctx context.Context, app *infra.App, dreamerRunID strin
 	}
 
 	openRootsSummary := ""
-	if roots, err := memory.GetOpenRootTasks(ctx, app, 20); err == nil && len(roots) > 0 {
+	if roots, err := app.Memory.GetOpenRootTasks(ctx, 20); err == nil && len(roots) > 0 {
 		openRootsSummary = "\n\nCurrent open todo list roots:\n" + memory.FormatTasksForContext(roots, 1500)
 	}
 
@@ -481,7 +481,7 @@ func loadDreamerInputs(ctx context.Context, env infra.ToolEnv) (*DreamerInputs, 
 	cutoff := time.Now().Add(-24 * time.Hour)
 	startDate := cutoff.Format("2006-01-02")
 	endDate := time.Now().Format("2006-01-02")
-	entries, err := memory.GetEntriesByDateRange(ctx, env, startDate, endDate, 200)
+	entries, err := env.MemoryStore().GetEntriesByDateRange(ctx, startDate, endDate, 200)
 	if err != nil {
 		return nil, err
 	}
@@ -501,7 +501,7 @@ func loadDreamerInputs(ctx context.Context, env infra.ToolEnv) (*DreamerInputs, 
 		entryUUIDs = append(entryUUIDs, e.UUID)
 	}
 	recentQueriesText := ""
-	if queries, qErr := memory.GetRecentQueries(ctx, env, 50); qErr == nil && len(queries) > 0 {
+	if queries, qErr := env.MemoryStore().GetRecentQueries(ctx, 50); qErr == nil && len(queries) > 0 {
 		var qLines []string
 		for _, q := range queries {
 			ts := q.Timestamp
@@ -761,7 +761,7 @@ func RunDreamer(ctx context.Context, app *infra.App, opts *RunDreamerOpts) (*Dre
 	}
 
 	for _, name := range impactedContexts {
-		ctxUUID, e := memory.EnsureContextExists(ctx, app, name)
+		ctxUUID, e := app.Memory.EnsureContextExists(ctx, name)
 		if e != nil {
 			infra.LoggerFrom(ctx).Warn("dreamer ensure context failed", "dreamer_run_id", dreamerRunID, "phase", "consolidation", "name", name, "error", e)
 			continue
@@ -769,14 +769,14 @@ func RunDreamer(ctx context.Context, app *infra.App, opts *RunDreamerOpts) (*Dre
 		contextUUIDs[ctxUUID] = struct{}{}
 	}
 	for uuid := range contextUUIDs {
-		if e := memory.TouchContextBatch(ctx, app, uuid, entryUUIDs, 0.05); e != nil {
+		if e := app.Memory.TouchContextBatch(ctx, uuid, entryUUIDs, 0.05); e != nil {
 			infra.LoggerFrom(ctx).Warn("dreamer touch context batch failed", "dreamer_run_id", dreamerRunID, "phase", "consolidation", "context_uuid", uuid, "error", e)
 		}
 	}
 
 	if queryAnalysis != "" {
 		thoughtContent := "Query analysis: " + queryAnalysis
-		if _, e := memory.UpsertSemanticMemory(ctx, app, thoughtContent, "thought", "selfmodel", 0.9, nil, nil); e != nil {
+		if _, e := app.Memory.UpsertSemanticMemory(ctx, thoughtContent, "thought", "selfmodel", 0.9, nil, nil); e != nil {
 			infra.LoggerFrom(ctx).Warn("dreamer save query analysis thought failed", "dreamer_run_id", dreamerRunID, "phase", "consolidation", "error", e)
 		} else {
 			infra.LoggerFrom(ctx).Info("dreamer saved query analysis thought", "dreamer_run_id", dreamerRunID, "phase", "consolidation", "len", len(queryAnalysis))
@@ -856,7 +856,7 @@ func RunDreamer(ctx context.Context, app *infra.App, opts *RunDreamerOpts) (*Dre
 	}
 	// Collect unique tags from the 7-day window, normalize them via LLM, then promote.
 	var tagMapping map[string]string
-	if incTags, tagsErr := memory.CollectIncubationTags(ctx, app); tagsErr != nil {
+	if incTags, tagsErr := app.Memory.CollectIncubationTags(ctx); tagsErr != nil {
 		infra.LoggerFrom(ctx).Warn("dreamer incubation tag collection failed", "dreamer_run_id", dreamerRunID, "phase", "incubation", "error", tagsErr)
 	} else {
 		var consolidateErr error
@@ -866,7 +866,7 @@ func RunDreamer(ctx context.Context, app *infra.App, opts *RunDreamerOpts) (*Dre
 			tagMapping = nil
 		}
 	}
-	if promoted, incErr := memory.PromoteIncubatingClusters(ctx, app, tagMapping); incErr != nil {
+	if promoted, incErr := app.Memory.PromoteIncubatingClusters(ctx, tagMapping); incErr != nil {
 		infra.LoggerFrom(ctx).Warn("dreamer incubation failed", "dreamer_run_id", dreamerRunID, "phase", "incubation", "error", incErr)
 	} else if promoted > 0 {
 		infra.LoggerFrom(ctx).Info("dreamer incubation completed", "dreamer_run_id", dreamerRunID, "phase", "incubation", "promoted", promoted)

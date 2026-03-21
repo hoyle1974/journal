@@ -39,13 +39,11 @@ func (s *Store) EvictStaleNodes(ctx context.Context, weightThreshold float64, st
 		if nodeType == NodeTypeIdentity || nodeType == NodeTypeUserIdentity || nodeType == "log" {
 			continue
 		}
-		// TODO(batch-2): GetLinkedCompletedProjectID will be converted to a Store method; pass nil env for now.
-		projectID := GetLinkedCompletedProjectID(ctx, nil, data)
+		projectID := s.GetLinkedCompletedProjectID(ctx, data)
 		if projectID != "" {
 			content := getStringField(data, "content")
 			if content != "" {
-				// TODO(batch-2): AppendToProjectArchiveSummary will be converted to a Store method; pass nil env for now.
-				if err := AppendToProjectArchiveSummary(ctx, nil, projectID, content); err != nil {
+				if err := s.AppendToProjectArchiveSummary(ctx, projectID, content); err != nil {
 					s.log.Warn("janitor archive append failed", "project_id", projectID, "error", err)
 				} else {
 					s.log.Debug("janitor squeezed into project", "id", doc.Ref.ID, "project_id", projectID)
@@ -97,8 +95,7 @@ func (s *Store) CreatePulseAuditSignals(ctx context.Context, importanceThreshold
 		content := getStringField(data, "content")
 
 		signalContent := fmt.Sprintf("STALE LOOP DETECTED: You haven't mentioned '%s' in 2 weeks. Is this still a priority?", content)
-		// TODO(batch-2): UpsertSemanticMemory will be converted to a Store method; pass nil env for now.
-		_, err = UpsertSemanticMemory(ctx, nil, signalContent, "thought", "selfmodel", 0.9, []string{nodeID}, nil)
+		_, err = s.UpsertSemanticMemory(ctx, signalContent, "thought", "selfmodel", 0.9, []string{nodeID}, nil)
 		if err != nil {
 			s.log.Warn("failed to create pulse signal", "node_id", nodeID, "error", err)
 			continue

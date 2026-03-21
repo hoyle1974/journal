@@ -49,7 +49,7 @@ func RunFirstRunOnboarding(ctx context.Context, app *infra.App) error {
 			CreatedAt: now,
 		})
 	}
-	if err := memory.InsertPendingQuestions(ctx, app, questions); err != nil {
+	if err := app.Memory.InsertPendingQuestions(ctx, questions); err != nil {
 		return fmt.Errorf("onboarding seed questions: %w", err)
 	}
 	infra.LoggerFrom(ctx).Info("first-run onboarding seeded", "count", len(questions))
