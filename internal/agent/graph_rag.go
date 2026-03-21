@@ -48,7 +48,7 @@ func ExpandSearchResultsToSubgraph(ctx context.Context, env infra.ToolEnv, searc
 
 	var parts []string
 	for _, id := range uuids {
-		sg, err := env.MemoryStore().GraphExpand(ctx, id, queryVector, 3, 8)
+		sg, err := env.MemoryGraph().Expand(ctx, id, queryVector, 3, 8)
 		if err != nil {
 			infra.LoggerFrom(ctx).Debug("graph_rag expand error", "uuid", id, "error", err)
 			continue

@@ -196,7 +196,7 @@ func RunEvolutionSynthesis(ctx context.Context, env infra.ToolEnv, journalSummar
 		personaContent = node.Content
 	}
 	activeContextsSummary := ""
-	if nodes, metas, err := env.MemoryStore().GetActiveContexts(ctx, 10); err == nil && len(nodes) > 0 {
+	if nodes, metas, err := env.MemoryContexts().GetActive(ctx, 10); err == nil && len(nodes) > 0 {
 		var lines []string
 		for i := range nodes {
 			if i >= len(metas) {

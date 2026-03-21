@@ -44,7 +44,7 @@ func BuildSystemPrompt(ctx context.Context, env infra.ToolEnv) (string, error) {
 	}
 
 	// 1. Active Contexts
-	nodes, metas, _ := env.MemoryStore().GetActiveContexts(ctx, 5)
+	nodes, metas, _ := env.MemoryContexts().GetActive(ctx, 5)
 	activeContextItems := make([]ActiveContextItem, 0, len(nodes))
 	for i := range nodes {
 		if i >= len(metas) {
@@ -95,7 +95,7 @@ func BuildSystemPrompt(ctx context.Context, env infra.ToolEnv) (string, error) {
 	}
 
 	// 5. Open Tasks (root)
-	roots, _ := env.MemoryStore().GetOpenRootTasks(ctx, 15)
+	roots, _ := env.MemoryTasks().GetOpenRootTasks(ctx, 15)
 	openTodoBlock := formatTodoSection(roots)
 	openTodoBlockWrapped := openTodoBlock
 	if openTodoBlock != "" {
