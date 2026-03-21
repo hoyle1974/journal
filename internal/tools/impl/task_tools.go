@@ -87,7 +87,7 @@ func registerTaskTools() {
 				t.JournalEntryIDs = []string{cur}
 			}
 
-			uuid, err := env.MemoryStore().CreateTask(ctx, t)
+			uuid, err := env.MemoryTasks().CreateTask(ctx, t)
 			if err != nil {
 				return tools.Fail("Error creating task: %v", err)
 			}
@@ -108,7 +108,7 @@ func registerTaskTools() {
 			if a.TaskID == "" {
 				return tools.MissingParam("task_id")
 			}
-			t, err := env.MemoryStore().GetTask(ctx, a.TaskID)
+			t, err := env.MemoryTasks().GetTask(ctx, a.TaskID)
 			if err != nil {
 				return tools.Fail("Error fetching task: %v", err)
 			}
@@ -169,7 +169,7 @@ func registerTaskTools() {
 			if !hasEdit {
 				return tools.Fail("provide at least one field to update: content, parent_id, due_date, system_prompt, or add/remove journal/memory IDs")
 			}
-			err := env.MemoryStore().UpdateTask(ctx, a.TaskID, opts)
+			err := env.MemoryTasks().UpdateTask(ctx, a.TaskID, opts)
 			if err != nil {
 				return tools.Fail("Error updating task: %v", err)
 			}
@@ -194,7 +194,7 @@ func registerTaskTools() {
 				return tools.Fail("reasoning is required when marking a task as completed or abandoned")
 			}
 
-			err := env.MemoryStore().UpdateTaskStatus(ctx, a.TaskID, a.Status, a.Reasoning)
+			err := env.MemoryTasks().UpdateTaskStatus(ctx, a.TaskID, a.Status, a.Reasoning)
 			if err != nil {
 				return tools.Fail("Error updating task: %v", err)
 			}
@@ -216,7 +216,7 @@ func registerTaskTools() {
 			var tasks []memory.Task
 			var err error
 			if query == "" {
-				tasks, err = env.MemoryStore().GetOpenRootTasks(ctx, limit*2)
+				tasks, err = env.MemoryTasks().GetOpenRootTasks(ctx, limit*2)
 				if err != nil {
 					return tools.Fail("Error listing tasks: %v", err)
 				}
@@ -270,7 +270,7 @@ func registerTaskTools() {
 			if env == nil {
 				return tools.Fail("No app in context")
 			}
-			result, err := env.MemoryStore().BrainstormSubtasks(ctx, a.TaskID)
+			result, err := env.MemoryTasks().BrainstormSubtasks(ctx, a.TaskID)
 			if err != nil {
 				return tools.Fail("Error decomposing task: %v", err)
 			}

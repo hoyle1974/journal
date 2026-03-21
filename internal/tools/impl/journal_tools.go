@@ -88,7 +88,7 @@ func registerJournalTools() {
 					limit = 200
 				}
 			}
-			entries, err := env.MemoryStore().GetEntries(ctx, limit)
+			entries, err := env.MemoryEntries().List(ctx, limit, false)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
@@ -111,7 +111,7 @@ func registerJournalTools() {
 		Execute: func(ctx context.Context, env infra.ToolEnv, args any) tools.Result {
 			a := args.(*getOldestEntriesArgs)
 			count := clampInt(a.Count, 10, 1, 50)
-			entries, err := env.MemoryStore().GetEntriesAsc(ctx, count)
+			entries, err := env.MemoryEntries().List(ctx, count, true)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
@@ -204,7 +204,7 @@ func registerJournalTools() {
 					}
 				}
 			} else {
-				entries, err = env.MemoryStore().SearchEntries(ctx, a.Query, searchLimit)
+				entries, err = env.MemoryEntries().Search(ctx, a.Query, searchLimit)
 				if err != nil {
 					return tools.Fail("Error: %v", err)
 				}
@@ -259,7 +259,7 @@ func registerJournalTools() {
 		Category:    "journal",
 		Args:        &tools.NoArgs{},
 		Execute: func(ctx context.Context, env infra.ToolEnv, args any) tools.Result {
-			entries, err := env.MemoryStore().GetEntries(ctx, 100)
+			entries, err := env.MemoryEntries().List(ctx, 100, false)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
@@ -331,7 +331,7 @@ func registerJournalTools() {
 					}
 				}
 			} else {
-				entries, err = env.MemoryStore().SearchEntries(ctx, a.Topic, 100)
+				entries, err = env.MemoryEntries().Search(ctx, a.Topic, 100)
 				if err != nil {
 					return tools.Fail("Error searching entries: %v", err)
 				}

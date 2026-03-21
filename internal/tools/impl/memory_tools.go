@@ -77,7 +77,7 @@ func registerKnowledgeTools() {
 					Predicate:   predicate,
 					ObjectValue: strings.TrimSpace(a.ObjectValue),
 				}
-				id, err := env.MemoryStore().UpsertSemanticMemoryPreembeddedWithSPO(ctx, a.Content, a.NodeType, "thought", 0.7, nil, entryIDs, nil, spo)
+				id, err := env.MemoryKnowledge().Upsert(ctx, a.Content, a.NodeType, "thought", 0.7, memory.UpsertOptions{Embedding: nil, SPO: spo, EntityLinks: nil, JournalEntryIDs: entryIDs})
 				if err != nil {
 					return tools.Fail("Error: %v", err)
 				}
@@ -122,16 +122,16 @@ func registerKnowledgeTools() {
 			// Single-pass vector search: significance_weight >= 0.7 pre-filter routes directly to
 			// semantic knowledge (Gold), excluding low-value gravel and raw log entries.
 			const semanticMinSignificance = 0.7
-			vectorNodes, vecErr := env.MemoryStore().QuerySimilarSemanticNodes(ctx, queryVec, candidateLimit, semanticMinSignificance)
+			vectorNodes, vecErr := env.MemoryGraph().QuerySimilar(ctx, queryVec, memory.SearchOptions{Limit: candidateLimit, MinSignificance: semanticMinSignificance})
 			if vecErr != nil {
 				infra.LogVectorSearchFailed(ctx, "journal(semantic)", vecErr, 0)
 				vectorNodes = nil
 			}
 			// Keyword fallback on the same unified collection for exact-match safety.
-			keywordNodes, _ := env.MemoryStore().SearchKnowledgeNodes(ctx, a.Query, candidateLimit)
+			keywordNodes, _ := env.MemoryGraph().SearchKeywords(ctx, a.Query, candidateLimit)
 
 			fusedNodes := memory.FuseKnowledgeNodes(vectorNodes, keywordNodes, limit*2)
-			nodes, _ := env.MemoryStore().RerankNodes(ctx, a.Query, fusedNodes, limit)
+			nodes, _ := env.MemoryGraph().Rerank(ctx, a.Query, fusedNodes, limit)
 
 			if vecErr != nil && len(nodes) == 0 {
 				return tools.Fail("Error: semantic search failed (vector: %v)", vecErr)

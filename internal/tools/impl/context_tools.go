@@ -56,7 +56,7 @@ func registerContextTools() {
 		Execute: func(ctx context.Context, env infra.ToolEnv, args any) tools.Result {
 			a := args.(*listContextsArgs)
 			limit := clampInt(a.Limit, 10, 1, 20)
-			contexts, metas, err := env.MemoryStore().GetActiveContexts(ctx, limit)
+			contexts, metas, err := env.MemoryContexts().GetActive(ctx, limit)
 			if err != nil {
 				return tools.Fail("Error: %v", err)
 			}
@@ -95,7 +95,7 @@ func registerContextTools() {
 			if cur := agent.CurrentEntryUUIDFrom(ctx); cur != "" {
 				sourceEntries = []string{cur}
 			}
-			uuid, err := env.MemoryStore().CreateContext(ctx, a.Name, a.Description, contextType, nil, sourceEntries)
+			uuid, err := env.MemoryContexts().CreateContext(ctx, a.Name, a.Description, contextType, nil, sourceEntries)
 			if err != nil {
 				return tools.Fail("Error creating context: %v", err)
 			}
@@ -133,7 +133,7 @@ func registerContextTools() {
 			if cur := agent.CurrentEntryUUIDFrom(ctx); cur != "" {
 				newSourceEntry = &cur
 			}
-			err = env.MemoryStore().TouchContext(ctx, node.UUID, newSourceEntry, boost)
+			err = env.MemoryContexts().Touch(ctx, node.UUID, newSourceEntry, boost)
 			if err != nil {
 				return tools.Fail("Error touching context: %v", err)
 			}
@@ -306,7 +306,7 @@ func registerProjectStatusTools() {
 			if node == nil {
 				return tools.Fail("Project '%s' not found.", a.ProjectName)
 			}
-			if err := env.MemoryStore().UpdateProjectStatus(ctx, node.UUID, a.Status); err != nil {
+			if err := env.MemoryKnowledge().UpdateProjectStatus(ctx, node.UUID, a.Status); err != nil {
 				return tools.Fail("Failed to update status: %v", err)
 			}
 			return tools.OK("Project '%s' is now marked as %s.", a.ProjectName, a.Status)
