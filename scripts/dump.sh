@@ -24,6 +24,7 @@ EXCLUDE_PATTERNS=(
     "cmd/admin/"
     "twilio.txt"
     "docs/telegram-setup.md" # New: one-time setup guide
+    "docs/superpowers/plans/" # Executed implementation plans — historical, not needed for context
     "_test.go"            # New: prunes all test files for leaner logic
 )
 # Function to check if a file should be excluded
