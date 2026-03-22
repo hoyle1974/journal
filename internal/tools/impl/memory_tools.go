@@ -77,7 +77,7 @@ func registerKnowledgeTools() {
 					Predicate:   predicate,
 					ObjectValue: strings.TrimSpace(a.ObjectValue),
 				}
-				id, err := env.MemoryKnowledge().Upsert(ctx, a.Content, a.NodeType, "thought", 0.7, memory.UpsertOptions{Embedding: nil, SPO: spo, EntityLinks: nil, JournalEntryIDs: entryIDs})
+				id, err := env.MemoryKnowledge().Upsert(ctx, a.Content, a.NodeType, "thought", 0.7, memory.UpsertOptions{SPO: spo, JournalEntryIDs: entryIDs})
 				if err != nil {
 					return tools.Fail("Error: %v", err)
 				}
