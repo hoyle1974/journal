@@ -753,11 +753,18 @@ func RunDreamer(ctx context.Context, app *infra.App, opts *RunDreamerOpts) (*Dre
 		return nil, fmt.Errorf("dreamer: all specialists failed")
 	}
 
-	// Log per-domain fact counts now that all are complete
+	// Log per-domain fact counts and facts now that all are complete
 	for i, d := range domains {
-		if outputs[i] != nil && len(outputs[i].Facts) > 0 && progress != nil {
-			progress.OnLog(ctx, fmt.Sprintf("    %s: %d facts", d, len(outputs[i].Facts)))
+		if outputs[i] == nil || len(outputs[i].Facts) == 0 {
+			continue
 		}
+		if progress != nil {
+			progress.OnLog(ctx, fmt.Sprintf("    %s: %d facts", d, len(outputs[i].Facts)))
+			for _, f := range outputs[i].Facts {
+				progress.OnLog(ctx, fmt.Sprintf("      - %s", f))
+			}
+		}
+		infra.LoggerFrom(ctx).Debug("dreamer specialist facts", "domain", d, "facts", outputs[i].Facts)
 	}
 
 	for _, name := range impactedContexts {
