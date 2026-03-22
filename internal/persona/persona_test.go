@@ -25,6 +25,13 @@ func (s *stubEnv) Dispatch(_ context.Context, _ *infra.LLMRequest) (*genai.Gener
 func (s *stubEnv) MemoryStore() *memory.Store {
 	panic("MemoryStore called unexpectedly")
 }
+func (s *stubEnv) MemoryEntries() memory.EntryStore     { panic("MemoryEntries called unexpectedly") }
+func (s *stubEnv) MemoryKnowledge() memory.KnowledgeStore { panic("MemoryKnowledge called unexpectedly") }
+func (s *stubEnv) MemoryGraph() memory.GraphStore       { panic("MemoryGraph called unexpectedly") }
+func (s *stubEnv) MemoryTasks() memory.TaskStore        { panic("MemoryTasks called unexpectedly") }
+func (s *stubEnv) MemoryContexts() memory.ContextStore  { panic("MemoryContexts called unexpectedly") }
+func (s *stubEnv) MemoryAgent() memory.AgentOps         { panic("MemoryAgent called unexpectedly") }
+func (s *stubEnv) MemoryAdmin() memory.AdminOps         { panic("MemoryAdmin called unexpectedly") }
 
 func TestApplyEdgeCases(t *testing.T) {
 	t.Parallel()
