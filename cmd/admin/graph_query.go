@@ -25,6 +25,7 @@ func runGraphQuery(ctx context.Context, app *infra.App, args []string) {
 	}
 
 	cfg := app.Config()
+	infra.InitObservability(cfg)
 
 	// 1. Keyword search to find seed nodes.
 	seeds, err := app.MemoryGraph().SearchKeywords(ctx, query, *limit)
