@@ -63,6 +63,9 @@ var predicateAliasMap = map[string]string{
 	"work_at":            "works_at",
 	"works_for":          "works_at",
 	"employed_by":        "works_at",
+	"moved_to":           "lives_in",
+	"relocated_to":       "lives_in",
+	"resides_in":         "lives_in",
 	"live_in":            "lives_in",
 	"lives_at":           "lives_in",
 	"located_at":         "located_in",
@@ -75,19 +78,27 @@ var predicateAliasMap = map[string]string{
 
 // IsAllowedPredicate reports whether predicate is in the canonical ontology.
 func IsAllowedPredicate(predicate string) bool {
-	_, ok := allowedPredicateSet[NormalizedPredicate(predicate)]
+	_, ok := allowedPredicateSet[CanonicalizePredicate(predicate)]
 	return ok
+}
+
+// CanonicalizePredicate normalizes a raw predicate and maps known aliases into the
+// canonical ontology. Unknown predicates are returned in normalized form to preserve
+// potentially useful relations while still allowing callers to detect ontology gaps.
+func CanonicalizePredicate(raw string) string {
+	p := NormalizedPredicate(raw)
+	if mapped, ok := predicateAliasMap[p]; ok {
+		return mapped
+	}
+	return p
 }
 
 // SnapAllowedPredicate maps a raw predicate to the nearest canonical ontology entry.
 // It first normalizes, then checks common aliases.
 func SnapAllowedPredicate(raw string) (string, bool) {
-	p := NormalizedPredicate(raw)
+	p := CanonicalizePredicate(raw)
 	if _, ok := allowedPredicateSet[p]; ok {
 		return p, true
-	}
-	if mapped, ok := predicateAliasMap[p]; ok {
-		return mapped, true
 	}
 	return "", false
 }
