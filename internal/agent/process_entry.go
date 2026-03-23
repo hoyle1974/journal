@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"cloud.google.com/go/firestore"
-	"github.com/jackstrohm/jot/internal/infra"
 	"github.com/hoyle1974/memory"
+	"github.com/jackstrohm/jot/internal/infra"
 	"github.com/jackstrohm/jot/pkg/utils"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -101,11 +101,11 @@ func ProcessEntry(ctx context.Context, app *infra.App, entryUUID, content, times
 		// existing knowledge nodes and links this entry to them.
 		ResolveAndLinkEntities(ctx, app, entryUUID, analysis.Entities)
 	}
-	// Best-effort SPO relationship extraction — runs in background because it makes an LLM call.
-	go func() {
-		bgCtx := context.Background()
-		ExtractAndStoreRelationships(bgCtx, app, entryUUID, content)
-	}()
+	tRef := time.Now()
+	if err := runRefineryPipeline(ctx, app, entryUUID, content); err != nil {
+		infra.LoggerFrom(ctx).Warn("process-entry: refinery pipeline failed", "entry_uuid", entryUUID, "error", err)
+	}
+	llm += time.Since(tRef)
 
 	t3 := time.Now()
 	vector, err := infra.GenerateEmbedding(ctx, app.Config().GoogleCloudProject, content, infra.EmbedTaskRetrievalDocument)

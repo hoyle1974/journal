@@ -33,6 +33,8 @@ require (
 	google.golang.org/protobuf v1.36.11
 )
 
+replace github.com/hoyle1974/memory => ./memory
+
 require (
 	cel.dev/expr v0.25.1 // indirect
 	cloud.google.com/go v0.123.0 // indirect

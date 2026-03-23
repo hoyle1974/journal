@@ -38,6 +38,9 @@ var processEntryReportPromptTxt string
 //go:embed relationship_extractor.txt
 var relationshipExtractorTxt string
 
+//go:embed refinery.txt
+var refineryTxt string
+
 var (
 	systemPromptTmpl       = template.Must(template.New("system").Parse(systemPromptTxt))
 	activityHistoryTmpl    = template.Must(template.New("activityHistory").Parse(activityHistoryTxt))
@@ -46,6 +49,7 @@ var (
 		"join": strings.Join,
 	}).Parse(processEntryReportPromptTxt))
 	relationshipExtractorTmpl = template.Must(template.New("relationshipExtractor").Parse(relationshipExtractorTxt))
+	refineryTmpl              = template.Must(template.New("refinery").Parse(refineryTxt))
 )
 
 // SystemPromptData holds all inputs for the main FOH system prompt.
@@ -156,6 +160,21 @@ func BuildRelationshipExtractor(data RelationshipExtractorData) (string, error) 
 	var buf bytes.Buffer
 	if err := relationshipExtractorTmpl.Execute(&buf, data); err != nil {
 		return "", fmt.Errorf("execute relationship extractor: %w", err)
+	}
+	return buf.String(), nil
+}
+
+// RefineryData holds inputs for synchronous relationship extraction.
+type RefineryData struct {
+	Discovery string
+	Entry     string
+}
+
+// BuildRefinery executes the refinery template.
+func BuildRefinery(data RefineryData) (string, error) {
+	var buf bytes.Buffer
+	if err := refineryTmpl.Execute(&buf, data); err != nil {
+		return "", fmt.Errorf("execute refinery: %w", err)
 	}
 	return buf.String(), nil
 }

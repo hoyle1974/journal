@@ -1,0 +1,65 @@
+# memory Library Rules
+
+## Collaboration Style
+
+- **Rule:** Be a candid collaborator, not a yes-man.
+- **Requirement:** When a suggestion conflicts with established project goals, architectural rules, or engineering best practices, say so clearly and explain why — before implementing it.
+- **Requirement:** If asked to do something that contradicts a rule in this file, flag the conflict explicitly and propose a compliant alternative. Do not silently comply.
+- **Requirement:** Concerns must be raised *before* acting, not buried in a footnote after the code is written.
+
+## Library Architecture
+
+- **Rule:** This is a pure Go library — no `main` package, no HTTP handlers, no CLI.
+- **Requirement:** All functionality is exposed via the `Store` struct. Callers construct a `Store` with `New(db, embedder, llm, opts...)`.
+- **Requirement:** Never import application-level packages or frameworks. Dependencies are limited to Firestore SDK, Google API clients, and the standard library.
+- **Rule:** Dependency injection via interfaces.
+- **Requirement:** `Embedder` and `LLMDispatcher` must be passed into `Store` at construction time — never instantiated inside the library. Callers own the lifecycle of these clients.
+- **Requirement:** New capabilities that require external services must be expressed as new interface types passed via `Option` funcs or `New()` parameters, not hardcoded clients.
+
+## Schema & Node Types
+
+- **Rule:** All node types must be declared as constants in `schema.go`.
+- **Requirement:** New node types must have a corresponding metadata struct, validator, and normalizer, and must be registered in the `registry` map in `schema.go`.
+- **Rule:** Node metadata is always stored as a JSON string in the `metadata` field. Use `ValidateMetadata` and `NormalizeMetadata` before writing.
+- **Requirement:** Never store raw, un-normalized metadata. Always pass through `NormalizeMetadata` before writing to Firestore.
+
+## Unified Collection
+
+- **Rule:** All node types live in the single `journal` Firestore collection (`KnowledgeCollection`).
+- **Requirement:** Distinguish node types via the `node_type` field. Never create separate collections for new node types.
+- **Rule:** Protected node types (`identity_anchor`, `user_identity`) must never be deleted by the janitor or migration code. Add explicit guards when iterating all documents.
+
+## LLM & Prompt Safety
+
+- **Rule:** No `fmt.Sprintf` for multi-variable prompt assembly.
+- **Requirement:** All parameterized prompts must use `text/template` with a typed data struct. Parse templates once at `init()` using `template.Must`.
+- **Requirement:** Wrap all user-origin strings in `<user_data>` tags via `wrapAsUserData()` before embedding in prompts.
+- **Rule:** Parse LLM output as key/value lines via `parseKeyValueMap`. No JSON from LLM responses.
+- **Rule:** LLM calls go through `LLMDispatcher.Dispatch`. Never call any LLM SDK directly inside the library.
+
+## Prompts
+
+- **Rule:** Prompt strings for LLM calls are either constants in the calling file (for short, stable prompts) or embedded text files in the `prompts/` subdirectory (for longer prompts).
+- **Requirement:** Use `//go:embed` to include prompt files from `prompts/`. Do not read prompt files at runtime.
+
+## Go Style
+
+- **Context:** Every exported function must take `ctx context.Context` as the first argument.
+- **Errors:** Use `%w` for error wrapping: `fmt.Errorf("context: %w", err)`. Use `errors.Is` and `errors.As` for inspection. Never use `%v` when wrapping an error.
+- **Files:** Keep files under 400 lines. If a file becomes a junk drawer, suggest a refactor.
+- **Type erasure:** Prefer `any` over `interface{}`. Use generics `[T any]` for collection utilities where it improves type safety.
+- **Slice allocation:** Pre-allocate when length is known: `make([]T, 0, n)` for append loops.
+
+## Logging
+
+- **Rule:** No `fmt.Print` or global `log.*` calls.
+- **Requirement:** Always use `s.log` (the `*slog.Logger` on `Store`). Debug logs must not truncate content.
+
+## Tests
+
+- **Rule:** Table-driven tests are preferred. Use `t.Cleanup` instead of `defer` for test teardown.
+- **Rule:** Tests that hit Firestore must use a test project or emulator — never prod.
+
+## Documentation
+
+- **Rule:** `blueprint.md` is the single source of truth for what this library provides. Update it in the same commit as any change that adds or removes exported types, functions, or node types.
