@@ -133,7 +133,6 @@ type ProcessEntryReportData struct {
 	Source         string
 	Significance   float64
 	Domain         string
-	FactStored     string
 	TaskCreated    string
 	ContextsLinked int
 	Mood           string
@@ -166,8 +165,9 @@ func BuildRelationshipExtractor(data RelationshipExtractorData) (string, error) 
 
 // RefineryData holds inputs for synchronous relationship extraction.
 type RefineryData struct {
-	Discovery string
-	Entry     string
+	Discovery         string
+	Entry             string
+	AllowedPredicates string
 }
 
 // BuildRefinery executes the refinery template.

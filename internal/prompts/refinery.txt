@@ -7,16 +7,19 @@ Required keys:
 
 Optional section:
 - triples:
-  - One line per triple in the exact format: Subject | predicate | Object
+  - One line per triple in the exact format: Subject | predicate | Object | SubjectType | ObjectType
+  - SubjectType/ObjectType must be one of: person, place, project, goal, preference, event, milestone, asset, tool, generic
 
 Rules:
 1) Use only grounded entities from entry text.
 2) Never invent UUIDs.
-3) Normalize predicate to snake_case and prefer this ontology:
-   works_at, prefers, owns, lives_in, located_in, collaborates_with, reports_to, manages
+3) Normalize predicate to snake_case and use only the allowed predicate ontology provided below.
 4) Emit at most 5 triples.
 5) If no reliable triple exists, return:
    status: none
+
+Allowed predicates:
+{{.AllowedPredicates}}
 
 Discovery context (existing nodes):
 {{.Discovery}}

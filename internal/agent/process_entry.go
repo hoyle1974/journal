@@ -21,7 +21,6 @@ type ProcessEntryReport struct {
 	Source         string
 	Significance   float64
 	Domain         string
-	FactStored     string
 	TaskCreated    string // commitment intent if an agency task was auto-created; empty if none
 	ContextsLinked int
 	Mood           string
@@ -60,7 +59,7 @@ func ProcessEntry(ctx context.Context, app *infra.App, entryUUID, content, times
 		}
 	}
 
-	infra.LoggerFrom(ctx).Debug("process-entry: running evaluator", "entry_uuid", entryUUID, "reason", "extract significance and optionally store fact")
+	infra.LoggerFrom(ctx).Debug("process-entry: running evaluator", "entry_uuid", entryUUID, "reason", "extract significance and commitment intent")
 	t0 := time.Now()
 	parsed, err := RunEvaluator(ctx, app, content, entryUUID, timestamp)
 	llm += time.Since(t0)
@@ -161,7 +160,6 @@ func ProcessEntry(ctx context.Context, app *infra.App, entryUUID, content, times
 	if parsed != nil {
 		report.Significance = parsed.Significance
 		report.Domain = parsed.Domain
-		report.FactStored = parsed.FactToStore
 	}
 	if taskContent != "" {
 		report.TaskCreated = taskContent

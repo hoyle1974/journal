@@ -39,6 +39,89 @@ const (
 	NodeTypeRelationship = "relationship"
 )
 
+// AllowedPredicates is the canonical relationship ontology used by Refinery.
+var AllowedPredicates = []string{
+	"works_at",
+	"prefers",
+	"owns",
+	"lives_in",
+	"located_in",
+	"collaborates_with",
+	"reports_to",
+	"manages",
+}
+
+var allowedPredicateSet = func() map[string]struct{} {
+	out := make(map[string]struct{}, len(AllowedPredicates))
+	for _, p := range AllowedPredicates {
+		out[p] = struct{}{}
+	}
+	return out
+}()
+
+var predicateAliasMap = map[string]string{
+	"work_at":            "works_at",
+	"works_for":          "works_at",
+	"employed_by":        "works_at",
+	"live_in":            "lives_in",
+	"lives_at":           "lives_in",
+	"located_at":         "located_in",
+	"based_in":           "located_in",
+	"collaborates":       "collaborates_with",
+	"collaboratesw_with": "collaborates_with",
+	"manage":             "manages",
+	"reports":            "reports_to",
+}
+
+// IsAllowedPredicate reports whether predicate is in the canonical ontology.
+func IsAllowedPredicate(predicate string) bool {
+	_, ok := allowedPredicateSet[NormalizedPredicate(predicate)]
+	return ok
+}
+
+// SnapAllowedPredicate maps a raw predicate to the nearest canonical ontology entry.
+// It first normalizes, then checks common aliases.
+func SnapAllowedPredicate(raw string) (string, bool) {
+	p := NormalizedPredicate(raw)
+	if _, ok := allowedPredicateSet[p]; ok {
+		return p, true
+	}
+	if mapped, ok := predicateAliasMap[p]; ok {
+		return mapped, true
+	}
+	return "", false
+}
+
+// CanonicalEntityNodeType normalizes extractor-provided entity types to known node types.
+// Unknown or empty values fall back to person for backwards compatibility.
+func CanonicalEntityNodeType(raw string) string {
+	t := strings.TrimSpace(strings.ToLower(raw))
+	switch t {
+	case NodeTypePerson, "people", "human":
+		return NodeTypePerson
+	case NodeTypePlace, "location", "city", "country":
+		return NodeTypePlace
+	case NodeTypeProject, "work":
+		return NodeTypeProject
+	case NodeTypeGoal:
+		return NodeTypeGoal
+	case NodeTypePreference:
+		return NodeTypePreference
+	case NodeTypeEvent:
+		return NodeTypeEvent
+	case NodeTypeMilestone:
+		return NodeTypeMilestone
+	case NodeTypeAsset:
+		return NodeTypeAsset
+	case NodeTypeTool:
+		return NodeTypeTool
+	case NodeTypeGeneric:
+		return NodeTypeGeneric
+	default:
+		return NodeTypePerson
+	}
+}
+
 // IdentityMeta is the metadata schema for identity-anchor nodes (primary user, core values, system directives).
 type IdentityMeta struct {
 	PrimaryName      string   `json:"primary_name"`

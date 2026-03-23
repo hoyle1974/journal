@@ -129,6 +129,60 @@ func TestNormalizedPredicate(t *testing.T) {
 	}
 }
 
+func TestAllowedPredicatesAndSnapping(t *testing.T) {
+	t.Parallel()
+
+	for _, p := range AllowedPredicates {
+		if !IsAllowedPredicate(p) {
+			t.Fatalf("expected allowed predicate %q to be recognized", p)
+		}
+	}
+
+	tests := []struct {
+		in       string
+		want     string
+		wantSnap bool
+	}{
+		{in: "works_at", want: "works_at", wantSnap: true},
+		{in: "works-for", want: "works_at", wantSnap: true},
+		{in: "lives at", want: "lives_in", wantSnap: true},
+		{in: "based_in", want: "located_in", wantSnap: true},
+		{in: "unknown_predicate", want: "", wantSnap: false},
+	}
+	for _, tc := range tests {
+		got, ok := SnapAllowedPredicate(tc.in)
+		if ok != tc.wantSnap {
+			t.Fatalf("SnapAllowedPredicate(%q) ok=%v, want %v", tc.in, ok, tc.wantSnap)
+		}
+		if got != tc.want {
+			t.Fatalf("SnapAllowedPredicate(%q)=%q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestCanonicalEntityNodeType(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		in   string
+		want string
+	}{
+		{in: "Person", want: NodeTypePerson},
+		{in: "Place", want: NodeTypePlace},
+		{in: "location", want: NodeTypePlace},
+		{in: "Project", want: NodeTypeProject},
+		{in: "tool", want: NodeTypeTool},
+		{in: "unknown", want: NodeTypePerson},
+		{in: "", want: NodeTypePerson},
+	}
+	for _, tc := range tests {
+		got := CanonicalEntityNodeType(tc.in)
+		if got != tc.want {
+			t.Fatalf("CanonicalEntityNodeType(%q)=%q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
 func TestIsSPOTriple(t *testing.T) {
 	t.Parallel()
 
@@ -382,9 +436,9 @@ func TestNormalizeMetadata(t *testing.T) {
 			name:     "project lowercases status and resolves parent_goal alias",
 			nodeType: "project",
 			meta: map[string]any{
-				"status":     "ACTIVE",
+				"status":      "ACTIVE",
 				"parent_goal": "goal-abc",
-				"deadline":   "2026-12-31",
+				"deadline":    "2026-12-31",
 			},
 			check: func(t *testing.T, got map[string]any) {
 				t.Helper()
@@ -518,9 +572,9 @@ func TestNormalizeMetadata(t *testing.T) {
 			name:     "generic copies source_excerpt and extracted_facts",
 			nodeType: "generic",
 			meta: map[string]any{
-				"source_excerpt":  "some text",
-				"extracted_facts": []string{"fact1", "fact2"},
-				"tags":            []string{"tag1"},
+				"source_excerpt":   "some text",
+				"extracted_facts":  []string{"fact1", "fact2"},
+				"tags":             []string{"tag1"},
 				"confidence_score": 0.9,
 			},
 			check: func(t *testing.T, got map[string]any) {

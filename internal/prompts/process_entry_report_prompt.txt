@@ -5,7 +5,6 @@ Write 2–5 sentences. Plain prose only. No markdown, no bullet points.
 Rules:
 - First person ("I evaluated...", "I detected...", "I extracted...")
 - Mention the significance score and domain assigned by the evaluator
-- If a fact was stored, say what it was
 - If a task was auto-created, say what commitment triggered it
 - Mention how many contexts were linked
 - Mention the detected mood and any notable entities or tags
@@ -13,7 +12,7 @@ Rules:
 
 Entry (truncated): {{.Content}}
 Source: {{.Source}}
-Evaluator — significance: {{printf "%.2f" .Significance}}, domain: {{.Domain}}{{if .FactStored}}, fact stored: "{{.FactStored}}"{{end}}
+Evaluator — significance: {{printf "%.2f" .Significance}}, domain: {{.Domain}}
 {{- if .TaskCreated}}
 Agency task auto-created: "{{.TaskCreated}}"
 {{- end}}

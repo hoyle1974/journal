@@ -97,7 +97,6 @@ func GenerateProcessEntryReport(ctx context.Context, app infra.ToolEnv, r *Proce
 		Source:         r.Source,
 		Significance:   r.Significance,
 		Domain:         r.Domain,
-		FactStored:     r.FactStored,
 		TaskCreated:    r.TaskCreated,
 		ContextsLinked: r.ContextsLinked,
 		Mood:           r.Mood,

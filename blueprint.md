@@ -7,7 +7,7 @@ JOT is a single-user "Agentic Second Brain." It creates a high-fidelity bridge b
 ### The "Gold vs. Gravel" Principle
 
 - **Gravel:** Temporary logistics, one-off errands, and conversational filler. It stays in the raw logs.
-- **Gold:** Relationship facts, project milestones, rigid preferences, and personal values. Captured via FOH (`upsert_knowledge`), ingest-time evaluator, and journal processing — not via a separate nightly batch job.
+- **Gold:** Relationship facts, project milestones, rigid preferences, and personal values. Captured synchronously at ingest through the Refinery pipeline in `ProcessEntry` (discovery -> extraction -> resolve/commit), not via FOH manual extraction or a nightly batch path.
 
 **Capabilities:** The single source of truth for what Jot can do (tools, agents, API, cron, memory) is `internal/prompts/app_capabilities.txt`. Keep it updated when adding or changing behavior.
 
@@ -34,7 +34,7 @@ Tools include journal, knowledge (semantic_search, upsert_knowledge, etc.), task
 
 ### B. The Evaluator — `internal/agent/evaluator.go` + `ProcessEntry`
 
-On journal ingest (`ProcessEntry`), the evaluator assigns significance, may upsert facts, and can auto-create tasks from strong future commitments. Proactive high-significance insights can be stored for FOH.
+On journal ingest (`ProcessEntry`), the evaluator assigns significance and can auto-create tasks from strong future commitments. Gold relationship extraction is handled by the synchronous Refinery pipeline. Proactive high-significance insights can still be stored for FOH.
 
 ## 4. Entry Points
 

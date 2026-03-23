@@ -23,7 +23,7 @@ Jot is a personal journaling and memory system. It ingests journal entries, extr
 - **Unified collection**: All documents (both episodic log entries and semantic knowledge nodes) live in the `journal` Firestore collection, distinguished by `node_type`.
 - **Episodic logs** (`node_type: "log"`): Raw journal entries. significance_weight=0.3; queried by journal tools with `node_type == "log"` filter.
 - **Semantic memory** (`node_type: person|project|goal|preference|...`): Extracted knowledge facts. significance_weight ranges 0.5–0.95. Types: person, project, goal, preference, event, milestone, place, asset, tool, generic, weekly_summary, monthly_summary, identity_anchor, user_identity. For project/goal nodes, status must be one of: active, archived, blocked, done, planning, pending, completed. Recalled by semantic_search via significance_weight >= 0.7 pre-filter + vector similarity.
-- **Gold vs. Gravel routing**: semantic_search targets significance_weight >= 0.7 (Gold facts); journal tools target node_type == "log" (Gravel events).
+- **Gold vs. Gravel routing**: semantic_search targets significance_weight >= 0.7 (Gold facts); journal tools target node_type == "log" (Gravel events). Gold relationship extraction happens synchronously at ingest via Refinery.
 - **Reserved names**: user_profile (identity), system_evolution (optional audit text for get_system_health_audit).
 
 ## Journal
@@ -43,10 +43,10 @@ Jot is a personal journaling and memory system. It ingests journal entries, extr
 ## Relationship Triples
 - Relational facts are stored as Subject-Predicate-Object triples and committed as first-class `relationship` nodes.
 - **Ingest-time extraction** runs synchronously in ProcessEntry via the Refinery pipeline (Discovery -> Extraction -> Resolution -> Commit).
-- Relationship nodes store normalized `predicate` plus `subject_id`, `object_uuid`, and `source_entry_id`, and maintain entity backlinks via `entity_links`.
+- Relationship nodes store normalized `predicate` plus `subject_id`, `object_uuid`, and `source_entry_id`, and maintain entity backlinks via `entity_links` (subject, object, and source log).
 - The `upsert_knowledge` tool supports optional `predicate` and `object_value` parameters for non-refinery/manual updates.
 
 ## Data terms
-- **Gold**: Permanent, high-value facts for semantic memory.
+- **Gold**: Permanent, high-value facts for semantic memory, extracted in real time at ingest by Refinery.
 - **Gravel**: Temporary or low-significance episodic content in raw logs.
 - **Knowledge gap**: Question the system could not answer from current knowledge; stored and shown to FOH for context.

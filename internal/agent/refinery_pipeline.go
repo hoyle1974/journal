@@ -13,8 +13,10 @@ import (
 
 type refineryTriple struct {
 	Subject   string
+	SubType   string
 	Predicate string
 	Object    string
+	ObjType   string
 }
 
 func runRefineryPipeline(ctx context.Context, app *infra.App, entryUUID, content string) error {
@@ -61,8 +63,9 @@ func refineryExtract(ctx context.Context, app *infra.App, entryUUID, content, di
 	defer span.End()
 
 	prompt, err := prompts.BuildRefinery(prompts.RefineryData{
-		Discovery: utils.WrapAsUserData(discovery),
-		Entry:     utils.WrapAsUserData(utils.SanitizePrompt(content)),
+		Discovery:         utils.WrapAsUserData(discovery),
+		Entry:             utils.WrapAsUserData(utils.SanitizePrompt(content)),
+		AllowedPredicates: utils.WrapAsUserData(strings.Join(memory.AllowedPredicates, ", ")),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("build refinery prompt: %w", err)
@@ -85,35 +88,27 @@ func refineryResolveCommit(ctx context.Context, app *infra.App, entryUUID string
 	defer span.End()
 	span.SetAttributes(map[string]string{"entry_uuid": entryUUID})
 
-	allowed := map[string]struct{}{
-		"works_at":          {},
-		"prefers":           {},
-		"owns":              {},
-		"lives_in":          {},
-		"located_in":        {},
-		"collaborates_with": {},
-		"reports_to":        {},
-		"manages":           {},
-	}
-
 	for _, t := range triples {
-		if _, ok := allowed[t.Predicate]; !ok {
-			infra.LoggerFrom(ctx).Warn("refinery skipped triple with non-ontology predicate", "entry_uuid", entryUUID, "predicate", t.Predicate, "subject", t.Subject, "object", t.Object)
+		predicate, ok := memory.SnapAllowedPredicate(t.Predicate)
+		if !ok {
+			infra.LoggerFrom(ctx).Warn("refinery skipped triple with unmapped predicate", "entry_uuid", entryUUID, "predicate", t.Predicate, "subject", t.Subject, "object", t.Object)
 			continue
 		}
-		subj, err := app.Memory.EnsureNode(ctx, t.Subject, memory.NodeTypePerson, entryUUID)
+		subType := memory.CanonicalEntityNodeType(t.SubType)
+		objType := memory.CanonicalEntityNodeType(t.ObjType)
+		subj, err := app.Memory.EnsureNode(ctx, t.Subject, subType, entryUUID)
 		if err != nil {
-			infra.LoggerFrom(ctx).Warn("refinery ensure subject failed", "entry_uuid", entryUUID, "subject", t.Subject, "error", err)
+			infra.LoggerFrom(ctx).Warn("refinery ensure subject failed", "entry_uuid", entryUUID, "subject", t.Subject, "subject_type", subType, "error", err)
 			continue
 		}
-		obj, err := app.Memory.EnsureNode(ctx, t.Object, memory.NodeTypePerson, entryUUID)
+		obj, err := app.Memory.EnsureNode(ctx, t.Object, objType, entryUUID)
 		if err != nil {
-			infra.LoggerFrom(ctx).Warn("refinery ensure object failed", "entry_uuid", entryUUID, "object", t.Object, "error", err)
+			infra.LoggerFrom(ctx).Warn("refinery ensure object failed", "entry_uuid", entryUUID, "object", t.Object, "object_type", objType, "error", err)
 			continue
 		}
-		relID, err := app.Memory.CreateRelationshipNode(ctx, subj.UUID, t.Predicate, obj.UUID, entryUUID)
+		relID, err := app.Memory.CreateRelationshipNode(ctx, subj.UUID, predicate, obj.UUID, entryUUID)
 		if err != nil {
-			infra.LoggerFrom(ctx).Warn("refinery create relationship failed", "entry_uuid", entryUUID, "subject_uuid", subj.UUID, "predicate", t.Predicate, "object_uuid", obj.UUID, "error", err)
+			infra.LoggerFrom(ctx).Warn("refinery create relationship failed", "entry_uuid", entryUUID, "subject_uuid", subj.UUID, "predicate", predicate, "object_uuid", obj.UUID, "error", err)
 			continue
 		}
 		if err := app.Memory.AddEntityLink(ctx, subj.UUID, relID); err != nil {
@@ -122,6 +117,9 @@ func refineryResolveCommit(ctx context.Context, app *infra.App, entryUUID string
 		if err := app.Memory.AddEntityLink(ctx, obj.UUID, relID); err != nil {
 			infra.LoggerFrom(ctx).Warn("refinery object backlink failed", "entry_uuid", entryUUID, "node_uuid", obj.UUID, "relationship_uuid", relID, "error", err)
 		}
+		if err := app.Memory.AddEntityLink(ctx, entryUUID, relID); err != nil {
+			infra.LoggerFrom(ctx).Warn("refinery source-log backlink failed", "entry_uuid", entryUUID, "relationship_uuid", relID, "error", err)
+		}
 	}
 	return nil
 }
@@ -129,14 +127,31 @@ func refineryResolveCommit(ctx context.Context, app *infra.App, entryUUID string
 func parseRefineryTriples(lines []string) []refineryTriple {
 	out := make([]refineryTriple, 0, len(lines))
 	for _, line := range lines {
-		spo := memory.ParseSPOTriple(line)
-		if spo == nil {
+		parts := strings.Split(line, "|")
+		if len(parts) != 5 && len(parts) != 3 {
 			continue
 		}
+		for i := range parts {
+			parts[i] = strings.TrimSpace(parts[i])
+		}
+		sub := parts[0]
+		pred := memory.NormalizedPredicate(parts[1])
+		obj := parts[2]
+		if sub == "" || pred == "" || obj == "" {
+			continue
+		}
+		subType := memory.NodeTypePerson
+		objType := memory.NodeTypePerson
+		if len(parts) == 5 {
+			subType = memory.CanonicalEntityNodeType(parts[3])
+			objType = memory.CanonicalEntityNodeType(parts[4])
+		}
 		out = append(out, refineryTriple{
-			Subject:   strings.TrimSpace(spo.Subject),
-			Predicate: memory.NormalizedPredicate(spo.Predicate),
-			Object:    strings.TrimSpace(spo.Object),
+			Subject:   sub,
+			SubType:   subType,
+			Predicate: pred,
+			Object:    obj,
+			ObjType:   objType,
 		})
 	}
 	return out
