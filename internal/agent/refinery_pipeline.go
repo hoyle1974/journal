@@ -17,6 +17,8 @@ type refineryTriple struct {
 	Predicate string
 	Object    string
 	ObjType   string
+	RawLine   string
+	ParseErr  string
 }
 
 func runRefineryPipeline(ctx context.Context, app *infra.App, entryUUID, content string) error {
@@ -89,10 +91,17 @@ func refineryResolveCommit(ctx context.Context, app *infra.App, entryUUID string
 	span.SetAttributes(map[string]string{"entry_uuid": entryUUID})
 
 	for _, t := range triples {
-		predicate, ok := memory.SnapAllowedPredicate(t.Predicate)
-		if !ok {
-			infra.LoggerFrom(ctx).Warn("refinery skipped triple with unmapped predicate", "entry_uuid", entryUUID, "predicate", t.Predicate, "subject", t.Subject, "object", t.Object)
+		if t.ParseErr != "" {
+			infra.LoggerFrom(ctx).Warn("refinery rejected triple", "entry_uuid", entryUUID, "reason", t.ParseErr, "raw_line", t.RawLine)
 			continue
+		}
+		predicate := memory.CanonicalizePredicate(t.Predicate)
+		if predicate == "" {
+			infra.LoggerFrom(ctx).Warn("refinery rejected triple", "entry_uuid", entryUUID, "reason", "empty predicate after canonicalization", "raw_line", t.RawLine)
+			continue
+		}
+		if !memory.IsAllowedPredicate(predicate) {
+			infra.LoggerFrom(ctx).Warn("refinery accepted non-ontology predicate", "entry_uuid", entryUUID, "raw_predicate", t.Predicate, "canonical_predicate", predicate, "raw_line", t.RawLine)
 		}
 		subType := memory.CanonicalEntityNodeType(t.SubType)
 		objType := memory.CanonicalEntityNodeType(t.ObjType)
@@ -127,17 +136,32 @@ func refineryResolveCommit(ctx context.Context, app *infra.App, entryUUID string
 func parseRefineryTriples(lines []string) []refineryTriple {
 	out := make([]refineryTriple, 0, len(lines))
 	for _, line := range lines {
+		rawLine := strings.TrimSpace(line)
+		if rawLine == "" {
+			continue
+		}
 		parts := strings.Split(line, "|")
 		if len(parts) != 5 && len(parts) != 3 {
+			out = append(out, refineryTriple{
+				RawLine:  rawLine,
+				ParseErr: fmt.Sprintf("expected 3 or 5 pipe-separated fields, got %d", len(parts)),
+			})
 			continue
 		}
 		for i := range parts {
 			parts[i] = strings.TrimSpace(parts[i])
 		}
 		sub := parts[0]
-		pred := memory.NormalizedPredicate(parts[1])
+		pred := parts[1]
 		obj := parts[2]
 		if sub == "" || pred == "" || obj == "" {
+			out = append(out, refineryTriple{
+				Subject:   sub,
+				Predicate: pred,
+				Object:    obj,
+				RawLine:   rawLine,
+				ParseErr:  "subject, predicate, and object must all be non-empty",
+			})
 			continue
 		}
 		subType := memory.NodeTypePerson
@@ -152,6 +176,7 @@ func parseRefineryTriples(lines []string) []refineryTriple {
 			Predicate: pred,
 			Object:    obj,
 			ObjType:   objType,
+			RawLine:   rawLine,
 		})
 	}
 	return out

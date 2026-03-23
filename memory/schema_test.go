@@ -145,6 +145,7 @@ func TestAllowedPredicatesAndSnapping(t *testing.T) {
 	}{
 		{in: "works_at", want: "works_at", wantSnap: true},
 		{in: "works-for", want: "works_at", wantSnap: true},
+		{in: "moved_to", want: "lives_in", wantSnap: true},
 		{in: "lives at", want: "lives_in", wantSnap: true},
 		{in: "based_in", want: "located_in", wantSnap: true},
 		{in: "unknown_predicate", want: "", wantSnap: false},
@@ -157,6 +158,31 @@ func TestAllowedPredicatesAndSnapping(t *testing.T) {
 		if got != tc.want {
 			t.Fatalf("SnapAllowedPredicate(%q)=%q, want %q", tc.in, got, tc.want)
 		}
+	}
+}
+
+func TestCanonicalizePredicate(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		in   string
+		want string
+	}{
+		{in: "moved_to", want: "lives_in"},
+		{in: "relocated_to", want: "lives_in"},
+		{in: "resides in", want: "lives_in"},
+		{in: "works_for", want: "works_at"},
+		{in: "creative-predicate", want: "creative_predicate"},
+	}
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.in, func(t *testing.T) {
+			t.Parallel()
+			got := CanonicalizePredicate(tc.in)
+			if got != tc.want {
+				t.Fatalf("CanonicalizePredicate(%q)=%q, want %q", tc.in, got, tc.want)
+			}
+		})
 	}
 }
 
