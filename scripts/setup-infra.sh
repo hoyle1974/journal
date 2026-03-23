@@ -102,57 +102,7 @@ fi
 echo ""
 
 # =============================================================================
-# 3. Create Cloud Scheduler Jobs for Dream (daily) and Janitor (weekly)
-# =============================================================================
-echo -e "${CYAN}Creating Cloud Scheduler jobs...${NC}"
-
-BASE_URL="https://${REGION}-${PROJECT}.cloudfunctions.net/jot-api-go"
-
-# Dream: daily at 2 AM UTC
-DREAM_JOB="jot-daily-dream"
-if gcloud scheduler jobs describe $DREAM_JOB --location=$REGION 2>/dev/null; then
-    echo -e "${YELLOW}Scheduler job $DREAM_JOB already exists. Updating...${NC}"
-    gcloud scheduler jobs update http $DREAM_JOB \
-        --location=$REGION \
-        --schedule="0 2 * * *" \
-        --uri="${BASE_URL}/dream" \
-        --http-method=POST \
-        --quiet
-else
-    gcloud scheduler jobs create http $DREAM_JOB \
-        --location=$REGION \
-        --schedule="0 2 * * *" \
-        --uri="${BASE_URL}/dream" \
-        --http-method=POST \
-        --time-zone="UTC" \
-        --quiet
-    echo -e "${GREEN}Dream job created: runs daily at 2 AM UTC${NC}"
-fi
-
-# Janitor: weekly Sunday 3 AM UTC
-JANITOR_JOB="jot-weekly-janitor"
-if gcloud scheduler jobs describe $JANITOR_JOB --location=$REGION 2>/dev/null; then
-    echo -e "${YELLOW}Scheduler job $JANITOR_JOB already exists. Updating...${NC}"
-    gcloud scheduler jobs update http $JANITOR_JOB \
-        --location=$REGION \
-        --schedule="0 3 * * 0" \
-        --uri="${BASE_URL}/janitor" \
-        --http-method=POST \
-        --quiet
-else
-    gcloud scheduler jobs create http $JANITOR_JOB \
-        --location=$REGION \
-        --schedule="0 3 * * 0" \
-        --uri="${BASE_URL}/janitor" \
-        --http-method=POST \
-        --time-zone="UTC" \
-        --quiet
-    echo -e "${GREEN}Janitor job created: runs weekly Sunday 3 AM UTC${NC}"
-fi
-echo ""
-
-# =============================================================================
-# 4. Output Configuration
+# 3. Output Configuration
 # =============================================================================
 echo -e "${GREEN}Infrastructure setup complete!${NC}"
 echo ""

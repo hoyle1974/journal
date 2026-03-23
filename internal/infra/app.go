@@ -34,7 +34,6 @@ type ToolEnv interface {
 	MemoryKnowledge() memory.KnowledgeStore
 	MemoryGraph()     memory.GraphStore
 	MemoryTasks()     memory.TaskStore
-	MemoryContexts()  memory.ContextStore
 	MemoryAgent()     memory.AgentOps
 	MemoryAdmin()     memory.AdminOps
 }
@@ -113,9 +112,6 @@ func (a *App) MemoryGraph()     memory.GraphStore     { return a.Memory.Graph() 
 
 // MemoryTasks returns the TaskStore domain view of the memory store.
 func (a *App) MemoryTasks()     memory.TaskStore      { return a.Memory.Tasks() }
-
-// MemoryContexts returns the ContextStore domain view of the memory store.
-func (a *App) MemoryContexts()  memory.ContextStore   { return a.Memory.Contexts() }
 
 // MemoryAgent returns the AgentOps domain view of the memory store.
 func (a *App) MemoryAgent()     memory.AgentOps       { return a.Memory.Agent() }

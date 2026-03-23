@@ -9,28 +9,22 @@ Jot is a personal journaling and memory system. It ingests journal entries, extr
 - Voice notes received via Telegram are transcribed to text by Gemini and processed identically to typed messages — the FOH agent acts on the transcription. The audio file is persisted in GCS (audio_url field) and the transcription is stored on the journal entry (transcription field).
 
 ## Entry points
-- **CLI**: log, query, janitor, rollup, edit, entries.
-- **API**: POST /query, /log, /rollup, /janitor, /decay-contexts, /backfill-embeddings, /telegram; GET /metrics, /entries, /pending-questions; POST /pending-questions/:id/resolve. Cloud Tasks for async work (e.g. process-telegram-query, process-entry).
-- **Cron**: Janitor (weekly) evicts low-significance, rarely recalled nodes; POST /rollup runs weekly + monthly summary rollups.
-- **First-run onboarding**: On cold start, if _system/onboarding is absent, the system seeds pending_questions with onboarding prompts (name, family, work, role); answers are stored as user_identity nodes.
+- **CLI**: log, query, edit, entries.
+- **API**: POST /query, /log, /backfill-embeddings, /telegram; GET /metrics, /entries, /pending-questions; POST /pending-questions/:id/resolve. Cloud Tasks for async work (e.g. process-telegram-query, process-entry).
+- **First-run onboarding**: On cold start, if _system/onboarding is absent, the system completes first-run onboarding (writes `_system/onboarding`). The onboarding question seed list is currently empty (no default pending_questions); add prompts in `internal/service/onboarding.go` to re-enable. When seeded, answers can be stored as user_identity nodes.
 - **Telegram question flow**: Pending questions surface in the Telegram bot. When a message arrives, the bot checks for unresolved pending questions first; if any exist it asks the oldest one instead of running FOH. Each reply resolves the current question and triggers the next, or returns "all done" and resumes normal operation. Send /skip to skip a question. Active question state is persisted per chat_id in the `telegram_question_state` Firestore collection.
 - **Telegram slash commands**: `/help` — lists available commands. `/skip` — skip the current pending question. Unknown slash commands fall through to FOH.
 
-## Persona layer
-- User-facing text is rewritten in a default persona before delivery: friendly personal assistant, professional and competent, not stiff or too casual, transparent when unable to answer or perform a task. Applied to: CLI/API query answers and Telegram replies. Pending question text is delivered as-is (no persona rewrite).
-
 ## Agents
-- **FOH (Front of House)**: Query loop. Uses system prompt, identity, active contexts, knowledge-gap block, open todos; can call tools (journal, knowledge, context, task, web, utility). Before answering, the model performs an in-prompt audit (reflection, gap detection, synthesis). If the model reports missing info via MISSING_INFO:, the query is saved as a knowledge gap (is_gap). Final answer is passed through the persona layer before being returned to the user.
+- **FOH (Front of House)**: Query loop. Uses system prompt, identity, knowledge-gap block, open todos; can call tools (journal, knowledge, task, web, utility). Before answering, the model performs an in-prompt audit (reflection, gap detection, synthesis). If the model reports missing info via MISSING_INFO:, the query is saved as a knowledge gap (is_gap).
 - **Project Engine**: A "project" is a task with subtasks (parent_id hierarchy). Use decompose_task to break a complex task into 3–7 subtasks. FOH automatically injects the most recently active project + pending subtasks into the system prompt (ACTIVE PROJECT block).
 
 ## Storage Architecture
 - **Unified collection**: All documents (both episodic log entries and semantic knowledge nodes) live in the `journal` Firestore collection, distinguished by `node_type`.
-- **Episodic logs** (`node_type: "log"`): Raw journal entries. significance_weight=0.3; never deleted by janitor; queried by journal tools with `node_type == "log"` filter.
+- **Episodic logs** (`node_type: "log"`): Raw journal entries. significance_weight=0.3; queried by journal tools with `node_type == "log"` filter.
 - **Semantic memory** (`node_type: person|project|goal|preference|...`): Extracted knowledge facts. significance_weight ranges 0.5–0.95. Types: person, project, goal, preference, event, milestone, place, asset, tool, generic, weekly_summary, monthly_summary, identity_anchor, user_identity. For project/goal nodes, status must be one of: active, archived, blocked, done, planning, pending, completed. Recalled by semantic_search via significance_weight >= 0.7 pre-filter + vector similarity.
 - **Gold vs. Gravel routing**: semantic_search targets significance_weight >= 0.7 (Gold facts); journal tools target node_type == "log" (Gravel events).
-- **Janitor**: Evicts low-significance, rarely recalled knowledge nodes. Never deletes node_type: log, identity_anchor, or user_identity.
-- **Context nodes**: Named, typed (permanent/auto). Separate `contexts` collection. Used for active projects, plans, living context.
-- **Reserved names**: user_profile (identity), system_evolution (audit/friction).
+- **Reserved names**: user_profile (identity), system_evolution (optional audit text for get_system_health_audit).
 
 ## Journal
 - **Entries** (node_type: log in `journal` collection): Timestamped, optional source (cli, telegram, web, etc.). Optional image attachment: CLI `--attach <path>`, API multipart/form-data on POST /log (field `image`), Telegram photo messages; images stored in GCS, entry stores `image_url` (requires JOT_IMAGES_BUCKET). When processed, entity mentions are resolved against existing knowledge nodes and the entry is linked at ingest time. SPO triples are extracted from new entries via LLM in a background goroutine and stored as generic knowledge nodes with bidirectional links.
@@ -38,10 +32,9 @@ Jot is a personal journaling and memory system. It ingests journal entries, extr
 - **Pending questions**: Saved as `node_type: pending_question` in the `journal` collection for user clarification.
 
 ## Tools (by category)
-- **knowledge**: semantic_search, upsert_knowledge, list_knowledge, get_entity_network, check_proactive_signals, graph_expand(node_id, hops=1, limit_per_edge=10, query=""): expands a knowledge node's neighbourhood. hops=2 or hops=3 requires the 'query' field (the question you are answering).
+- **knowledge**: semantic_search, upsert_knowledge, list_knowledge, get_entity_network, check_proactive_signals, get_system_health_audit, graph_expand(node_id, hops=1, limit_per_edge=10, query=""): expands a knowledge node's neighbourhood. hops=2 or hops=3 requires the 'query' field (the question you are answering).
 - **journal**: get_recent_entries, get_oldest_entries, get_entries_by_date_range, search_entries, count_entries, list_sources, get_entries_by_source, query_activity_history, query_entities, summarize_daily_activities, retrieve_image. Date-range tools accept YYYY-MM-DD or natural expressions (yesterday, last week, today); "today" and date ranges use the server's calendar day (UTC).
-- **context**: list_contexts, create_context, touch_context, delete_context, get_system_health_audit, get_project_timeline, update_project_status.
-- **task**: create_task, get_task, update_task, update_task_status, search_tasks, decompose_task. Tasks are stored as `node_type: task` in the `journal` collection via `github.com/hoyle1974/memory`.
+- **task**: create_task, get_task, update_task, update_task_status, search_tasks, decompose_task, get_project_timeline, update_project_status. Tasks are stored as `node_type: task` in the `journal` collection via `github.com/hoyle1974/memory`.
 - **query**: get_recent_queries, search_queries, get_queries_by_date.
 - **web**: fetch_url, define_word, wikipedia, web_search, bookmark, countdown, github_read, get_weather (Open-Meteo; default unit: fahrenheit).
 - **utility**: calculate, date_calc, text_stats, convert_units, random, timezone_convert, encode_decode.

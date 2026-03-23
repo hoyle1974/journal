@@ -11,17 +11,11 @@ import (
 )
 
 // onboardingQuestions is the seed set injected on first run.
-// Extend this slice to add more onboarding prompts.
+// Empty for now — first run still marks _system/onboarding complete; add entries here to re-enable prompts.
 var onboardingQuestions = []struct {
 	Question string
 	Kind     string
-}{
-	{"What is your name?", "onboarding"},
-	{"What city and country do you live in?", "onboarding"},
-	{"Describe your family.", "onboarding"},
-	{"Who do you work for?", "onboarding"},
-	{"What is your job or role?", "onboarding"},
-}
+}{}
 
 const onboardingContext = "Initial setup — your answers will be stored as long-term identity facts."
 

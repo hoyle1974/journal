@@ -16,8 +16,7 @@ JOT is a single-user "Agentic Second Brain." It creates a high-fidelity bridge b
 | Collection   | Purpose              | Logic                                                                 |
 |--------------|----------------------|-----------------------------------------------------------------------|
 | `journal`    | Episodic Memory      | Raw journal logs (`node_type: log`). Every user input is logged here first. Also stores task nodes (`node_type: task`), query/gap nodes (`node_type: query`), and pending-question nodes (`node_type: pending_question`). Unified collection via `github.com/hoyle1974/memory`. |
-| `journal`    | Semantic Memory      | Distilled facts (`node_type: person|project|goal|preference|...`). Vector embeddings; context nodes (e.g. `user_profile`, `system_evolution`) also live here with significance_weight >= 0.7. |
-| `contexts`   | Active Contexts      | Named, typed (permanent/auto) context nodes for active projects, plans, and living context. |
+| `journal`    | Semantic Memory      | Distilled facts (`node_type: person|project|goal|preference|...`). Vector embeddings; reserved knowledge nodes (e.g. `user_profile`, `system_evolution`) may live here with significance_weight >= 0.7. |
 | `_system`    | State                | `deploy_meta`, `onboarding`. |
 
 ## 3. Core Component Architecture
@@ -26,32 +25,21 @@ JOT is a single-user "Agentic Second Brain." It creates a high-fidelity bridge b
 
 The main query loop. Invoked via `internal/service` (`RunQuery` → `agent.RunQueryWithDebug`). User input is saved to the journal at the start of each request (before the LLM runs).
 
-1. **Start:** Log user input as an entry (`AddEntryAndEnqueue`), build system prompt (identity, contexts, knowledge-gap block, open todos).
+1. **Start:** Log user input as an entry (`AddEntryAndEnqueue`), build system prompt (identity, knowledge-gap block, open todos).
 2. **Loop:** LLM either answers or issues tool calls. Tools run in parallel (worker pool); results are sent back to the LLM.
 3. **Unified audit:** The system prompt requires the model to perform reflection, gap detection, and synthesis in its reasoning before giving the final answer. If the model outputs `MISSING_INFO: <list>`, that is parsed and the query is saved as a knowledge gap.
-4. **Answer:** Save query (and optional knowledge-gap flag) via `EnqueueSaveQuery`. The raw answer is then passed through the **persona layer** (`internal/persona`), which rewrites it in a default friendly-assistant tone before delivery.
-5. **Persona:** CLI, Telegram, and API query answers go through the persona layer.
+4. **Answer:** Save query (and optional knowledge-gap flag) via `EnqueueSaveQuery`.
 
-Tools include journal, knowledge (semantic_search, upsert_knowledge, etc.), context, task, web, utility. `discovery_search` maps intent to tool schemas when the model is unsure which tool to use.
+Tools include journal, knowledge (semantic_search, upsert_knowledge, etc.), task, web, utility. `discovery_search` maps intent to tool schemas when the model is unsure which tool to use.
 
 ### B. The Evaluator — `internal/agent/evaluator.go` + `ProcessEntry`
 
 On journal ingest (`ProcessEntry`), the evaluator assigns significance, may upsert facts, and can auto-create tasks from strong future commitments. Proactive high-significance insights can be stored for FOH.
 
-### C. Rollups — `internal/agent/rollup.go`
-
-`RunWeeklyRollup` / `RunMonthlyRollup` synthesize period summaries into `weekly_summary` / `monthly_summary` knowledge nodes. Invoked via POST /rollup (cron or manual).
-
-### D. Cron-related helpers — `internal/service/cron.go`
-
-- **Janitor:** `RunJanitor` — evicts low-significance, rarely recalled nodes (composite index: `last_recalled_at`, `significance_weight`). Never deletes `identity_anchor` / `user_identity`.
-- **Pulse audit:** `RunPulseAudit` — finds high-value nodes not recalled in 14 days and creates proactive "stale loop" signals for FOH.
-
 ## 4. Entry Points
 
-- **CLI** (`cmd/jot`): log, query, janitor, rollup, edit, entries, help.
-- **API:** POST /query, /log, /rollup, /janitor, /decay-contexts, /backfill-embeddings, /telegram; GET /metrics, /entries, /pending-questions; POST /pending-questions/:id/resolve. Cloud Tasks for async work (e.g. process-telegram-query, process-entry). Handler is wired in `function.go`: lazy init on first request; `InitDefaultApp` from `cmd/server` for explicit startup. Use `SetServer` to inject a server for tests.
-- **Cron:** Janitor (weekly rollup of eviction); rollups via POST /rollup.
+- **CLI** (`cmd/jot`): log, query, edit, entries, help.
+- **API:** POST /query, /log, /backfill-embeddings, /telegram; GET /metrics, /entries, /pending-questions; POST /pending-questions/:id/resolve. Cloud Tasks for async work (e.g. process-telegram-query, process-entry). Handler is wired in `function.go`: lazy init on first request; `InitDefaultApp` from `cmd/server` for explicit startup. Use `SetServer` to inject a server for tests.
 
 ## 5. Engineering Patterns (see also `.cursorrules`)
 

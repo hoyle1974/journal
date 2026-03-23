@@ -12,7 +12,7 @@ import (
 )
 
 // TestRunFirstRunOnboarding_Integration runs against the Firestore emulator when
-// FIRESTORE_EMULATOR_HOST is set. Covers first-run (seeds questions + writes doc) and
+// FIRESTORE_EMULATOR_HOST is set. Covers first-run (writes _system/onboarding; may seed zero questions) and
 // already-run (skips, idempotent).
 func TestRunFirstRunOnboarding_Integration(t *testing.T) {
 	if os.Getenv("FIRESTORE_EMULATOR_HOST") == "" {
@@ -36,7 +36,7 @@ func TestRunFirstRunOnboarding_Integration(t *testing.T) {
 		_ = client.Close()
 	})
 
-	// First run: should seed questions and write _system/onboarding.
+	// First run: should write _system/onboarding (onboarding seed list may be empty).
 	if err := RunFirstRunOnboarding(ctx, app); err != nil {
 		t.Fatalf("first RunFirstRunOnboarding: %v", err)
 	}
@@ -56,8 +56,8 @@ func TestRunFirstRunOnboarding_Integration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list pending_questions: %v", err)
 	}
-	if len(snap) != 4 {
-		t.Errorf("pending_questions count = %d, want 4", len(snap))
+	if len(snap) != 0 {
+		t.Errorf("pending_questions count = %d, want 0 (no onboarding seed questions)", len(snap))
 	}
 
 	// Second run: should skip (idempotent).
@@ -68,7 +68,7 @@ func TestRunFirstRunOnboarding_Integration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list pending_questions after second run: %v", err)
 	}
-	if len(snap2) != 4 {
-		t.Errorf("after second run pending_questions count = %d, want 4 (idempotent)", len(snap2))
+	if len(snap2) != 0 {
+		t.Errorf("after second run pending_questions count = %d, want 0 (idempotent)", len(snap2))
 	}
 }

@@ -45,11 +45,8 @@ func NewRouter(s *Server) *chi.Mux {
 		r.With(RateLimitMiddleware(60)).Patch("/entries/{uuid}", wrapAPI(handleEntries))
 		r.With(RateLimitMiddleware(60)).Delete("/entries", wrapAPI(handleEntries))
 		r.With(RateLimitMiddleware(60)).Delete("/entries/{uuid}", wrapAPI(handleEntries))
-		r.With(RateLimitMiddleware(1)).Post("/janitor", wrapAPI(handleJanitor))
-		r.With(RateLimitMiddleware(2)).Post("/rollup", wrapAPI(handleRollup))
 		r.With(RateLimitMiddleware(60)).Get("/pending-questions", wrapAPI(handlePendingQuestions))
 		r.With(RateLimitMiddleware(60)).Post("/pending-questions/{id}/resolve", wrapAPI(handlePendingQuestionResolve))
-		r.With(RateLimitMiddleware(5)).Post("/decay-contexts", wrapAPI(handleDecayContexts))
 		r.With(RateLimitMiddleware(2)).Post("/backfill-embeddings", wrapAPI(handleBackfillEmbeddings))
 		r.With(RateLimitMiddleware(120)).Post("/internal/process-entry", wrapAPI(handleProcessEntry))
 		r.With(RateLimitMiddleware(120)).Post("/internal/process-telegram-query", wrapAPI(handleProcessTelegramQuery))
@@ -66,8 +63,8 @@ func NewRouter(s *Server) *chi.Mux {
 			"error": "Not found", "path": path,
 			"available_routes": []string{
 				"GET  /health", "GET  /metrics", "GET  /privacy-policy", "GET  /terms-and-conditions",
-				"POST /log", "POST /query", "GET  /entries", "POST /janitor", "POST /rollup", "POST /telegram",
-				"POST /decay-contexts", "POST /backfill-embeddings", "GET  /pending-questions", "POST /pending-questions/:id/resolve",
+				"POST /log", "POST /query", "GET  /entries", "POST /telegram",
+				"POST /backfill-embeddings", "GET  /pending-questions", "POST /pending-questions/:id/resolve",
 			},
 		})
 	})

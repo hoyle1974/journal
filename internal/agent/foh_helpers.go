@@ -49,7 +49,7 @@ func AddEntryAndEnqueue(ctx context.Context, app *infra.App, content, source str
 			_, _, _ = ProcessEntry(bgCtx, app, entryUUID, content, ts, source)
 		})
 	} else {
-		infra.LoggerFrom(ctx).Debug("triggering async task", "event", "async_task_enqueued", "task", "process-entry", "task_id", taskID, "parent_trace_id", parentTraceID, "entry_uuid", entryUUID, "reason", "async processing for evaluator, context links, analysis, embedding")
+			infra.LoggerFrom(ctx).Debug("triggering async task", "event", "async_task_enqueued", "task", "process-entry", "task_id", taskID, "parent_trace_id", parentTraceID, "entry_uuid", entryUUID, "reason", "async processing for evaluator, analysis, embedding")
 	}
 	return entryUUID, nil
 }

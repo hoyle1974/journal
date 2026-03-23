@@ -91,7 +91,6 @@ The Immutable Source of Truth Rule: internal/prompts/app_capabilities.txt and bl
 
 - **Rule:** All composite indexes used by queries must be defined in `firestore.indexes.json`.
 - **Requirement:** After adding or changing an index, run `firebase deploy --only firestore:indexes` (or use `./scripts/deploy.sh`, which deploys indexes first).
-- **Janitor:** The janitor (garbage collection) requires the composite index on `knowledge_nodes` with fields `significance_weight`, `last_recalled_at` (order matters).
 
 ## Feature Work Tracking
 

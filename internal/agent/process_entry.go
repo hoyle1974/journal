@@ -29,7 +29,7 @@ type ProcessEntryReport struct {
 	EntityNames    []string
 }
 
-// ProcessEntry runs evaluator, context detection, journal analysis, and embedding for an entry.
+// ProcessEntry runs evaluator, journal analysis, and embedding for an entry.
 // Returns a latency breakdown so callers can log where time was spent (llm, embedding, firestore_write, overhead).
 func ProcessEntry(ctx context.Context, app *infra.App, entryUUID, content, timestamp, source string) (*infra.LatencyBreakdown, *ProcessEntryReport, error) {
 	start := time.Now()
@@ -83,15 +83,6 @@ func ProcessEntry(ctx context.Context, app *infra.App, entryUUID, content, times
 		}
 	}
 
-	t1 := time.Now()
-	contextUUIDs, err := app.Memory.DetectOrCreateContext(ctx, content, entryUUID)
-	firestoreWrite += time.Since(t1)
-	if err != nil {
-		infra.LoggerFrom(ctx).Warn("context detection failed", "error", err)
-	}
-	contextCount := len(contextUUIDs)
-	infra.LoggerFrom(ctx).Debug("process-entry: context detection done", "entry_uuid", entryUUID, "contexts_linked", contextCount, "reason", "link entry to active contexts")
-
 	t2 := time.Now()
 	analysis, err := app.Memory.Agent().AnalyzeJournalEntry(ctx, content, entryUUID, timestamp)
 	llm += time.Since(t2)
@@ -104,7 +95,7 @@ func ProcessEntry(ctx context.Context, app *infra.App, entryUUID, content, times
 			analysisJSON = string(b)
 		}
 	}
-	infra.LoggerFrom(ctx).Debug("process-entry: journal analysis done", "entry_uuid", entryUUID, "has_analysis", analysis != nil, "reason", "mood/tags/entities for rollup and search")
+	infra.LoggerFrom(ctx).Debug("process-entry: journal analysis done", "entry_uuid", entryUUID, "has_analysis", analysis != nil, "reason", "mood/tags/entities for search")
 	if analysis != nil && len(analysis.Entities) > 0 {
 		// Synchronous entity resolution with internal timeout. Resolves entity mentions to
 		// existing knowledge nodes and links this entry to them.
@@ -140,7 +131,7 @@ func ProcessEntry(ctx context.Context, app *infra.App, entryUUID, content, times
 	if analysisJSON != "" {
 		updates = append(updates, firestore.Update{Path: "journal_analysis", Value: analysisJSON})
 	}
-	infra.LoggerFrom(ctx).Debug("process-entry: writing embedding and analysis to Firestore", "entry_uuid", entryUUID, "reason", "persist for RAG and rollups")
+	infra.LoggerFrom(ctx).Debug("process-entry: writing embedding and analysis to Firestore", "entry_uuid", entryUUID, "reason", "persist for RAG")
 	t4 := time.Now()
 	err = updateEntryWithRetry(ctx, client, entryUUID, content, timestamp, source, updates)
 	firestoreWrite += time.Since(t4)
@@ -151,7 +142,7 @@ func ProcessEntry(ctx context.Context, app *infra.App, entryUUID, content, times
 	}
 	total := time.Since(start)
 	breakdown := buildBreakdown(start, llm, embeddingDur, firestoreWrite)
-	doneAttrs := []any{"event", "process_entry_done", "entry_uuid", entryUUID, "contexts_linked", contextCount, "embedding_dims", len(vector), "has_analysis", analysisJSON != "", "duration", total}
+	doneAttrs := []any{"event", "process_entry_done", "entry_uuid", entryUUID, "embedding_dims", len(vector), "has_analysis", analysisJSON != "", "duration", total}
 	doneAttrs = append(doneAttrs, breakdown.LogAttrs()...)
 	if corr := infra.CorrelationFromContext(ctx); corr != nil {
 		if corr.TaskID != "" {
@@ -162,7 +153,7 @@ func ProcessEntry(ctx context.Context, app *infra.App, entryUUID, content, times
 		}
 	}
 	infra.LoggerFrom(ctx).Info("process-entry done", doneAttrs...)
-	infra.LoggerFrom(ctx).Debug("process-entry: done", "entry_uuid", entryUUID, "reason", "evaluator, context links, analysis, and embedding all completed")
+	infra.LoggerFrom(ctx).Debug("process-entry: done", "entry_uuid", entryUUID, "reason", "evaluator, analysis, and embedding all completed")
 	report := &ProcessEntryReport{
 		Content: utils.TruncateString(content, 500),
 		Source:  source,
@@ -175,7 +166,7 @@ func ProcessEntry(ctx context.Context, app *infra.App, entryUUID, content, times
 	if taskContent != "" {
 		report.TaskCreated = taskContent
 	}
-	report.ContextsLinked = contextCount
+	report.ContextsLinked = 0
 	if analysis != nil {
 		report.Mood = analysis.Mood
 		report.Tags = analysis.Tags

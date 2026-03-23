@@ -139,7 +139,7 @@ func RunQueryWithDebug(ctx context.Context, app FOHEnv, question, source string,
 		span.RecordError(err)
 		return errQueryResult(fmt.Sprintf("Error building system prompt: %v", err), 0, debugLogs)
 	}
-	infra.LoggerFrom(ctx).Debug("FOH: system prompt built", "query_run_id", queryRunID, "phase", "start", "prompt_len", len(systemPrompt), "reason", "inject date, contexts, recent history")
+	infra.LoggerFrom(ctx).Debug("FOH: system prompt built", "query_run_id", queryRunID, "phase", "start", "prompt_len", len(systemPrompt), "reason", "inject date, recent history, tasks, project")
 	logDebug("[prompt] %s", systemPrompt)
 
 	useCompactTools := app.Config() != nil && app.Config().UseCompactTools

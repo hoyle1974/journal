@@ -502,45 +502,6 @@ func cmdEdit(limit int) {
 	}
 }
 
-func cmdRollup() {
-	fmt.Println("Running roll-up (weekly + monthly summaries)...")
-	result, _ := api.DoOrExit(context.Background(), "POST", "/rollup", nil, time.Duration(timeout.QuerySeconds)*time.Second)
-	weekly := int(jsonFloat(result, "weekly_entries_rolled"))
-	monthly := int(jsonFloat(result, "monthly_weekly_nodes"))
-	fmt.Printf("Weekly entries rolled: %d | Monthly (weekly nodes): %d\n", weekly, monthly)
-}
-
-func cmdJanitor() {
-	fmt.Println("Running Janitor (garbage collection)...")
-	result, headers, err := api.Do(context.Background(), "POST", "/janitor", nil, time.Duration(timeout.QuerySeconds)*time.Second)
-	if err != nil {
-		fmt.Printf("Error: %v\n", err)
-		printRateLimitHelp(err)
-		os.Exit(1)
-	}
-	if result == nil {
-		fmt.Println("Error: No response from API")
-		os.Exit(1)
-	}
-	if traceFlag && headers != nil {
-		printTraceInfo(headers)
-	}
-	if deleted, ok := result["deleted"].(float64); ok {
-		fmt.Printf("Evicted: %.0f\n", deleted)
-	}
-
-	if errors, ok := result["errors"].([]interface{}); ok && len(errors) > 0 {
-		fmt.Printf("\nErrors (%d):\n", len(errors))
-		for i, e := range errors {
-			if i >= 5 {
-				break
-			}
-			fmt.Printf("  - %v\n", e)
-		}
-	}
-}
-
-
 func cmdHelp(topic string) {
 	topics := map[string]string{
 		"log": `
@@ -575,12 +536,6 @@ jot edit [limit]
     r      - Refresh list
     q      - Quit
 `,
-		"janitor": `
-jot janitor
-
-  Run garbage collection: evict low-significance semantic memory entries
-  that haven't been recalled in 30+ days. Schedule weekly.
-`,
 	}
 
 	if topic != "" {
@@ -607,7 +562,6 @@ Commands (optional):
   log, l <message>     Fast logging (bypasses AI)
   edit [limit]         Interactive entry editor
   entries [limit]      List recent entries
-  janitor, rollup      Run Janitor (weekly GC) or weekly/monthly rollup cron
   help [topic]         Show help
 
 Run 'jot help <topic>' for detailed help.
@@ -680,10 +634,6 @@ func main() {
 		}
 		cmdEntries(limit)
 
-	case "janitor":
-		cmdJanitor()
-	case "rollup":
-		cmdRollup()
 	case "help", "-h", "--help":
 		topic := ""
 		if len(args) > 1 {

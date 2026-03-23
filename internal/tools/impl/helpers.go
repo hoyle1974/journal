@@ -126,29 +126,6 @@ func formatEntries(entries []memory.Entry) string {
 	return strings.Join(lines, "\n")
 }
 
-// formatContexts formats context nodes and metadata for LLM context.
-func formatContexts(nodes []memory.KnowledgeNode, metas []memory.ContextMetadata) string {
-	var lines []string
-	for i, n := range nodes {
-		meta := metas[i]
-		content := n.Content
-		if len(content) > 150 {
-			content = content[:147] + "..."
-		}
-		lastTouched := memory.TruncateTimestamp(meta.LastTouched, memory.DateTimeDisplayLen)
-		if lastTouched == "" {
-			lastTouched = "(no date)"
-		}
-		updated := memory.TruncateTimestamp(n.Timestamp, memory.DateTimeDisplayLen)
-		if updated == "" {
-			updated = "(no date)"
-		}
-		lines = append(lines, fmt.Sprintf("%d. [%s] %s (%.0f%% relevance)\n   UUID: %s\n   %s\n   Updated: %s | Last touched: %s",
-			i+1, meta.ContextType, meta.ContextName, meta.Relevance*100, n.UUID, content, updated, lastTouched))
-	}
-	return strings.Join(lines, "\n\n")
-}
-
 // formatQueriesForContext formats query history for LLM context using jot's formatter.
 func formatQueriesForContext(queries []memory.QueryLog) string {
 	return memory.FormatQueriesForContext(queries, 10000)

@@ -16,12 +16,6 @@ type SystemService interface {
 	SetOnboardingComplete(ctx context.Context, statusVal, seededAt string, version int) error
 }
 
-// PulseResult is the outcome of a pulse audit run (returned by AgentService.RunPulseAudit).
-type PulseResult struct {
-	StaleNodes []string
-	Signals    int
-}
-
 // PendingQuestion is an unresolved question (returned by MemoryService.GetUnresolvedPendingQuestions).
 type PendingQuestion struct {
 	UUID           string   `json:"uuid"`
@@ -73,8 +67,6 @@ type JournalService interface {
 
 // MemoryService provides memory and knowledge operations for HTTP handlers.
 type MemoryService interface {
-	InitializePermanentContexts(ctx context.Context) error
-	DecayContexts(ctx context.Context) (int, error)
 	GetUnresolvedPendingQuestions(ctx context.Context, limit int) ([]PendingQuestion, error)
 	ResolvePendingQuestion(ctx context.Context, id, answer string) error
 }
@@ -84,10 +76,6 @@ type AgentService interface {
 	AddEntry(ctx context.Context, content, source string, timestamp *string, imageBytes []byte) (string, error)
 	RunQuery(ctx context.Context, question, source string) *QueryResult
 	ProcessEntry(ctx context.Context, entryUUID, content, timestamp, source string) (*infra.LatencyBreakdown, *agent.ProcessEntryReport, error)
-	RunPulseAudit(ctx context.Context) (*PulseResult, error)
-	RunJanitor(ctx context.Context) (int, error)
-	RunWeeklyRollup(ctx context.Context) (int, error)
-	RunMonthlyRollup(ctx context.Context) (int, error)
 }
 
 // TelegramService provides Telegram Bot API operations for HTTP handlers.

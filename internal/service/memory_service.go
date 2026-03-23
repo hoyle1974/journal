@@ -17,23 +17,6 @@ func NewMemoryService(env infra.ToolEnv) *MemoryService {
 	return &MemoryService{env: env}
 }
 
-// InitializePermanentContexts ensures permanent context nodes exist.
-func (m *MemoryService) InitializePermanentContexts(ctx context.Context) error {
-	return m.env.MemoryStore().InitializePermanentContexts(ctx)
-}
-
-// DecayContexts decays stale context weights.
-func (m *MemoryService) DecayContexts(ctx context.Context) (int, error) {
-	infra.LoggerFrom(ctx).Info("function call", "fn", "DecayContexts")
-	count, err := m.env.MemoryStore().Admin().DecayContexts(ctx)
-	if err != nil {
-		infra.LoggerFrom(ctx).Error("function result", "fn", "DecayContexts", "error", err.Error())
-		return 0, err
-	}
-	infra.LoggerFrom(ctx).Info("function result", "fn", "DecayContexts", "decayed_count", count)
-	return count, nil
-}
-
 // GetUnresolvedPendingQuestions returns pending questions for the API (api type).
 func (m *MemoryService) GetUnresolvedPendingQuestions(ctx context.Context, limit int) ([]api.PendingQuestion, error) {
 	infra.LoggerFrom(ctx).Info("function call", "fn", "GetUnresolvedPendingQuestions", "limit", limit)

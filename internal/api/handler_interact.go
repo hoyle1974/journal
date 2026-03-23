@@ -8,7 +8,6 @@ import (
 
 	"github.com/jackstrohm/jot/internal/agent"
 	"github.com/jackstrohm/jot/internal/infra"
-	"github.com/jackstrohm/jot/internal/persona"
 	"github.com/jackstrohm/jot/pkg/utils"
 )
 
@@ -87,9 +86,6 @@ func handleQuery(s *Server, w http.ResponseWriter, r *http.Request) (any, error)
 	LogHandlerRequest(ctx, r.Method, path, "question_preview", utils.TruncateString(question, 80), "source", source)
 	result := s.Agent.RunQuery(ctx, question, source)
 	app, hasApp := s.App.(*infra.App)
-	if result.Answer != "" && !result.Error && hasApp {
-		result.Answer = persona.Apply(ctx, app, result.Answer, question)
-	}
 
 	if s.Config != nil && s.Config.DebugReportEnabled && hasApp && !result.Error {
 		asyncCtx := context.WithoutCancel(ctx)

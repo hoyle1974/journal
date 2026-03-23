@@ -45,6 +45,7 @@ func init() {
 	registerKnowledgeTools()
 	registerSignalTools()
 	registerGraphTools()
+	registerSystemHealthTool()
 }
 
 func registerKnowledgeTools() {
@@ -350,6 +351,33 @@ func registerSignalTools() {
 				return tools.OK("No proactive signals at this time.")
 			}
 			return tools.OK("Current Proactive Signals:\n%s", signals)
+		},
+	})
+}
+
+func registerSystemHealthTool() {
+	tools.Register(&tools.Tool{
+		Name:        "get_system_health_audit",
+		Description: "Get the latest system evolution audit: recommended tool changes, knowledge gaps, and architectural suggestions stored under the system_evolution knowledge node. Use when the user asks what to change, what's wrong with the system, or for improvement suggestions.",
+		Category:    "knowledge",
+		Args:        &tools.NoArgs{},
+		Execute: func(ctx context.Context, env infra.ToolEnv, args any) tools.Result {
+			node, _, err := env.MemoryStore().FindContextByName(ctx, "system_evolution")
+			if err != nil {
+				return tools.Fail("Error finding system_evolution context: %v", err)
+			}
+			if node == nil {
+				return tools.OK("No system evolution audit has been stored yet.")
+			}
+			content := strings.TrimSpace(node.Content)
+			if content == "" {
+				return tools.OK("System evolution audit exists but is empty.")
+			}
+			auditTs := memory.TruncateTimestamp(node.Timestamp, memory.DateTimeDisplayLen)
+			if auditTs == "" {
+				auditTs = "(no date)"
+			}
+			return tools.OK("System Evolution Audit (as of %s):\n\n%s", auditTs, content)
 		},
 	})
 }

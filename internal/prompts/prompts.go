@@ -1,6 +1,6 @@
 // Package prompts provides static prompt text loaded from embedded files via go:embed.
 // Large prompt blocks live in .txt files and are loaded at init for use by the jot agent.
-// Parameterized prompts use text/template with strongly-typed data structs.
+// Parameterized prompts use text/template with strongly typed data structs.
 package prompts
 
 import (
@@ -23,30 +23,6 @@ var dataSafetyTxt string
 //go:embed evaluator.txt
 var evaluatorTxt string
 
-//go:embed router.txt
-var routerTxt string
-
-//go:embed context_analyze.txt
-var contextAnalyzeTxt string
-
-//go:embed journal_analyze.txt
-var journalAnalyzeTxt string
-
-//go:embed knowledge_gap.txt
-var knowledgeGapTxt string
-
-//go:embed executive_summary.txt
-var executiveSummaryTxt string
-
-//go:embed identity_architect.txt
-var identityArchitectTxt string
-
-//go:embed gap_detector.txt
-var gapDetectorTxt string
-
-//go:embed roll_up.txt
-var rollUpTxt string
-
 //go:embed activity_history.txt
 var activityHistoryTxt string
 
@@ -64,11 +40,6 @@ var relationshipExtractorTxt string
 
 var (
 	systemPromptTmpl       = template.Must(template.New("system").Parse(systemPromptTxt))
-	contextAnalyzeTmpl     = template.Must(template.New("context").Parse(contextAnalyzeTxt))
-	journalAnalyzeTmpl     = template.Must(template.New("journal").Parse(journalAnalyzeTxt))
-	knowledgeGapTmpl       = template.Must(template.New("knowledgeGap").Parse(knowledgeGapTxt))
-	gapDetectorTmpl        = template.Must(template.New("gapDetector").Parse(gapDetectorTxt))
-	rollUpTmpl             = template.Must(template.New("rollUp").Parse(rollUpTxt))
 	activityHistoryTmpl    = template.Must(template.New("activityHistory").Parse(activityHistoryTxt))
 	debugReportTmpl        = template.Must(template.New("debugReport").Parse(debugReportPromptTxt))
 	processEntryReportTmpl = template.Must(template.New("processEntryReport").Funcs(template.FuncMap{
@@ -88,7 +59,6 @@ type SystemPromptData struct {
 	LastWeek           string
 	CurrentMonth       string
 	IdentityBlock      string
-	ActiveContexts     string
 	RecentConversation string
 	ProactiveSignals   string
 	KnowledgeGapBlock  string
@@ -101,82 +71,6 @@ func BuildSystemPrompt(data SystemPromptData) (string, error) {
 	var buf bytes.Buffer
 	if err := systemPromptTmpl.Execute(&buf, data); err != nil {
 		return "", fmt.Errorf("execute system prompt: %w", err)
-	}
-	return buf.String(), nil
-}
-
-// ContextAnalyzeData holds the entry content for context analysis.
-type ContextAnalyzeData struct {
-	EntryContent string
-}
-
-// BuildContextAnalyze executes the context-analyze template.
-func BuildContextAnalyze(data ContextAnalyzeData) (string, error) {
-	var buf bytes.Buffer
-	if err := contextAnalyzeTmpl.Execute(&buf, data); err != nil {
-		return "", fmt.Errorf("execute context analyze: %w", err)
-	}
-	return buf.String(), nil
-}
-
-// JournalAnalyzeData holds entry ID, date, and text for journal analysis.
-type JournalAnalyzeData struct {
-	EntryID   string
-	Date      string
-	EntryText string
-}
-
-// BuildJournalAnalyze executes the journal-analyze template.
-func BuildJournalAnalyze(data JournalAnalyzeData) (string, error) {
-	var buf bytes.Buffer
-	if err := journalAnalyzeTmpl.Execute(&buf, data); err != nil {
-		return "", fmt.Errorf("execute journal analyze: %w", err)
-	}
-	return buf.String(), nil
-}
-
-// KnowledgeGapData holds the gap list content for the knowledge-gap block.
-type KnowledgeGapData struct {
-	GapListContent string
-}
-
-// BuildKnowledgeGap executes the knowledge-gap template.
-func BuildKnowledgeGap(data KnowledgeGapData) (string, error) {
-	var buf bytes.Buffer
-	if err := knowledgeGapTmpl.Execute(&buf, data); err != nil {
-		return "", fmt.Errorf("execute knowledge gap: %w", err)
-	}
-	return buf.String(), nil
-}
-
-// GapDetectorData holds recent journal, relevant knowledge, tool manifest, and pending questions for gap detection.
-type GapDetectorData struct {
-	RecentJournal         string
-	RelevantKnowledge     string
-	ToolManifest          string
-	PendingQuestionsBlock string // SanitizePrompt+WrapAsUserData-wrapped bullet list; empty string if none
-}
-
-// BuildGapDetector executes the gap-detector template.
-func BuildGapDetector(data GapDetectorData) (string, error) {
-	var buf bytes.Buffer
-	if err := gapDetectorTmpl.Execute(&buf, data); err != nil {
-		return "", fmt.Errorf("execute gap detector: %w", err)
-	}
-	return buf.String(), nil
-}
-
-// RollUpData holds period label and analyses text for roll-up.
-type RollUpData struct {
-	PeriodLabel  string
-	AnalysesText string
-}
-
-// BuildRollUp executes the roll-up template.
-func BuildRollUp(data RollUpData) (string, error) {
-	var buf bytes.Buffer
-	if err := rollUpTmpl.Execute(&buf, data); err != nil {
-		return "", fmt.Errorf("execute roll up: %w", err)
 	}
 	return buf.String(), nil
 }
@@ -205,15 +99,6 @@ func DataSafety() string { return dataSafetyTxt }
 
 // Evaluator returns the evaluator system prompt (without data safety suffix).
 func Evaluator() string { return evaluatorTxt }
-
-// Router returns the router/dispatcher system prompt (without data safety suffix).
-func Router() string { return routerTxt }
-
-// ExecutiveSummary returns the living-context executive summary prompt.
-func ExecutiveSummary() string { return executiveSummaryTxt }
-
-// IdentityArchitect returns the identity-architect prompt for profile synthesis.
-func IdentityArchitect() string { return identityArchitectTxt }
 
 // AppCapabilities returns the static, LLM-readable description of Jot's parts (entry points, memory, journal, tools).
 // Keep app_capabilities.txt up to date when the codebase changes.

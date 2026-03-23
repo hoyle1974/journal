@@ -12,13 +12,6 @@ import (
 	"github.com/jackstrohm/jot/pkg/utils"
 )
 
-// ActiveContextItem is one context node for the system prompt (name, relevance, content).
-type ActiveContextItem struct {
-	ContextName string
-	Relevance   float64
-	Content     string
-}
-
 // BuildSystemPrompt creates the system prompt with current date context and recent history.
 // env supplies Firestore for journal queries; pass from the caller (e.g. FOHEnv).
 // For which parts are static vs dynamic (context caching), see docs/context-caching-analysis.md.
@@ -43,26 +36,7 @@ func BuildSystemPrompt(ctx context.Context, env infra.ToolEnv) (string, error) {
 		identityWrapped = utils.WrapAsUserData(identityBlock)
 	}
 
-	// 1. Active Contexts
-	nodes, metas, _ := env.MemoryContexts().GetActive(ctx, 5)
-	activeContextItems := make([]ActiveContextItem, 0, len(nodes))
-	for i := range nodes {
-		if i >= len(metas) {
-			break
-		}
-		activeContextItems = append(activeContextItems, ActiveContextItem{
-			ContextName: metas[i].ContextName,
-			Relevance:   metas[i].Relevance,
-			Content:     nodes[i].Content,
-		})
-	}
-	activeContextsStr := formatContextSection(activeContextItems)
-	activeContextsWrapped := activeContextsStr
-	if activeContextsStr != "" {
-		activeContextsWrapped = utils.WrapAsUserData(activeContextsStr)
-	}
-
-	// 2. Recent Conversation
+	// 1. Recent Conversation
 	var queries []memory.QueryLog
 	if env != nil {
 		queries, _ = env.MemoryStore().GetRecentQueries(ctx, 5)
@@ -73,7 +47,7 @@ func BuildSystemPrompt(ctx context.Context, env infra.ToolEnv) (string, error) {
 		recentConversationWrapped = utils.WrapAsUserData(recentConversation)
 	}
 
-	// 3. Proactive Alerts
+	// 2. Proactive Alerts
 	proactiveSignals := ""
 	proactiveSignalsWrapped := ""
 	if signals, err := env.MemoryStore().GetActiveSignals(ctx, 3); err == nil && signals != "" {
@@ -83,7 +57,7 @@ func BuildSystemPrompt(ctx context.Context, env infra.ToolEnv) (string, error) {
 
 	sourceCodeBlock := prompts.SourceCodeBlock()
 
-	// 4. Knowledge Gaps
+	// 3. Knowledge Gaps
 	var gapQueries []memory.QueryLog
 	if env != nil {
 		gapQueries, _ = env.MemoryStore().GetRecentGapQueries(ctx, 3)
@@ -94,7 +68,7 @@ func BuildSystemPrompt(ctx context.Context, env infra.ToolEnv) (string, error) {
 		knowledgeGapBlockWrapped = utils.WrapAsUserData(knowledgeGapBlock)
 	}
 
-	// 5. Open Tasks (root)
+	// 4. Open Tasks (root)
 	roots, _ := env.MemoryTasks().GetOpenRootTasks(ctx, 15)
 	openTodoBlock := formatTodoSection(roots)
 	openTodoBlockWrapped := openTodoBlock
@@ -102,7 +76,7 @@ func BuildSystemPrompt(ctx context.Context, env infra.ToolEnv) (string, error) {
 		openTodoBlockWrapped = utils.WrapAsUserData(openTodoBlock)
 	}
 
-	// 6. Active Project (most recently created root task that has subtasks)
+	// 5. Active Project (most recently created root task that has subtasks)
 	activeProjectBlock := buildActiveProjectBlock(ctx, env, roots)
 	activeProjectBlockWrapped := activeProjectBlock
 	if activeProjectBlock != "" {
@@ -110,11 +84,11 @@ func BuildSystemPrompt(ctx context.Context, env infra.ToolEnv) (string, error) {
 	}
 
 	// Log the actual injected context at Info so it appears in production (e.g. tail.sh / LLM_CONTEXT_SENT).
-	injectedSections := strings.TrimSpace(identityBlock + activeContextsStr + recentConversation + proactiveSignals + knowledgeGapBlock + openTodoBlock + activeProjectBlock)
+	injectedSections := strings.TrimSpace(identityBlock + recentConversation + proactiveSignals + knowledgeGapBlock + openTodoBlock + activeProjectBlock)
 	if injectedSections == "" {
 		injectedSections = "(no dynamic sections)"
 	}
-	infra.LoggerFrom(ctx).Info("LLM_CONTEXT_SENT | injected context sections (Contexts, Conversation, Alerts, Gaps, Tasks, Project)",
+	infra.LoggerFrom(ctx).Info("LLM_CONTEXT_SENT | injected context sections (Conversation, Alerts, Gaps, Tasks, Project)",
 		"event", "LLM_CONTEXT_SENT",
 		"context_sections", injectedSections)
 
@@ -128,7 +102,6 @@ func BuildSystemPrompt(ctx context.Context, env infra.ToolEnv) (string, error) {
 		LastWeek:           lastWeekStr,
 		CurrentMonth:       currentMonth,
 		IdentityBlock:      identityWrapped,
-		ActiveContexts:     activeContextsWrapped,
 		RecentConversation: recentConversationWrapped,
 		ProactiveSignals:   proactiveSignalsWrapped,
 		KnowledgeGapBlock:  knowledgeGapBlockWrapped,
@@ -146,34 +119,8 @@ func BuildSystemPrompt(ctx context.Context, env infra.ToolEnv) (string, error) {
 		infra.LoggerFrom(ctx).Debug("system prompt: Map vs Manual (core tools + discovery)", "reason", "JOT_USE_COMPACT_TOOLS=true")
 	}
 
-	infra.LoggerFrom(ctx).Debug("system prompt built", "prompt_len", len(prompt), "reason", "inject date, active contexts, recent conversation, signals, gap block, open todo roots")
+	infra.LoggerFrom(ctx).Debug("system prompt built", "prompt_len", len(prompt), "reason", "inject date, recent conversation, signals, gap block, open todo roots")
 	return prompt, nil
-}
-
-// formatContextSection builds the ACTIVE CONTEXTS block with --- and ## header; tag by name/relevance, Briefing for content.
-func formatContextSection(items []ActiveContextItem) string {
-	if len(items) == 0 {
-		return ""
-	}
-	var lines []string
-	for _, item := range items {
-		if item.Relevance < 0.4 {
-			continue
-		}
-		tag := "PROJECT"
-		if strings.Contains(item.ContextName, "user_") {
-			tag = "IDENTITY"
-		}
-		if item.Relevance > 0.8 {
-			tag = "CRITICAL"
-		}
-		content := utils.FirstSentence(item.Content, 150)
-		lines = append(lines, fmt.Sprintf("- [%s] %s (Rel: %.0f%%)\n  Briefing: %s", tag, item.ContextName, item.Relevance*100, content))
-	}
-	if len(lines) == 0 {
-		return ""
-	}
-	return fmt.Sprintf("\n---\n## 🧠 ACTIVE CONTEXTS\n# High-relevance project briefings and situational awareness.\n\n%s", strings.Join(lines, "\n"))
 }
 
 // formatConversationSection builds the RECENT CONVERSATION block with --- and ## header; HH:MM, User/Asst lines.
