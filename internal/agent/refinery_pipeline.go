@@ -72,7 +72,7 @@ func refineryExtract(ctx context.Context, app *infra.App, entryUUID, content, di
 	if err != nil {
 		return nil, fmt.Errorf("build refinery prompt: %w", err)
 	}
-	raw, err := infra.GenerateContentSimple(ctx, app, prompt+prompts.DataSafety(), "", app.Config(), &infra.GenConfig{MaxOutputTokens: 300})
+	raw, err := infra.GenerateContentSimple(ctx, app, "", prompt+prompts.DataSafety(), app.Config(), &infra.GenConfig{MaxOutputTokens: 300})
 	if err != nil {
 		return nil, fmt.Errorf("refinery llm call: %w", err)
 	}
