@@ -9,6 +9,9 @@ import (
 	"github.com/jackstrohm/jot/pkg/telegram"
 )
 
+// ConfigGetter returns the current config (allows tests to override).
+type ConfigGetter func() *config.Config
+
 // TelegramService handles Telegram Bot API operations for the API.
 type TelegramService struct {
 	getConfig ConfigGetter

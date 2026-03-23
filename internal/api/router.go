@@ -31,8 +31,6 @@ func NewRouter(s *Server) *chi.Mux {
 		r.Get("/metrics", wrap(handleMetrics))
 		r.Get("/privacy-policy", wrap(handlePrivacyPolicy))
 		r.Get("/terms-and-conditions", wrap(handleTermsAndConditions))
-		r.Post("/webhook", wrapAPI(handleWebhook))
-		r.Post("/sms", wrap(handleSMS))
 		r.Post("/telegram", wrap(handleTelegram))
 	})
 
@@ -47,10 +45,6 @@ func NewRouter(s *Server) *chi.Mux {
 		r.With(RateLimitMiddleware(60)).Patch("/entries/{uuid}", wrapAPI(handleEntries))
 		r.With(RateLimitMiddleware(60)).Delete("/entries", wrapAPI(handleEntries))
 		r.With(RateLimitMiddleware(60)).Delete("/entries/{uuid}", wrapAPI(handleEntries))
-		r.With(RateLimitMiddleware(5)).Post("/sync", wrapAPI(handleSync))
-		r.With(RateLimitMiddleware(60)).Get("/dream/latest", wrapAPI(handleDreamLatest))
-		r.With(RateLimitMiddleware(60)).Get("/dream/status", wrapAPI(handleDreamStatus))
-		r.With(RateLimitMiddleware(2)).Post("/dream", wrapAPI(handleDream))
 		r.With(RateLimitMiddleware(1)).Post("/janitor", wrapAPI(handleJanitor))
 		r.With(RateLimitMiddleware(2)).Post("/rollup", wrapAPI(handleRollup))
 		r.With(RateLimitMiddleware(60)).Get("/pending-questions", wrapAPI(handlePendingQuestions))
@@ -58,10 +52,8 @@ func NewRouter(s *Server) *chi.Mux {
 		r.With(RateLimitMiddleware(5)).Post("/decay-contexts", wrapAPI(handleDecayContexts))
 		r.With(RateLimitMiddleware(2)).Post("/backfill-embeddings", wrapAPI(handleBackfillEmbeddings))
 		r.With(RateLimitMiddleware(120)).Post("/internal/process-entry", wrapAPI(handleProcessEntry))
-		r.With(RateLimitMiddleware(120)).Post("/internal/process-sms-query", wrapAPI(handleProcessSMSQuery))
 		r.With(RateLimitMiddleware(120)).Post("/internal/process-telegram-query", wrapAPI(handleProcessTelegramQuery))
 		r.With(RateLimitMiddleware(120)).Post("/internal/save-query", wrapAPI(handleSaveQuery))
-		r.With(RateLimitMiddleware(120)).Post("/internal/dream-run", wrapAPI(handleDreamRun))
 		r.With(RateLimitMiddleware(300)).Post("/internal/replay", wrapAPI(handleReplay))
 	})
 
@@ -74,9 +66,8 @@ func NewRouter(s *Server) *chi.Mux {
 			"error": "Not found", "path": path,
 			"available_routes": []string{
 				"GET  /health", "GET  /metrics", "GET  /privacy-policy", "GET  /terms-and-conditions",
-				"POST /log", "POST /query", "GET  /entries", "POST /sync", "GET  /dream/latest", "GET  /dream/status", "POST /dream",
-				"POST /janitor", "POST /rollup", "POST /webhook", "POST /sms", "POST /telegram", "POST /decay-contexts",
-				"POST /backfill-embeddings", "GET  /pending-questions", "POST /pending-questions/:id/resolve",
+				"POST /log", "POST /query", "GET  /entries", "POST /janitor", "POST /rollup", "POST /telegram",
+				"POST /decay-contexts", "POST /backfill-embeddings", "GET  /pending-questions", "POST /pending-questions/:id/resolve",
 			},
 		})
 	})

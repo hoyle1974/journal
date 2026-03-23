@@ -17,22 +17,13 @@ import (
 // Config holds configuration loaded from environment and Secret Manager.
 type Config struct {
 	GoogleCloudProject string
-	DocumentID         string
 	ServiceAccountFile string
 	CloudTasksQueue    string
 	CloudTasksLocation string
-	SyncGDocURL        string
 	JotAPIBaseURL      string // Base URL for Cloud Task targets (JOT_API_URL)
 	GeminiAPIKey       string
 	JotAPIKey          string
 	GeminiModel        string
-	DreamerModel       string // Faster model for dreamer (default: flash)
-
-	// Twilio
-	TwilioAccountSID   string
-	TwilioAuthToken    string
-	TwilioPhoneNumber  string
-	AllowedPhoneNumber string
 
 	// Telegram
 	TelegramBotToken      string
@@ -48,8 +39,8 @@ type Config struct {
 	// UseCompactTools when true uses an MCP-style tool protocol: only a short tool directory is sent in the prompt (no full parameter schemas). The model outputs structured tool calls (JSON); we parse, validate, and execute server-side. Reduces tool context from ~7k tokens to a few hundred. Default true; set JOT_USE_COMPACT_TOOLS=false to disable.
 	UseCompactTools bool
 
-	// DebugReportEnabled controls whether a first-person narrative debug report is generated after each query and
-	// written (bold) to the Google Doc in place of the normal log entry. Default true; set JOT_DEBUG_REPORT_DISABLED=true to disable.
+	// DebugReportEnabled controls whether a first-person narrative debug report is generated after each query
+	// and logged asynchronously at debug level. Default true; set JOT_DEBUG_REPORT_DISABLED=true to disable.
 	DebugReportEnabled bool
 }
 
@@ -59,25 +50,15 @@ func Load() (*Config, error) {
 
 	cfg := &Config{}
 	cfg.GoogleCloudProject = loadEnv("GOOGLE_CLOUD_PROJECT", "")
-	cfg.DocumentID = os.Getenv("DOCUMENT_ID")
 	cfg.ServiceAccountFile = os.Getenv("SERVICE_ACCOUNT_FILE")
 	cfg.CloudTasksQueue = loadEnv("CLOUD_TASKS_QUEUE", "jot-sync-queue")
 	cfg.CloudTasksLocation = loadEnv("CLOUD_TASKS_LOCATION", "us-central1")
-	cfg.SyncGDocURL = os.Getenv("SYNC_GDOC_URL")
 	cfg.JotAPIBaseURL = os.Getenv("JOT_API_URL")
 
 	// Secrets (env first, then Secret Manager using project from env)
 	cfg.GeminiAPIKey = loadSecret(cfg.GoogleCloudProject, "GEMINI_API_KEY")
 	cfg.JotAPIKey = loadSecret(cfg.GoogleCloudProject, "JOT_API_KEY")
 	cfg.GeminiModel = normalizeToFlash(loadEnv("GEMINI_MODEL", "gemini-2.5-flash"))
-	cfg.DreamerModel = normalizeToFlash(loadEnv("DREAMER_MODEL", "gemini-2.5-flash"))
-	// Only load Twilio secrets if at least one Twilio env var is set; otherwise skip Secret Manager to avoid NotFound warnings.
-	if twilioWanted() {
-		cfg.TwilioAccountSID = loadSecretOptional(cfg.GoogleCloudProject, "TWILIO_ACCOUNT_SID")
-		cfg.TwilioAuthToken = loadSecretOptional(cfg.GoogleCloudProject, "TWILIO_AUTH_TOKEN")
-		cfg.TwilioPhoneNumber = loadSecretOptionalWithDefault(cfg.GoogleCloudProject, "TWILIO_PHONE_NUMBER", "")
-		cfg.AllowedPhoneNumber = loadSecretOptionalWithDefault(cfg.GoogleCloudProject, "ALLOWED_PHONE_NUMBER", "")
-	}
 	if telegramWanted() {
 		cfg.TelegramBotToken = loadSecretOptional(cfg.GoogleCloudProject, "TELEGRAM_BOT_TOKEN")
 		cfg.TelegramSecretToken = loadSecretOptionalWithDefault(cfg.GoogleCloudProject, "TELEGRAM_SECRET_TOKEN", "")
@@ -118,14 +99,6 @@ func loadEnv(key, defaultValue string) string {
 		return v
 	}
 	return defaultValue
-}
-
-// twilioWanted returns true if any Twilio-related env var is set (caller intends to use Twilio).
-func twilioWanted() bool {
-	return os.Getenv("TWILIO_ACCOUNT_SID") != "" ||
-		os.Getenv("TWILIO_AUTH_TOKEN") != "" ||
-		os.Getenv("TWILIO_PHONE_NUMBER") != "" ||
-		os.Getenv("ALLOWED_PHONE_NUMBER") != ""
 }
 
 // telegramWanted returns true if any Telegram-related env var is set (caller intends to use Telegram).

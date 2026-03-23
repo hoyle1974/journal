@@ -19,7 +19,7 @@ import (
 
 // DefaultGeminiFactory creates a Gemini client using the built-in implementation.
 // Used by NewApp when no GeminiFactory is provided.
-func DefaultGeminiFactory(ctx context.Context, cfg *config.Config) (*genai.Client, string, string, error) {
+func DefaultGeminiFactory(ctx context.Context, cfg *config.Config) (*genai.Client, string, error) {
 	log := Logger
 	if log == nil {
 		log = slog.Default()
@@ -139,36 +139,30 @@ func resolveModel(configured string, available []string) string {
 	return use
 }
 
-func newGeminiClientForApp(ctx context.Context, cfg *config.Config, log *slog.Logger) (*genai.Client, string, string, error) {
+func newGeminiClientForApp(ctx context.Context, cfg *config.Config, log *slog.Logger) (*genai.Client, string, error) {
 	if cfg == nil || cfg.GeminiAPIKey == "" {
-		return nil, "", "", fmt.Errorf("GEMINI_API_KEY not configured")
+		return nil, "", fmt.Errorf("GEMINI_API_KEY not configured")
 	}
 	client, err := genai.NewClient(ctx, &genai.ClientConfig{
 		APIKey:  cfg.GeminiAPIKey,
 		Backend: genai.BackendGeminiAPI,
 	})
 	if err != nil {
-		return nil, "", "", fmt.Errorf("failed to create Gemini client: %w", err)
+		return nil, "", fmt.Errorf("failed to create Gemini client: %w", err)
 	}
 	_, available := listAllModelsWithLogger(ctx, client, log, cfg.GeminiAPIKey)
 	effGen := cfg.GeminiModel
-	effDream := cfg.DreamerModel
 	if len(available) > 0 {
 		effGen = resolveModel(cfg.GeminiModel, available)
-		effDream = resolveModel(cfg.DreamerModel, available)
-		if effGen != cfg.GeminiModel || effDream != cfg.DreamerModel {
+		if effGen != cfg.GeminiModel {
 			log.Info("gemini model resolved (configured not in list)",
-				"gemini_configured", cfg.GeminiModel, "gemini_resolved", effGen,
-				"dreamer_configured", cfg.DreamerModel, "dreamer_resolved", effDream)
+				"gemini_configured", cfg.GeminiModel, "gemini_resolved", effGen)
 		}
 	}
 	if effGen == "" {
 		effGen = cfg.GeminiModel
 	}
-	if effDream == "" {
-		effDream = cfg.DreamerModel
-	}
-	return client, effGen, effDream, nil
+	return client, effGen, nil
 }
 
 // GetGeminiClient returns the Gemini client from the given App.

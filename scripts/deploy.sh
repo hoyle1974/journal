@@ -32,13 +32,8 @@ REGION="us-central1"
 FUNCTION_NAME="jot-api-go"
 IMAGE="$REGION-docker.pkg.dev/$PROJECT/jot/$FUNCTION_NAME"
 
-# Resource configuration (use max of query/dream so POST /dream can run up to DreamSeconds)
-QUERY_TIMEOUT=$(grep 'QuerySeconds = ' internal/timeout/timeout.go | sed 's/.*= \([0-9]*\).*/\1/')
-DREAM_TIMEOUT=$(grep 'DreamSeconds = ' internal/timeout/timeout.go | sed 's/.*= \([0-9]*\).*/\1/')
-RUN_TIMEOUT=$QUERY_TIMEOUT
-if [ -n "$DREAM_TIMEOUT" ] && [ "$DREAM_TIMEOUT" -gt "$RUN_TIMEOUT" ] 2>/dev/null; then
-  RUN_TIMEOUT=$DREAM_TIMEOUT
-fi
+# Resource configuration (Cloud Run request timeout from shared QuerySeconds)
+RUN_TIMEOUT=$(grep 'QuerySeconds = ' internal/timeout/timeout.go | sed 's/.*= \([0-9]*\).*/\1/')
 CPU="1"
 # gen2 (required for Prometheus sidecar) has a minimum of 512 Mi total memory
 MEMORY="512Mi"

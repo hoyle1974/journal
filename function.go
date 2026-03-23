@@ -15,7 +15,6 @@ import (
 	"github.com/GoogleCloudPlatform/functions-framework-go/functions"
 	"github.com/jackstrohm/jot/internal/api"
 	"github.com/jackstrohm/jot/internal/config"
-	"github.com/jackstrohm/jot/internal/gdoc"
 	"github.com/jackstrohm/jot/internal/infra"
 	"github.com/jackstrohm/jot/internal/service"
 )
@@ -35,7 +34,7 @@ func getConfig() *config.Config {
 	return defaultConfig
 }
 
-// InitDefaultApp loads config, initializes observability and the default infra.App (with gdoc logging).
+// InitDefaultApp loads config, initializes observability and the default infra.App.
 // Call from cmd/server or tests before using the API so startup fails fast on misconfiguration.
 // When running as a Cloud Function with no prior call, the first request will perform this init lazily.
 func InitDefaultApp(ctx context.Context) error {
@@ -45,7 +44,7 @@ func InitDefaultApp(ctx context.Context) error {
 		return err
 	}
 	infra.InitObservability(defaultConfig)
-	return infra.InitDefaultApp(ctx, defaultConfig, gdoc.NewGDocLogFunc(defaultConfig), nil)
+	return infra.InitDefaultApp(ctx, defaultConfig, nil)
 }
 
 // SetTestConfig sets a config override for tests. Returns a restore func to call in defer.
@@ -79,7 +78,7 @@ func ensureServer() error {
 				return
 			}
 			infra.InitObservability(defaultConfig)
-			serverInitErr = infra.InitDefaultApp(context.Background(), defaultConfig, gdoc.NewGDocLogFunc(defaultConfig), nil)
+			serverInitErr = infra.InitDefaultApp(context.Background(), defaultConfig, nil)
 			if serverInitErr != nil {
 				return
 			}
@@ -95,10 +94,9 @@ func ensureServer() error {
 		journalSvc := service.NewJournalService(app, defaultConfig)
 		memorySvc := service.NewMemoryService(app)
 		agentSvc := service.NewAgentService(app)
-		smsSvc := service.NewSMSService(getConfig)
 		telegramSvc := service.NewTelegramService(getConfig)
 		systemSvc := service.NewSystemService(app)
-		defaultServer = api.NewServer(app, defaultConfig, infra.Logger, journalSvc, memorySvc, agentSvc, smsSvc, telegramSvc, systemSvc)
+		defaultServer = api.NewServer(app, defaultConfig, infra.Logger, journalSvc, memorySvc, agentSvc, telegramSvc, systemSvc)
 	})
 	return serverInitErr
 }

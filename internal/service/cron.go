@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/jackstrohm/jot/internal/agent"
 	"github.com/jackstrohm/jot/internal/infra"
 )
 
@@ -27,11 +26,6 @@ func envOrDefault(key, def string) string {
 type PulseResult struct {
 	StaleNodes []string
 	Signals    int
-}
-
-// RunDreamer consolidates the last 24h of journal entries into semantic memory.
-func RunDreamer(ctx context.Context, app *infra.App) (*agent.DreamerResult, error) {
-	return agent.RunDreamer(ctx, app, nil)
 }
 
 // RunJanitor performs garbage collection on semantic memory via pkg/memory.

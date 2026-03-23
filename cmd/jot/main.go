@@ -378,30 +378,6 @@ func cmdQuery(question string) {
 	}
 }
 
-func cmdSync() {
-	fmt.Println("Syncing Google Doc...")
-	result, headers := api.DoOrExit(context.Background(), "POST", "/sync", nil, 300*time.Second)
-	if traceFlag && headers != nil {
-		printTraceInfo(headers)
-	}
-	if msg := jsonStr(result, "message"); msg != "" {
-		fmt.Printf("  %s\n", msg)
-		return
-	}
-
-	entries := int(jsonFloat(result, "entries_added"))
-	questions := int(jsonFloat(result, "questions_answered"))
-	actions := int(jsonFloat(result, "actions_executed"))
-	total := entries + questions + actions
-
-	if total == 0 {
-		fmt.Println("  Nothing to process")
-	} else {
-		fmt.Printf("  Processed: %d entries, %d questions, %d actions\n",
-			entries, questions, actions)
-	}
-}
-
 func cmdEntries(limit int) {
 	result, _ := api.DoOrExit(context.Background(), "GET", fmt.Sprintf("/entries?limit=%d", limit), nil, RequestTimeout)
 	entriesRaw, ok := result["entries"].([]interface{})
@@ -526,171 +502,6 @@ func cmdEdit(limit int) {
 	}
 }
 
-func cmdDream() {
-	// If a dream is already running or pending, attach to it instead of starting a new one.
-	state, _, _ := api.Do(context.Background(), "GET", "/dream/status", nil, 15*time.Second)
-	if state != nil {
-		if status, _ := state["status"].(string); status == "running" || status == "pending" {
-			dreamRunID, _ := state["dream_run_id"].(string)
-			if dreamRunID != "" {
-				fmt.Printf("Dream already in progress (run_id: %s). Showing progress.\n", dreamRunID)
-				fmt.Println("Polling for progress (Ctrl-C to exit anytime; dream continues on server)...")
-				fmt.Println()
-				pollDreamStatus(state, 0, "")
-				return
-			}
-		}
-	}
-
-	fmt.Println("Starting dream run (consolidating last 24h into semantic memory)...")
-	result, headers, err := api.Do(context.Background(), "POST", "/dream", nil, 30*time.Second)
-	if err != nil {
-		fmt.Printf("Error: %v\n", err)
-		printRateLimitHelp(err)
-		if strings.Contains(err.Error(), "504") || strings.Contains(err.Error(), "upstream request timeout") || strings.Contains(err.Error(), "request failed (status 504)") {
-			fmt.Println("Tip: The server timed out. Dream runs async now; try again or poll GET /dream/status.")
-		}
-		os.Exit(1)
-	}
-	if result == nil {
-		fmt.Println("Error: No response from API")
-		os.Exit(1)
-	}
-	if traceFlag && headers != nil {
-		printTraceInfo(headers)
-	}
-	dreamRunID, _ := result["dream_run_id"].(string)
-	if dreamRunID == "" {
-		fmt.Println("Error: No dream_run_id in response")
-		os.Exit(1)
-	}
-	if b, _ := result["already_running"].(bool); b {
-		fmt.Printf("Dream already in progress (run_id: %s). Polling for status.\n", dreamRunID)
-	}
-	fmt.Println("Polling for progress (Ctrl-C to exit anytime; dream continues on server)...")
-	fmt.Println()
-	pollDreamStatus(nil, 0, "")
-}
-
-func pollDreamStatus(initialState map[string]interface{}, lastLogLen int, lastPhase string) {
-	pollInterval := 2 * time.Second
-	state := initialState
-	for {
-		if state == nil {
-			var err error
-			state, _, err = api.Do(context.Background(), "GET", "/dream/status", nil, 15*time.Second)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Poll error: %v\n", err)
-				time.Sleep(pollInterval)
-				continue
-			}
-			if state == nil {
-				time.Sleep(pollInterval)
-				continue
-			}
-		}
-		status, _ := state["status"].(string)
-		phase, _ := state["current_phase"].(string)
-		if phase != "" && phase != lastPhase {
-			lastPhase = phase
-			fmt.Printf("[%s]\n", phase)
-		}
-		if logSlice, ok := state["log"].([]interface{}); ok {
-			for i := lastLogLen; i < len(logSlice); i++ {
-				if msg, ok := logSlice[i].(string); ok {
-					fmt.Println("  ", msg)
-				}
-			}
-			lastLogLen = len(logSlice)
-		}
-		switch status {
-		case "completed":
-			if res, ok := state["result"].(map[string]interface{}); ok {
-				entries := int(jsonFloatFromMap(res, "entries_processed"))
-				extracted := int(jsonFloatFromMap(res, "facts_extracted"))
-				written := int(jsonFloatFromMap(res, "facts_written"))
-				fmt.Println()
-				fmt.Printf("Done. Entries: %d | Extracted: %d | Written: %d\n", entries, extracted, written)
-			}
-			return
-		case "failed":
-			errMsg, _ := state["error"].(string)
-			fmt.Println()
-			if errMsg != "" {
-				fmt.Printf("Dream run failed: %s\n", errMsg)
-			} else {
-				fmt.Println("Dream run failed.")
-			}
-			os.Exit(1)
-		}
-		state = nil // next iteration fetch fresh state
-		time.Sleep(pollInterval)
-	}
-}
-
-func jsonFloatFromMap(m map[string]interface{}, key string) float64 {
-	if v, ok := m[key]; ok {
-		if f, ok := v.(float64); ok {
-			return f
-		}
-	}
-	return 0
-}
-
-func cmdDreamPollOnly() {
-	// Legacy / unused: kept in case we want a "jot dream status" that only polls.
-	pollInterval := 2 * time.Second
-	var lastPhase string
-	var lastLogLen int
-	for {
-		state, _, err := api.Do(context.Background(), "GET", "/dream/status", nil, 15*time.Second)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Poll error: %v\n", err)
-			time.Sleep(pollInterval)
-			continue
-		}
-		if state == nil {
-			time.Sleep(pollInterval)
-			continue
-		}
-		status, _ := state["status"].(string)
-		phase, _ := state["current_phase"].(string)
-		if phase != "" && phase != lastPhase {
-			lastPhase = phase
-			fmt.Printf("[%s]\n", phase)
-		}
-		if logSlice, ok := state["log"].([]interface{}); ok {
-			for i := lastLogLen; i < len(logSlice); i++ {
-				if msg, ok := logSlice[i].(string); ok {
-					fmt.Println("  ", msg)
-				}
-			}
-			lastLogLen = len(logSlice)
-		}
-		switch status {
-		case "completed":
-			if res, ok := state["result"].(map[string]interface{}); ok {
-				entries := int(jsonFloatFromMap(res, "entries_processed"))
-				extracted := int(jsonFloatFromMap(res, "facts_extracted"))
-				written := int(jsonFloatFromMap(res, "facts_written"))
-				fmt.Println()
-				fmt.Printf("Done. Entries: %d | Extracted: %d | Written: %d\n", entries, extracted, written)
-			}
-			return
-		case "failed":
-			errMsg, _ := state["error"].(string)
-			fmt.Println()
-			if errMsg != "" {
-				fmt.Printf("Dream run failed: %s\n", errMsg)
-			} else {
-				fmt.Println("Dream run failed.")
-			}
-			os.Exit(1)
-		}
-		time.Sleep(pollInterval)
-	}
-}
-
 func cmdRollup() {
 	fmt.Println("Running roll-up (weekly + monthly summaries)...")
 	result, _ := api.DoOrExit(context.Background(), "POST", "/rollup", nil, time.Duration(timeout.QuerySeconds)*time.Second)
@@ -753,14 +564,6 @@ jot q <question>
     jot q What meetings did I have in January?
     jot query How has my mood been lately?
 `,
-		"sync": `
-jot sync
-jot s
-
-  Process the linked Google Doc.
-  - Processes new entries from the Google Doc
-  - Answers any questions (?question) in the Google Doc
-`,
 		"edit": `
 jot edit [limit]
 
@@ -771,13 +574,6 @@ jot edit [limit]
     v <#>  - View full entry
     r      - Refresh list
     q      - Quit
-`,
-		"dream": `
-jot dream
-
-  Run the Dreamer: consolidate last 24h of journal entries into semantic memory.
-  Extracts "gold" (permanent facts) from "gravel" (temporary logistics).
-  Schedule daily via Cloud Scheduler.
 `,
 		"janitor": `
 jot janitor
@@ -809,11 +605,9 @@ Just talk to your assistant - it figures out what to do:
 
 Commands (optional):
   log, l <message>     Fast logging (bypasses AI)
-  sync, s              Process Google Doc
   edit [limit]         Interactive entry editor
   entries [limit]      List recent entries
-  dream, janitor       Run Dreamer (daily) or Janitor (weekly) cron
-  recall               Show last night's dream narrative (morning readout)
+  janitor, rollup      Run Janitor (weekly GC) or weekly/monthly rollup cron
   help [topic]         Show help
 
 Run 'jot help <topic>' for detailed help.
@@ -836,9 +630,8 @@ func main() {
 
 	cmd := strings.ToLower(args[0])
 
-	// Before starting a journal/query session, show unread dream narrative then pending clarification questions
+	// Before starting a journal/query session, show pending clarification questions when present.
 	if cmd == "log" || cmd == "l" || cmd == "query" || cmd == "q" {
-		maybeFetchUnreadDream()
 		maybePromptPendingQuestions()
 	}
 
@@ -862,9 +655,6 @@ func main() {
 		}
 		input := strings.Join(args[1:], " ")
 		cmdQuery(input)
-
-	case "sync", "s":
-		cmdSync()
 
 	case "edit":
 		limit := 10
@@ -890,15 +680,10 @@ func main() {
 		}
 		cmdEntries(limit)
 
-	case "dream":
-		cmdDream()
 	case "janitor":
 		cmdJanitor()
 	case "rollup":
 		cmdRollup()
-	case "recall", "awake":
-		cmdRecall()
-
 	case "help", "-h", "--help":
 		topic := ""
 		if len(args) > 1 {
@@ -911,56 +696,6 @@ func main() {
 		input := strings.Join(args, " ")
 		cmdQuery(input)
 	}
-}
-
-// maybeFetchUnreadDream fetches GET /dream/latest; if unread, prints the narrative and marks it read in the background.
-func maybeFetchUnreadDream() {
-	if APIBaseURL == "" {
-		return
-	}
-	result, err := apiRequest(context.Background(), "GET", "/dream/latest", nil, RequestTimeout)
-	if err != nil || result == nil {
-		return
-	}
-	unread, _ := result["unread"].(bool)
-	if !unread {
-		return
-	}
-	narrative, _ := result["narrative"].(string)
-	if narrative == "" {
-		return
-	}
-	fmt.Printf("\n[From Last Night's Dreamer]:\n%s\n---\n", narrative)
-	go func() {
-		_, _ = apiRequest(context.Background(), "GET", "/dream/latest?mark_read=true", nil, RequestTimeout)
-	}()
-}
-
-// cmdRecall fetches and prints the latest dream narrative (read or unread).
-func cmdRecall() {
-	if APIBaseURL == "" {
-		fmt.Println("Error: JOT_API_URL is not set")
-		os.Exit(1)
-	}
-	result, _, err := api.Do(context.Background(), "GET", "/dream/latest", nil, RequestTimeout)
-	if err != nil {
-		fmt.Printf("Error: %v\n", err)
-		os.Exit(1)
-	}
-	if result == nil {
-		fmt.Println("Error: No response from API")
-		os.Exit(1)
-	}
-	narrative, _ := result["narrative"].(string)
-	timestamp, _ := result["timestamp"].(string)
-	if narrative == "" {
-		fmt.Println("No dream narrative found. Run the dreamer (e.g. via cron) to generate one.")
-		return
-	}
-	if timestamp != "" {
-		fmt.Printf("Dream from %s:\n\n", timestamp)
-	}
-	fmt.Println(narrative)
 }
 
 // maybePromptPendingQuestions fetches unresolved pending questions and prompts the user to answer or skip.
@@ -976,7 +711,7 @@ func maybePromptPendingQuestions() {
 	if !ok || len(questionsRaw) == 0 {
 		return
 	}
-	fmt.Println("\n--- Pending clarifications (from your last dream run) ---")
+	fmt.Println("\n--- Pending clarifications ---")
 	for i, qRaw := range questionsRaw {
 		q, _ := qRaw.(map[string]interface{})
 		if q == nil {

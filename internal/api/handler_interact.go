@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/jackstrohm/jot/internal/agent"
-	"github.com/jackstrohm/jot/internal/gdoc"
 	"github.com/jackstrohm/jot/internal/infra"
 	"github.com/jackstrohm/jot/internal/persona"
 	"github.com/jackstrohm/jot/pkg/utils"
@@ -70,7 +69,6 @@ func handleLog(s *Server, w http.ResponseWriter, r *http.Request) (any, error) {
 }
 
 // handleQuery runs the FOH and delivers the answer to the API client as JSON.
-// SMS callers use a Cloud Task (process-sms-query) which runs FOH and delivers the answer via SendSMS.
 func handleQuery(s *Server, w http.ResponseWriter, r *http.Request) (any, error) {
 	ctx := r.Context()
 	path := pathForLog(r.URL.Path)
@@ -94,31 +92,21 @@ func handleQuery(s *Server, w http.ResponseWriter, r *http.Request) (any, error)
 	}
 
 	if s.Config != nil && s.Config.DebugReportEnabled && hasApp && !result.Error {
-		// Suppress normal gdoc log forwarding; the debug report replaces the normal entry.
-		reportCtx := infra.WithSuppressGDocLog(ctx)
-		infra.LoggerFrom(reportCtx).Info("query completed",
-			"error", result.Error, "iterations", result.Iterations,
-			"tool_call_count", len(result.ToolCalls),
-			"answer_preview", utils.TruncateString(result.Answer, 120))
-		// Detach from the request context so the async work survives the HTTP response,
-		// then fire-and-forget the LLM call + gdoc write via the app pool.
-		asyncCtx := context.WithoutCancel(reportCtx)
-		cfg := s.Config
+		asyncCtx := context.WithoutCancel(ctx)
 		toolCalls := result.ToolCalls
 		debugLogs := result.DebugLogs
 		answer := result.Answer
+		q := question
 		app.SubmitAsync(func() {
-			narrative := agent.GenerateDebugReport(asyncCtx, app, question, toolCalls, debugLogs, answer)
+			narrative := agent.GenerateDebugReport(asyncCtx, app, q, toolCalls, debugLogs, answer)
 			if narrative != "" {
-				gdoc.WriteReport(asyncCtx, cfg, narrative)
+				infra.LoggerFrom(asyncCtx).Debug("query debug report", "narrative", narrative)
 			}
 		})
-	} else {
-		infra.LoggerFrom(ctx).Info("query completed",
-			"error", result.Error, "iterations", result.Iterations,
-			"tool_call_count", len(result.ToolCalls),
-			"answer_preview", utils.TruncateString(result.Answer, 120))
 	}
+	infra.LoggerFrom(ctx).Info("query completed",
+		"error", result.Error, "iterations", result.Iterations,
+		"tool_call_count", len(result.ToolCalls),
+		"answer_preview", utils.TruncateString(result.Answer, 120))
 	return result, nil
 }
-

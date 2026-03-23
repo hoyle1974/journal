@@ -100,7 +100,7 @@ func GetCompactDirectory() string {
 	for _, t := range registry {
 		byCat[t.Category] = append(byCat[t.Category], t)
 	}
-	cats := []string{"knowledge", "journal", "context", "task", "query", "web", "utility", "specialist"}
+	cats := []string{"knowledge", "journal", "context", "task", "query", "web", "utility"}
 	used := make(map[string]bool)
 	for _, c := range cats {
 		used[c] = true

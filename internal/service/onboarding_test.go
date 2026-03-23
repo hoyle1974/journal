@@ -21,10 +21,10 @@ func TestRunFirstRunOnboarding_Integration(t *testing.T) {
 	ctx := context.Background()
 	cfg := &config.Config{GoogleCloudProject: "test-project"}
 	// Gemini factory that fails so we don't need API keys; app still has Firestore.
-	noGemini := func(context.Context, *config.Config) (*genai.Client, string, string, error) {
-		return nil, "", "", errors.New("no gemini in test")
+	noGemini := func(context.Context, *config.Config) (*genai.Client, string, error) {
+		return nil, "", errors.New("no gemini in test")
 	}
-	app, _ := infra.NewApp(ctx, cfg, nil, noGemini)
+	app, _ := infra.NewApp(ctx, cfg, noGemini)
 	if app == nil {
 		t.Fatal("NewApp returned nil app")
 	}

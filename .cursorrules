@@ -18,7 +18,7 @@
 ## Structured Logging
 
 - **Rule:** No `fmt.Print` or raw `slog` global calls.
-- **Requirement:** Always use `LoggerFrom(ctx)` to ensure logs are request-scoped and forwarded to the Google Doc correctly.
+- **Requirement:** Always use `LoggerFrom(ctx)` to ensure logs are request-scoped (e.g. Cloud Logging in production).
 - **Pattern:** `LoggerFrom(ctx).Info("message", "key", value)`.
 - **Rule:** Debug logs must not truncate content. When logging at Debug level, pass the full string (e.g. full node/entry text, full query, full block content). Do not use `TruncateString`, `truncateForLog`, or manual slicing with `...` for values included in `LoggerFrom(ctx).Debug(...)` calls. Info/Warn/Error may still use truncated previews for long values.
 
@@ -74,13 +74,13 @@ The Immutable Source of Truth Rule: internal/prompts/app_capabilities.txt and bl
 ## Domain Terms
 
 - **Gold:** Permanent facts for Semantic Memory.
-- **Gravel:** Temporary logs to be ignored by the Dreamer.
+- **Gravel:** Temporary logs in the raw journal; semantic search targets higher-weight "gold" facts instead.
 - **FOH:** Front of House (the `query_agent.go` loop).
 - **Project Engine:** The set of tools and prompt-injection logic that allows the agent to reason about complex multi-step goals. A "project" is a Task with subtasks (parent_id hierarchy). Use `decompose_task` to break a task into subtasks. FOH injects the active project subtree via `buildActiveProjectBlock` in `prompter.go`.
 
 ## App capabilities file
 
-- **File:** `internal/prompts/app_capabilities.txt` — single source of truth for what Jot can do. LLM-readable; injected into the Dreamer gap-detection prompt so the model understands current capabilities when detecting gaps/contradictions.
+- **File:** `internal/prompts/app_capabilities.txt` — single source of truth for what Jot can do. LLM-readable; used for gap/contradiction awareness in prompts where applicable.
 - **Rule:** After any change that affects what Jot can do (new or removed tools, agents, API routes, cron jobs, memory/journal behavior, or data models), update `app_capabilities.txt` so it stays accurate and concise. Prefer short bullets and clear section headers.
 
 ## Logic Updates
@@ -124,7 +124,7 @@ All in-progress feature and task work is tracked as **briefs** in `briefs/active
 - **Requirement:** Tool implementations (`internal/tools/impl/*`) must NEVER execute raw database queries (e.g., `client.Collection(...)`) or mutate state directly. Tools exist exclusively to parse LLM arguments and delegate the actual work to domain packages (`pkg/memory`, `pkg/task`, `pkg/system`).
 
 - **Rule:** Infrastructure Purity (No Vendor Leakage).
-- **Requirement:** `internal/infra` is strictly for generic, cross-cutting technical concerns (Firestore client instantiation, OpenTelemetry, structured logging, base LLM client). Do NOT place external vendor logic, structs, or API handlers (e.g., Twilio, GitHub, Slack) in `internal/infra`. Use dedicated packages (e.g., `pkg/sms`) for third-party adapters.
+- **Requirement:** `internal/infra` is strictly for generic, cross-cutting technical concerns (Firestore client instantiation, OpenTelemetry, structured logging, base LLM client). Do NOT place external vendor logic, structs, or API handlers (e.g., Telegram, GitHub, Slack) in `internal/infra`. Use dedicated packages (e.g., `pkg/telegram`) for third-party adapters.
 
 - **Rule:** Anti-Context Smuggling.
 - **Requirement:** Contexts (`ctx`) are for deadlines, cancellation, and request-scoped tracing. They are NOT dependency injection containers. Using `infra.GetApp(ctx)` is a leaky abstraction that breaks module boundaries by letting nested code extract arbitrary dependencies from context without declaring them. Never use it in new code. Pass narrow, explicit interfaces (e.g., `FirestoreProvider`, `ToolEnv`) into functions that need them.

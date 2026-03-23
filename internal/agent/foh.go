@@ -207,7 +207,6 @@ func RunQueryWithDebug(ctx context.Context, app FOHEnv, question, source string,
 					"semantic_search": true, "get_entity_network": true, "search_entries": true,
 					"get_entries_by_date_range": true, "query_entities": true, "wikipedia": true,
 					"web_search": true, "list_knowledge": true,
-					"consult_anthropologist": true, "consult_architect": true, "consult_executive": true, "consult_philosopher": true,
 					"graph_expand": true,
 				}
 				if searchTools[discoveredToolName] {
@@ -440,7 +439,6 @@ func RunQueryWithDebug(ctx context.Context, app FOHEnv, question, source string,
 			"semantic_search": true, "get_entity_network": true, "search_entries": true,
 			"get_entries_by_date_range": true, "query_entities": true, "wikipedia": true,
 			"web_search": true, "list_knowledge": true,
-			"consult_anthropologist": true, "consult_architect": true, "consult_executive": true, "consult_philosopher": true,
 			"graph_expand": true,
 		}
 		for _, r := range results {

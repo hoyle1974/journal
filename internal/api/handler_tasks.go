@@ -11,9 +11,7 @@ import (
 	"time"
 
 	"github.com/jackstrohm/jot/internal/agent"
-	"github.com/jackstrohm/jot/internal/gdoc"
 	"github.com/jackstrohm/jot/internal/infra"
-	"github.com/jackstrohm/jot/pkg/sms"
 	"github.com/jackstrohm/jot/pkg/telegram"
 	"github.com/jackstrohm/jot/pkg/utils"
 )
@@ -59,51 +57,14 @@ func handleProcessEntry(s *Server, w http.ResponseWriter, r *http.Request) (any,
 	app, hasApp := s.App.(*infra.App)
 	if s.Config != nil && s.Config.DebugReportEnabled && hasApp && entryReport != nil {
 		asyncCtx := context.WithoutCancel(ctx)
-		cfg := s.Config
 		report := entryReport
 		app.SubmitAsync(func() {
 			narrative := agent.GenerateProcessEntryReport(asyncCtx, app, report)
 			if narrative != "" {
-				gdoc.WriteReport(asyncCtx, cfg, narrative)
+				infra.LoggerFrom(asyncCtx).Debug("process-entry report", "narrative", narrative)
 			}
 		})
 	}
-	return map[string]string{"status": "ok"}, nil
-}
-
-// handleProcessSMSQuery runs the query for an incoming SMS (FOH) and sends the reply via Twilio.
-// Invoked by a Cloud Task enqueued from the SMS webhook so the work runs in a request-scoped context (Cloud Run keeps the request alive until done).
-func handleProcessSMSQuery(s *Server, w http.ResponseWriter, r *http.Request) (any, error) {
-	ctx := r.Context()
-	path := pathForLog(r.URL.Path)
-	var data struct {
-		From       string `json:"from" validate:"required"`
-		Body       string `json:"body" validate:"required"`
-		MessageSid string `json:"message_sid"`
-		correlationFields
-	}
-	if err := DecodeAndValidate(r, &data, s.Validator); err != nil {
-		return nil, handlerError(http.StatusBadRequest, err.Error())
-	}
-	ctx = data.correlationFields.applyToCtx(ctx)
-	msg := &sms.TwilioWebhookRequest{
-		MessageSid: data.MessageSid,
-		From:       data.From,
-		To:         "",
-		Body:       data.Body,
-	}
-	LogHandlerRequest(ctx, r.Method, path, "from", data.From, "message_sid", data.MessageSid, "body_length", len(data.Body), "task_id", data.TaskID, "parent_trace_id", data.ParentTraceID)
-	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
-	defer cancel()
-	response := s.SMS.ProcessIncomingSMS(ctx, s.App.(*infra.App), msg)
-	if response == "" {
-		response = "I couldn't process that. Please try again."
-	}
-	if err := s.SMS.SendSMS(ctx, data.From, response); err != nil {
-		infra.LoggerFrom(ctx).Error("process-sms-query: send reply failed", "to", data.From, "error", err)
-		return nil, fmt.Errorf("failed to send SMS reply: %w", err)
-	}
-	infra.LoggerFrom(ctx).Info("process-sms-query: reply sent", "to", data.From, "preview", utils.TruncateString(response, 60))
 	return map[string]string{"status": "ok"}, nil
 }
 

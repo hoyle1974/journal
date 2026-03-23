@@ -56,7 +56,7 @@ func runRollUpLLM(ctx context.Context, app *infra.App, periodLabel, analysesText
 	}
 	req := &infra.LLMRequest{
 		Parts:     []*genai.Part{{Text: userPrompt}},
-		Model:     app.Config().DreamerModel,
+		Model:     app.QueryModel(),
 		GenConfig: &infra.GenConfig{MaxOutputTokens: 1024},
 	}
 	apiCtx, cancel := context.WithTimeout(ctx, 60*time.Second)

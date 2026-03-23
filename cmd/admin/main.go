@@ -37,7 +37,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("config: %v", err)
 	}
-	app, err := infra.NewApp(ctx, cfg, nil, nil)
+	app, err := infra.NewApp(ctx, cfg, nil)
 	if err != nil {
 		log.Fatalf("NewApp: %v", err)
 	}

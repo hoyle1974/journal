@@ -17,19 +17,9 @@ import (
 	"github.com/panjf2000/ants/v2"
 )
 
-// GDocLogFunc is the callback invoked by the app's gdoc log pool to write a line to the Google Doc.
-// The caller (e.g. jot or main) provides this so infra does not depend on doc-writing logic.
-type GDocLogFunc func(ctx context.Context, msg string)
-
-// GeminiFactory creates a Gemini client and resolves model names. The caller (e.g. jot) provides this
+// GeminiFactory creates a Gemini client and resolves the primary model name. The caller (e.g. jot) provides this
 // so infra does not depend on gemini implementation details (e.g. list-models, SanitizePrompt).
-type GeminiFactory func(ctx context.Context, cfg *config.Config) (*genai.Client, string, string, error)
-
-// gdocLogPayload carries context and message for the gdoc log pool.
-type gdocLogPayload struct {
-	ctx context.Context
-	msg string
-}
+type GeminiFactory func(ctx context.Context, cfg *config.Config) (*genai.Client, string, error)
 
 // ToolEnv is the minimal interface tools need: config, Firestore, and single-shot LLM dispatch.
 // Implemented by *App. Passed explicitly to tool execution so tools do not pull app from context.
@@ -59,14 +49,11 @@ type App struct {
 	firestoreErr           error
 	geminiClient           *genai.Client
 	geminiErr              error
-	effectiveGeminiModel   string
-	effectiveDreamerModel  string
-	configuredGeminiModel  string
-	configuredDreamerModel string
+	effectiveGeminiModel  string
+	configuredGeminiModel string
 
 	imageStorage storage.ImageStorage
 
-	gdocLogPool             *ants.PoolWithFunc
 	toolExecutionPool       *ants.Pool
 	asyncFireAndForgetPool  *ants.Pool
 	summaryGenerationPool   *ants.Pool
@@ -94,9 +81,6 @@ func (a *App) EffectiveModel(configured string) string {
 	if configured == a.configuredGeminiModel && a.effectiveGeminiModel != "" {
 		return a.effectiveGeminiModel
 	}
-	if configured == a.configuredDreamerModel && a.effectiveDreamerModel != "" {
-		return a.effectiveDreamerModel
-	}
 	return configured
 }
 
@@ -106,14 +90,6 @@ func (a *App) QueryModel() string {
 		return a.effectiveGeminiModel
 	}
 	return a.configuredGeminiModel
-}
-
-// DreamerModel returns the resolved model name for the dreamer/specialist agent.
-func (a *App) DreamerModel() string {
-	if a.effectiveDreamerModel != "" {
-		return a.effectiveDreamerModel
-	}
-	return a.configuredDreamerModel
 }
 
 // Config returns the config used to create the app (for callers that need project, API keys, etc.).
@@ -220,15 +196,6 @@ func (a *App) SubmitSummaryGen(task func()) {
 	})
 }
 
-// SubmitGDocLog submits a message to the Google Doc log pool with WaitGroup tracking.
-func (a *App) SubmitGDocLog(ctx context.Context, msg string) {
-	if a.gdocLogPool == nil {
-		return
-	}
-	a.backgroundTasksWg.Add(1)
-	a.gdocLogPool.Invoke(&gdocLogPayload{ctx: ctx, msg: msg})
-}
-
 // WaitForBackgroundTasks waits for all background tasks submitted to this app's pools to complete.
 func (a *App) WaitForBackgroundTasks() {
 	if a.backgroundTasksWg != nil {
@@ -236,10 +203,9 @@ func (a *App) WaitForBackgroundTasks() {
 	}
 }
 
-// WithContext attaches request-scoped logger and gdoc submitter to the context (no app in context).
+// WithContext attaches request-scoped logger to the context (no app in context).
 func (a *App) WithContext(ctx context.Context) context.Context {
-	ctx = WithLogger(ctx, a.Logger)
-	return WithGDocSubmitter(ctx, a.SubmitGDocLog)
+	return WithLogger(ctx, a.Logger)
 }
 
 var (
@@ -263,18 +229,18 @@ func GetDefaultApp() (*App, error) {
 }
 
 // InitDefaultApp initializes the process-wide App. Must be called at startup.
-func InitDefaultApp(ctx context.Context, cfg *config.Config, gdocLog GDocLogFunc, geminiFactory GeminiFactory) error {
+func InitDefaultApp(ctx context.Context, cfg *config.Config, geminiFactory GeminiFactory) error {
 	if cfg == nil {
 		return errors.New("config is required")
 	}
 	defaultAppOnce.Do(func() {
-		defaultApp, defaultAppErr = NewApp(ctx, cfg, gdocLog, geminiFactory)
+		defaultApp, defaultAppErr = NewApp(ctx, cfg, geminiFactory)
 	})
 	return defaultAppErr
 }
 
 // NewApp creates a new App with Firestore, Gemini (via factory), and worker pools.
-func NewApp(ctx context.Context, cfg *config.Config, gdocLog GDocLogFunc, geminiFactory GeminiFactory) (*App, error) {
+func NewApp(ctx context.Context, cfg *config.Config, geminiFactory GeminiFactory) (*App, error) {
 	if cfg == nil {
 		return nil, errors.New("config is required")
 	}
@@ -287,8 +253,7 @@ func NewApp(ctx context.Context, cfg *config.Config, gdocLog GDocLogFunc, gemini
 		Logger:                 logger,
 		cfg:                    cfg,
 		backgroundTasksWg:      &sync.WaitGroup{},
-		configuredGeminiModel:  cfg.GeminiModel,
-		configuredDreamerModel: cfg.DreamerModel,
+		configuredGeminiModel: cfg.GeminiModel,
 	}
 
 	app.firestoreClient, app.firestoreErr = firestore.NewClient(ctx, cfg.GoogleCloudProject)
@@ -300,7 +265,7 @@ func NewApp(ctx context.Context, cfg *config.Config, gdocLog GDocLogFunc, gemini
 	if factory == nil {
 		factory = DefaultGeminiFactory
 	}
-	app.geminiClient, app.effectiveGeminiModel, app.effectiveDreamerModel, app.geminiErr = factory(ctx, cfg)
+	app.geminiClient, app.effectiveGeminiModel, app.geminiErr = factory(ctx, cfg)
 	if app.geminiErr != nil {
 		return app, app.geminiErr
 	}
@@ -317,20 +282,6 @@ func NewApp(ctx context.Context, cfg *config.Config, gdocLog GDocLogFunc, gemini
 			app.Logger.Warn("GCS client for image upload failed, image attach disabled", "bucket", cfg.ImagesBucket, "error", err)
 		} else {
 			app.imageStorage = storage.NewGCSImageStorage(gcsClient, cfg.ImagesBucket)
-		}
-	}
-
-	if gdocLog != nil {
-		gdocLogPool, err := ants.NewPoolWithFunc(1, func(i interface{}) {
-			if p, ok := i.(*gdocLogPayload); ok {
-				defer app.backgroundTasksWg.Done()
-				gdocLog(p.ctx, p.msg)
-			}
-		}, ants.WithMaxBlockingTasks(10000))
-		if err != nil {
-			app.Logger.Error("failed to create gdoc log pool", "error", err)
-		} else {
-			app.gdocLogPool = gdocLogPool
 		}
 	}
 

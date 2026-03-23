@@ -6,8 +6,8 @@ JOT is a single-user "Agentic Second Brain." It creates a high-fidelity bridge b
 
 ### The "Gold vs. Gravel" Principle
 
-- **Gravel:** Temporary logistics, one-off errands, and conversational filler. It stays in the raw logs but is ignored by long-term memory.
-- **Gold:** Relationship facts, project milestones, rigid preferences, and personal values. This is extracted by the Dreamer and stored in the Knowledge Graph.
+- **Gravel:** Temporary logistics, one-off errands, and conversational filler. It stays in the raw logs.
+- **Gold:** Relationship facts, project milestones, rigid preferences, and personal values. Captured via FOH (`upsert_knowledge`), ingest-time evaluator, and journal processing — not via a separate nightly batch job.
 
 **Capabilities:** The single source of truth for what Jot can do (tools, agents, API, cron, memory) is `internal/prompts/app_capabilities.txt`. Keep it updated when adding or changing behavior.
 
@@ -16,9 +16,9 @@ JOT is a single-user "Agentic Second Brain." It creates a high-fidelity bridge b
 | Collection   | Purpose              | Logic                                                                 |
 |--------------|----------------------|-----------------------------------------------------------------------|
 | `journal`    | Episodic Memory      | Raw journal logs (`node_type: log`). Every user input is logged here first. Also stores task nodes (`node_type: task`), query/gap nodes (`node_type: query`), and pending-question nodes (`node_type: pending_question`). Unified collection via `github.com/hoyle1974/memory`. |
-| `journal`    | Semantic Memory      | Distilled facts (`node_type: person|project|goal|preference|...`). Vector embeddings; context nodes (e.g. `user_profile`, `latest_dream`, `system_evolution`) also live here with significance_weight >= 0.7. |
+| `journal`    | Semantic Memory      | Distilled facts (`node_type: person|project|goal|preference|...`). Vector embeddings; context nodes (e.g. `user_profile`, `system_evolution`) also live here with significance_weight >= 0.7. |
 | `contexts`   | Active Contexts      | Named, typed (permanent/auto) context nodes for active projects, plans, and living context. |
-| `_system`    | State                | `dream_run`, `deploy_meta`, `sync_lock`, `sync_state`, `sync_debounce`, `onboarding`. |
+| `_system`    | State                | `deploy_meta`, `onboarding`. |
 
 ## 3. Core Component Architecture
 
@@ -28,45 +28,30 @@ The main query loop. Invoked via `internal/service` (`RunQuery` → `agent.RunQu
 
 1. **Start:** Log user input as an entry (`AddEntryAndEnqueue`), build system prompt (identity, contexts, knowledge-gap block, open todos).
 2. **Loop:** LLM either answers or issues tool calls. Tools run in parallel (worker pool); results are sent back to the LLM.
-3. **Unified audit:** The system prompt requires the model to perform reflection, gap detection, and synthesis in its reasoning before giving the final answer (no separate reflection or synthesis API passes). If the model outputs `MISSING_INFO: <list>`, that is parsed and the query is saved as a knowledge gap.
+3. **Unified audit:** The system prompt requires the model to perform reflection, gap detection, and synthesis in its reasoning before giving the final answer. If the model outputs `MISSING_INFO: <list>`, that is parsed and the query is saved as a knowledge gap.
 4. **Answer:** Save query (and optional knowledge-gap flag) via `EnqueueSaveQuery`. The raw answer is then passed through the **persona layer** (`internal/persona`), which rewrites it in a default friendly-assistant tone before delivery.
-5. **Persona:** CLI, Twilio, Telegram, Google Doc sync, GET /dream/latest narrative, and GET /pending-questions question text are all formatted through the persona layer (default: friendly personal assistant, professional, transparent when unable to answer).
+5. **Persona:** CLI, Telegram, and API query answers go through the persona layer.
 
-Tools include journal, knowledge (semantic_search, upsert_knowledge, etc.), context, task, web, utility, and specialists. `discovery_search` maps intent to tool schemas when the model is unsure which tool to use.
+Tools include journal, knowledge (semantic_search, upsert_knowledge, etc.), context, task, web, utility. `discovery_search` maps intent to tool schemas when the model is unsure which tool to use.
 
-### B. The Dreamer (Nightly) — `internal/agent/dreamer.go` + `internal/service/cron.go`
+### B. The Evaluator — `internal/agent/evaluator.go` + `ProcessEntry`
 
-Consolidates the last 24h of journal entries. Entry point: `service.RunDreamer` (cron or API).
+On journal ingest (`ProcessEntry`), the evaluator assigns significance, may upsert facts, and can auto-create tasks from strong future commitments. Proactive high-significance insights can be stored for FOH.
 
-1. **Fetch:** Load last 24h entries and journal context; load recent queries text.
-2. **Colloquium:** "Committee" of specialists discuss the journal in a room (up to 10 passes); each can add or correct; they may reply "DONE" when satisfied.
-3. **Extraction:** Run specialists (relationship, work, task, thought, selfmodel) for final fact extraction; run context extractor and query analyzer.
-4. **Consolidation:** Merge facts by embedding similarity (`mergeDreamerFacts`), then write to semantic memory (`dreamerWriteMergedFacts`).
-5. **Gap detection:** `RunGapDetection` — identify knowledge gaps/contradictions (uses `app_capabilities.txt`).
-6. **Synthesis:** Re-synthesize impacted context nodes; merge persona facts into `user_profile` (`RunProfileSynthesis`); run Cognitive Engineer and write to `system_evolution` (`RunEvolutionSynthesis`).
-7. **Incubation:** `PromoteIncubatingClusters` — promote recurring themes (tags/categories across days) to formal contexts.
-8. **Narrative:** Write the morning readout to `_system/latest_dream`.
-9. **Task phase:** Tool-calling phase to create or update tasks from the night's journal.
+### C. Rollups — `internal/agent/rollup.go`
 
-### C. The Specialist Agents — `internal/agent/specialists.go`
+`RunWeeklyRollup` / `RunMonthlyRollup` synthesize period summaries into `weekly_summary` / `monthly_summary` knowledge nodes. Invoked via POST /rollup (cron or manual).
 
-Domains: **relationship** (Anthropologist), **work** (Architect), **task** (Executive), **thought** (Philosopher), **selfmodel**, **evolution** (Cognitive Engineer). Used in Dreamer for extraction and colloquium; consultable via tools (`consult_anthropologist`, `consult_architect`, etc.). `RunCommittee` runs selected specialists in parallel; `RunEvolutionAudit` is the Cognitive Engineer’s nightly analysis (friction, suggested changes).
+### D. Cron-related helpers — `internal/service/cron.go`
 
-### D. The Planner — `internal/agent/planner.go`
-
-`CreateAndSavePlan(goal)` uses the LLM to decompose a goal into phases, then stores the goal and phase nodes in the knowledge graph (goal + task nodes with `parent_goal`, `step_number`, `dependencies`). Exposed via CLI and `generate_plan` tool.
-
-### E. Cron Jobs — `internal/service/cron.go`
-
-- **Dreamer:** Daily consolidation (see above).
 - **Janitor:** `RunJanitor` — evicts low-significance, rarely recalled nodes (composite index: `last_recalled_at`, `significance_weight`). Never deletes `identity_anchor` / `user_identity`.
 - **Pulse audit:** `RunPulseAudit` — finds high-value nodes not recalled in 14 days and creates proactive "stale loop" signals for FOH.
 
 ## 4. Entry Points
 
-- **CLI** (`cmd/jot`): log, query, sync (Google Doc), dream, janitor, plan, recall (dream narrative), edit, entries, etc.
-- **API:** POST /query, /log, /dream, /rollup, /janitor, /plan, /sync, /decay-contexts, /backfill-embeddings, /webhook, /sms, /telegram; GET /dream/latest, /dream/status, /metrics, /entries, /pending-questions; POST /pending-questions/:id/resolve. POST /dream returns 202 and runs the dream asynchronously (single run at a time; poll GET /dream/status). Cloud Tasks for async work (e.g. process-sms-query, process-telegram-query, dream-run). Handler is wired in `function.go`: `init()` only registers the HTTP handler; config and server are created lazily on first request (or explicitly via `InitDefaultApp` from `cmd/server`). Use `SetServer` to inject a server for tests or embedding so the package can be imported without triggering config or infra.
-- **Cron:** Dreamer (daily), Janitor (weekly).
+- **CLI** (`cmd/jot`): log, query, janitor, rollup, edit, entries, help.
+- **API:** POST /query, /log, /rollup, /janitor, /decay-contexts, /backfill-embeddings, /telegram; GET /metrics, /entries, /pending-questions; POST /pending-questions/:id/resolve. Cloud Tasks for async work (e.g. process-telegram-query, process-entry). Handler is wired in `function.go`: lazy init on first request; `InitDefaultApp` from `cmd/server` for explicit startup. Use `SetServer` to inject a server for tests.
+- **Cron:** Janitor (weekly rollup of eviction); rollups via POST /rollup.
 
 ## 5. Engineering Patterns (see also `.cursorrules`)
 

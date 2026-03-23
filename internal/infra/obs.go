@@ -27,69 +27,16 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// gdocLoggingKey marks context as inside gdoc write so we don't forward those logs to gdoc again.
-type gdocLoggingKeyType struct{}
-
-var gdocLoggingKey = &gdocLoggingKeyType{}
-
-// WithGDocLogging returns a context that marks the caller as writing to the Google Doc log.
-func WithGDocLogging(ctx context.Context) context.Context {
-	return context.WithValue(ctx, gdocLoggingKey, true)
-}
-
-func isGDocLogging(ctx context.Context) bool {
-	return ctx.Value(gdocLoggingKey) != nil
-}
-
-// syncInProgressKey marks context as inside sync so we don't forward logs to the doc during sync.
-type syncInProgressKeyType struct{}
-
-var syncInProgressKey = &syncInProgressKeyType{}
-
-// WithSyncInProgress returns a context that marks the caller as running gdoc sync.
-func WithSyncInProgress(ctx context.Context) context.Context {
-	return context.WithValue(ctx, syncInProgressKey, true)
-}
-
-func isSyncInProgress(ctx context.Context) bool {
-	return ctx.Value(syncInProgressKey) != nil
-}
-
-// suppressGDocLogKey marks context so the gdoc forwarding handler skips writing this request's logs to the doc.
-// Used when the debug report will write its own entry, replacing the normal log entry.
-type suppressGDocLogKeyType struct{}
-
-var suppressGDocLogKey = &suppressGDocLogKeyType{}
-
-// WithSuppressGDocLog returns a context that prevents the gdoc forwarding handler from forwarding logs to the Google Doc.
-func WithSuppressGDocLog(ctx context.Context) context.Context {
-	return context.WithValue(ctx, suppressGDocLogKey, true)
-}
-
-func isGDocLogSuppressed(ctx context.Context) bool {
-	return ctx.Value(suppressGDocLogKey) != nil
-}
-
 // Logger is the global structured logger (set by InitObservability).
 var Logger *slog.Logger
 
 type loggerKeyType struct{}
-type gdocSubmitterKeyType struct{}
 
 var loggerKey = &loggerKeyType{}
-var gdocSubmitterKey = &gdocSubmitterKeyType{}
-
-// GDocSubmitterFunc is the type for submitting a log line to the Google Doc. Set per-request via WithGDocSubmitter.
-type GDocSubmitterFunc func(ctx context.Context, msg string)
 
 // WithLogger attaches a request-scoped logger to the context. Use at the request boundary (e.g. router middleware).
 func WithLogger(ctx context.Context, logger *slog.Logger) context.Context {
 	return context.WithValue(ctx, loggerKey, logger)
-}
-
-// WithGDocSubmitter attaches a callback to submit log lines to the Google Doc. Use at the request boundary with WithLogger.
-func WithGDocSubmitter(ctx context.Context, submit GDocSubmitterFunc) context.Context {
-	return context.WithValue(ctx, gdocSubmitterKey, submit)
 }
 
 // LoggerFrom returns the request-scoped logger from the context (set via WithLogger), or the global Logger when unset.
@@ -173,9 +120,6 @@ func initLogger(cfg *config.Config) {
 	}
 	// Enrich the log message with all key=value attrs so viewers that only show "message" still show the full line.
 	var handler slog.Handler = &messageWithAttrsHandler{inner: baseHandler}
-	if os.Getenv("K_SERVICE") != "" && cfg != nil && cfg.DocumentID != "" {
-		handler = &gdocForwardingHandler{inner: handler}
-	}
 
 	env := "development"
 	if cfg != nil && cfg.Env != "" {
@@ -235,61 +179,6 @@ func (f *flushAfterWriteWriter) Write(p []byte) (n int, err error) {
 		return n, err
 	}
 	return n, f.w.Flush()
-}
-
-type gdocForwardingHandler struct {
-	inner slog.Handler
-}
-
-func (h *gdocForwardingHandler) Enabled(ctx context.Context, level slog.Level) bool {
-	return h.inner.Enabled(ctx, level)
-}
-
-func (h *gdocForwardingHandler) Handle(ctx context.Context, r slog.Record) error {
-	if err := h.inner.Handle(ctx, r); err != nil {
-		return err
-	}
-	if r.Level < slog.LevelInfo || isGDocLogging(ctx) || isSyncInProgress(ctx) || isGDocLogSuppressed(ctx) {
-		return nil
-	}
-	if r.Message == "request completed" {
-		return nil
-	}
-	line := formatRecordForGDoc(&r)
-	if line != "" {
-		if submit, ok := ctx.Value(gdocSubmitterKey).(GDocSubmitterFunc); ok && submit != nil {
-			submit(ctx, line)
-		}
-	}
-	return nil
-}
-
-func (h *gdocForwardingHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	return &gdocForwardingHandler{inner: h.inner.WithAttrs(attrs)}
-}
-
-func (h *gdocForwardingHandler) WithGroup(name string) slog.Handler {
-	return &gdocForwardingHandler{inner: h.inner.WithGroup(name)}
-}
-
-func formatRecordForGDoc(r *slog.Record) string {
-	const maxLen = 500
-	var b strings.Builder
-	b.WriteString(r.Level.String())
-	b.WriteString(" ")
-	b.WriteString(r.Message)
-	r.Attrs(func(a slog.Attr) bool {
-		b.WriteString(" ")
-		b.WriteString(a.Key)
-		b.WriteString("=")
-		b.WriteString(a.Value.String())
-		return true
-	})
-	s := b.String()
-	if len(s) > maxLen {
-		s = s[:maxLen-3] + "..."
-	}
-	return s
 }
 
 func initTracing(cfg *config.Config) {

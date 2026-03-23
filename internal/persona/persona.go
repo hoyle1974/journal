@@ -1,6 +1,6 @@
 // Package persona provides a response-rewriting layer so user-facing text is
-// formatted in a consistent, friendly assistant persona. Used for CLI, Twilio,
-// Telegram, dream narrative, and pending questions before delivery.
+// formatted in a consistent, friendly assistant persona. Used for CLI, Telegram,
+// and API query answers before delivery.
 package persona
 
 import (

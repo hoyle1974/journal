@@ -9,55 +9,51 @@ Jot is a personal journaling and memory system. It ingests journal entries, extr
 - Voice notes received via Telegram are transcribed to text by Gemini and processed identically to typed messages — the FOH agent acts on the transcription. The audio file is persisted in GCS (audio_url field) and the transcription is stored on the journal entry (transcription field).
 
 ## Entry points
-- **CLI**: log, query, sync (Google Doc), dream, janitor, recall (dream narrative), edit, entries.
-- **API**: POST /query, /log, /dream, /rollup, /janitor, /sync, /decay-contexts, /backfill-embeddings, /webhook, /sms, /telegram; GET /dream/latest, /dream/status, /metrics, /entries, /pending-questions; POST /pending-questions/:id/resolve. POST /dream returns 202 and runs the dream async (single run at a time; poll GET /dream/status for progress). Cloud Tasks for async work (e.g. process-sms-query, process-telegram-query, dream-run).
-- **Cron**: Dreamer (daily) consolidates last 24h journal into semantic memory; Janitor (weekly) evicts low-significance, rarely recalled nodes.
+- **CLI**: log, query, janitor, rollup, edit, entries.
+- **API**: POST /query, /log, /rollup, /janitor, /decay-contexts, /backfill-embeddings, /telegram; GET /metrics, /entries, /pending-questions; POST /pending-questions/:id/resolve. Cloud Tasks for async work (e.g. process-telegram-query, process-entry).
+- **Cron**: Janitor (weekly) evicts low-significance, rarely recalled nodes; POST /rollup runs weekly + monthly summary rollups.
 - **First-run onboarding**: On cold start, if _system/onboarding is absent, the system seeds pending_questions with onboarding prompts (name, family, work, role); answers are stored as user_identity nodes.
 - **Telegram question flow**: Pending questions surface in the Telegram bot. When a message arrives, the bot checks for unresolved pending questions first; if any exist it asks the oldest one instead of running FOH. Each reply resolves the current question and triggers the next, or returns "all done" and resumes normal operation. Send /skip to skip a question. Active question state is persisted per chat_id in the `telegram_question_state` Firestore collection.
-- **Telegram slash commands**: `/dream` — triggers the dreamer pipeline and streams phase/log updates to the chat as it runs. `/recall` — sends the latest dream narrative. `/help` — lists available commands. `/skip` — skip the current pending question. Unknown slash commands fall through to FOH.
+- **Telegram slash commands**: `/help` — lists available commands. `/skip` — skip the current pending question. Unknown slash commands fall through to FOH.
 
 ## Persona layer
-- User-facing text is rewritten in a default persona before delivery: friendly personal assistant, professional and competent, not stiff or too casual, transparent when unable to answer or perform a task. Applied to: CLI/API query answers, Twilio SMS replies, Telegram replies, Google Doc sync responses, GET /dream/latest narrative. Pending question text is delivered as-is (no persona rewrite).
+- User-facing text is rewritten in a default persona before delivery: friendly personal assistant, professional and competent, not stiff or too casual, transparent when unable to answer or perform a task. Applied to: CLI/API query answers and Telegram replies. Pending question text is delivered as-is (no persona rewrite).
 
 ## Agents
-- **FOH (Front of House)**: Query loop. Uses system prompt, identity, active contexts, knowledge-gap block, open todos; can call tools (journal, knowledge, context, task, web, utility). Before answering, the model performs an in-prompt audit (reflection: does tool output match intent?; gap detection: what is missing?; synthesis: combine into a cohesive narrative). If the model reports missing info via MISSING_INFO:, the query is saved as a knowledge gap (is_gap). Final answer is passed through the persona layer before being returned to the user. No separate reflection or synthesis API passes—audit is unified in one generation.
-- **Dreamer**: Nightly pipeline. Loads last 24h journal → colloquium (specialists discuss) → specialist extraction (relationship, work, task, thought, selfmodel) → merge facts → write to semantic memory → gap detection → context synthesis → profile synthesis → evolution synthesis → dream narrative + task phase. Writes latest_dream and system_evolution.
-- **Specialists**: Domain extractors (relationship, work, task, thought, selfmodel) plus evolution (Cognitive Engineer). Consultable via tools (consult_anthropologist, consult_architect, etc.).
-- **Project Engine**: Planning is now part of the Task system. A "project" is a task with subtasks (parent_id hierarchy). Use decompose_task to break a complex task into 3–7 subtasks. FOH automatically injects the most recently active project + pending subtasks into the system prompt (ACTIVE PROJECT block).
+- **FOH (Front of House)**: Query loop. Uses system prompt, identity, active contexts, knowledge-gap block, open todos; can call tools (journal, knowledge, context, task, web, utility). Before answering, the model performs an in-prompt audit (reflection, gap detection, synthesis). If the model reports missing info via MISSING_INFO:, the query is saved as a knowledge gap (is_gap). Final answer is passed through the persona layer before being returned to the user.
+- **Project Engine**: A "project" is a task with subtasks (parent_id hierarchy). Use decompose_task to break a complex task into 3–7 subtasks. FOH automatically injects the most recently active project + pending subtasks into the system prompt (ACTIVE PROJECT block).
 
 ## Storage Architecture
 - **Unified collection**: All documents (both episodic log entries and semantic knowledge nodes) live in the `journal` Firestore collection, distinguished by `node_type`.
 - **Episodic logs** (`node_type: "log"`): Raw journal entries. significance_weight=0.3; never deleted by janitor; queried by journal tools with `node_type == "log"` filter.
 - **Semantic memory** (`node_type: person|project|goal|preference|...`): Extracted knowledge facts. significance_weight ranges 0.5–0.95. Types: person, project, goal, preference, event, milestone, place, asset, tool, generic, weekly_summary, monthly_summary, identity_anchor, user_identity. For project/goal nodes, status must be one of: active, archived, blocked, done, planning, pending, completed. Recalled by semantic_search via significance_weight >= 0.7 pre-filter + vector similarity.
-- **Gold vs. Gravel routing**: Enforced at query level. semantic_search targets significance_weight >= 0.7 (Gold facts); journal tools target node_type == "log" (Gravel events).
+- **Gold vs. Gravel routing**: semantic_search targets significance_weight >= 0.7 (Gold facts); journal tools target node_type == "log" (Gravel events).
 - **Janitor**: Evicts low-significance, rarely recalled knowledge nodes. Never deletes node_type: log, identity_anchor, or user_identity.
 - **Context nodes**: Named, typed (permanent/auto). Separate `contexts` collection. Used for active projects, plans, living context.
-- **Reserved names**: user_profile (identity), system_evolution (audit/friction), latest_dream (narrative).
+- **Reserved names**: user_profile (identity), system_evolution (audit/friction).
 
 ## Journal
-- **Entries** (node_type: log in `journal` collection): Timestamped, optional source (cli, sms, telegram, web, etc.). Optional image attachment: CLI `--attach <path>`, API multipart/form-data on POST /log (field `image`), Telegram photo messages; images stored in GCS, entry stores `image_url` (requires JOT_IMAGES_BUCKET). Can be analyzed (categories, entities). When processed, entity mentions (persons, places, orgs, and all other entity types) are resolved against existing knowledge nodes and the entry is linked to each matched node (journal_entry_ids) synchronously at ingest time — without waiting for the nightly Dreamer. SPO triples (Subject | Predicate | Object) are also extracted from new entries via LLM in a background goroutine and stored as generic knowledge nodes with bidirectional links to subject and object entities. Google Doc sync processes new entries and in-doc questions.
+- **Entries** (node_type: log in `journal` collection): Timestamped, optional source (cli, telegram, web, etc.). Optional image attachment: CLI `--attach <path>`, API multipart/form-data on POST /log (field `image`), Telegram photo messages; images stored in GCS, entry stores `image_url` (requires JOT_IMAGES_BUCKET). When processed, entity mentions are resolved against existing knowledge nodes and the entry is linked at ingest time. SPO triples are extracted from new entries via LLM in a background goroutine and stored as generic knowledge nodes with bidirectional links.
 - **Queries**: Saved as `node_type: query` in the `journal` collection with question, answer, source, is_gap. Gap queries surface in knowledge-gap block for FOH.
-- **Pending questions**: Saved as `node_type: pending_question` in the `journal` collection. Gaps/contradictions from Dreamer gap detection; user can clarify later.
+- **Pending questions**: Saved as `node_type: pending_question` in the `journal` collection for user clarification.
 
 ## Tools (by category)
-- **knowledge**: semantic_search, upsert_knowledge, list_knowledge, get_entity_network (discovers related facts via vector search and synthesizes a concise profile), check_proactive_signals, get_latest_dream, graph_expand(node_id, hops=1, limit_per_edge=10, query=""): expands a knowledge node's neighbourhood. hops=1 returns immediate SPO edges, incoming back-references, and entity_links. hops=2 or hops=3 performs multi-hop BFS with semantic pruning — requires the 'query' field (the question you are answering) so exploration follows semantic relevance rather than blindly spidering the graph.
-- **journal**: get_recent_entries, get_oldest_entries, get_entries_by_date_range, search_entries, count_entries, list_sources, get_entries_by_source, query_activity_history, query_entities, summarize_daily_activities, retrieve_image. get_recent_entries, get_entries_by_date_range, and search_entries accept optional has_image=true to restrict results to entries with an attached image. Use retrieve_image(entry_uuid) to send a previously ingested image back to the user over Telegram; first find the entry UUID via a search or date-range tool with has_image=true, then call retrieve_image with that UUID and include the returned token verbatim in your answer. Date-range tools accept YYYY-MM-DD or natural expressions (yesterday, last week, today); "today" and date ranges use the server's calendar day (UTC). Phrases like "last 6 months" are not supported.
+- **knowledge**: semantic_search, upsert_knowledge, list_knowledge, get_entity_network, check_proactive_signals, graph_expand(node_id, hops=1, limit_per_edge=10, query=""): expands a knowledge node's neighbourhood. hops=2 or hops=3 requires the 'query' field (the question you are answering).
+- **journal**: get_recent_entries, get_oldest_entries, get_entries_by_date_range, search_entries, count_entries, list_sources, get_entries_by_source, query_activity_history, query_entities, summarize_daily_activities, retrieve_image. Date-range tools accept YYYY-MM-DD or natural expressions (yesterday, last week, today); "today" and date ranges use the server's calendar day (UTC).
 - **context**: list_contexts, create_context, touch_context, delete_context, get_system_health_audit, get_project_timeline, update_project_status.
-- **task**: create_task, get_task, update_task, update_task_status, search_tasks, decompose_task (breaks a task into 3–7 subtasks, creating child tasks with parent_id; Tasks struct now has dependencies and is_sequential fields). Tasks are stored as `node_type: task` in the `journal` collection via `github.com/hoyle1974/memory`.
+- **task**: create_task, get_task, update_task, update_task_status, search_tasks, decompose_task. Tasks are stored as `node_type: task` in the `journal` collection via `github.com/hoyle1974/memory`.
 - **query**: get_recent_queries, search_queries, get_queries_by_date.
-- **web**: fetch_url, define_word, wikipedia, web_search, bookmark, countdown, github_read, get_weather (current conditions + daily forecast for any city; no API key; uses Open-Meteo; default unit: fahrenheit).
+- **web**: fetch_url, define_word, wikipedia, web_search, bookmark, countdown, github_read, get_weather (Open-Meteo; default unit: fahrenheit).
 - **utility**: calculate, date_calc, text_stats, convert_units, random, timezone_convert, encode_decode.
-- **specialist**: consult_anthropologist, consult_architect, consult_executive, consult_philosopher (and any other consult_*).
 - **bootstrap**: discovery_search (intent → tool schemas). When using compact tools, invoke discovered tools via key/value lines only: TOOL: name, then ARGS: with param_name | value per line; no JSON, no code fences.
 
 ## SPO Triples
-- Relational facts are stored as Subject-Predicate-Object triples. The `predicate` field (e.g. `works_at`, `is_married_to`, `prefers`) and `object_value` field (raw object string) are persisted alongside the `content` on knowledge nodes.
-- The Dreamer automatically extracts SPO triples from specialist outputs and writes `predicate` + `object_value` to Firestore on each fact write.
-- **Ingest-time SPO extraction**: At write time, `ExtractAndStoreRelationships` calls the LLM (background goroutine, ~1-2s) to extract SPO triples from new journal entries and stores them as generic knowledge nodes. Subject and object entities are looked up and linked bidirectionally.
-- The `upsert_knowledge` tool supports optional `predicate` and `object_value` parameters so FOH can also write relational facts end-to-end.
-- `get_entity_network` uses 1-hop traversal (`QueryNodesLinkingTo`, `QueryIncomingSPOEdges`, and node-intrinsic `ObjectUUID`) to surface SPO edges.
+- Relational facts are stored as Subject-Predicate-Object triples. The `predicate` and `object_value` fields are persisted alongside `content` on knowledge nodes.
+- **Ingest-time SPO extraction**: `ExtractAndStoreRelationships` calls the LLM (background goroutine) to extract SPO triples from new journal entries.
+- The `upsert_knowledge` tool supports optional `predicate` and `object_value` parameters.
+- `get_entity_network` uses 1-hop traversal to surface SPO edges.
 
 ## Data terms
 - **Gold**: Permanent, high-value facts for semantic memory.
-- **Gravel**: Temporary or low-significance (e.g. one-off errands); Dreamer ignores for extraction.
+- **Gravel**: Temporary or low-significance episodic content in raw logs.
 - **Knowledge gap**: Question the system could not answer from current knowledge; stored and shown to FOH for context.

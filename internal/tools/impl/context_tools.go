@@ -177,7 +177,7 @@ func registerSystemEvolutionTools() {
 				return tools.Fail("Error finding system_evolution context: %v", err)
 			}
 			if node == nil {
-				return tools.OK("No system evolution audit has been run yet. The nightly Dreamer will populate this after it runs.")
+				return tools.OK("No system evolution context has been stored yet.")
 			}
 			content := strings.TrimSpace(node.Content)
 			if content == "" {

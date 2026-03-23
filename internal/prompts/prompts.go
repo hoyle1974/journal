@@ -8,7 +8,6 @@ import (
 	_ "embed"
 	"fmt"
 	"strings"
-	"sync"
 	"text/template"
 )
 
@@ -42,24 +41,6 @@ var executiveSummaryTxt string
 //go:embed identity_architect.txt
 var identityArchitectTxt string
 
-//go:embed specialist_relationship.txt
-var specialistRelationshipTxt string
-
-//go:embed specialist_work.txt
-var specialistWorkTxt string
-
-//go:embed specialist_task.txt
-var specialistTaskTxt string
-
-//go:embed specialist_thought.txt
-var specialistThoughtTxt string
-
-//go:embed specialist_selfmodel.txt
-var specialistSelfmodelTxt string
-
-//go:embed specialist_evolution.txt
-var specialistEvolutionTxt string
-
 //go:embed gap_detector.txt
 var gapDetectorTxt string
 
@@ -69,9 +50,6 @@ var rollUpTxt string
 //go:embed activity_history.txt
 var activityHistoryTxt string
 
-//go:embed dream_story.txt
-var dreamStoryTxt string
-
 //go:embed app_capabilities.txt
 var appCapabilitiesTxt string
 
@@ -80,12 +58,6 @@ var debugReportPromptTxt string
 
 //go:embed process_entry_report_prompt.txt
 var processEntryReportPromptTxt string
-
-//go:embed dreamer_report_prompt.txt
-var dreamerReportPromptTxt string
-
-//go:embed tag_consolidator.txt
-var tagConsolidatorTxt string
 
 //go:embed relationship_extractor.txt
 var relationshipExtractorTxt string
@@ -102,28 +74,8 @@ var (
 	processEntryReportTmpl = template.Must(template.New("processEntryReport").Funcs(template.FuncMap{
 		"join": strings.Join,
 	}).Parse(processEntryReportPromptTxt))
-	dreamerReportTmpl = template.Must(template.New("dreamerReport").Funcs(template.FuncMap{
-		"join": strings.Join,
-	}).Parse(dreamerReportPromptTxt))
-	tagConsolidatorTmpl         = template.Must(template.New("tagConsolidator").Parse(tagConsolidatorTxt))
-	relationshipExtractorTmpl   = template.Must(template.New("relationshipExtractor").Parse(relationshipExtractorTxt))
+	relationshipExtractorTmpl = template.Must(template.New("relationshipExtractor").Parse(relationshipExtractorTxt))
 )
-
-var (
-	specialistMap     map[string]string
-	specialistMapOnce sync.Once
-)
-
-func initSpecialistMap() {
-	specialistMap = map[string]string{
-		"relationship": specialistRelationshipTxt,
-		"work":         specialistWorkTxt,
-		"task":         specialistTaskTxt,
-		"thought":      specialistThoughtTxt,
-		"selfmodel":    specialistSelfmodelTxt,
-		"evolution":    specialistEvolutionTxt,
-	}
-}
 
 // SystemPromptData holds all inputs for the main FOH system prompt.
 type SystemPromptData struct {
@@ -263,20 +215,8 @@ func ExecutiveSummary() string { return executiveSummaryTxt }
 // IdentityArchitect returns the identity-architect prompt for profile synthesis.
 func IdentityArchitect() string { return identityArchitectTxt }
 
-// Specialist returns the specialist system prompt for the given domain (relationship, work, task, thought, selfmodel, evolution). Empty string if unknown.
-func Specialist(domain string) string {
-	specialistMapOnce.Do(initSpecialistMap)
-	if s, ok := specialistMap[domain]; ok {
-		return s
-	}
-	return ""
-}
-
-// DreamStoryTemplate returns the dream narrative (morning readout) system prompt.
-func DreamStoryTemplate() string { return dreamStoryTxt }
-
-// AppCapabilities returns the static, LLM-readable description of Jot's parts (entry points, agents, memory, journal, tools).
-// Injected into gap-detection during dreaming so the model understands current capabilities. Keep app_capabilities.txt up to date when the codebase changes.
+// AppCapabilities returns the static, LLM-readable description of Jot's parts (entry points, memory, journal, tools).
+// Keep app_capabilities.txt up to date when the codebase changes.
 func AppCapabilities() string {
 	return appCapabilitiesTxt
 }
@@ -317,44 +257,6 @@ func BuildProcessEntryReport(data ProcessEntryReportData) (string, error) {
 	var buf bytes.Buffer
 	if err := processEntryReportTmpl.Execute(&buf, data); err != nil {
 		return "", fmt.Errorf("process entry report template: %w", err)
-	}
-	return buf.String(), nil
-}
-
-// DreamerReportData holds all inputs for the dreamer process narrative prompt.
-type DreamerReportData struct {
-	EntriesProcessed     int
-	FactsExtracted       int
-	FactsWritten         int
-	ContextsSynthesized  int
-	PersonaFacts         []string
-	EvolutionSummary     string
-	EvolutionOpenLoops   []string
-	EvolutionDevRequests []string
-	RoomTranscriptText   string
-	DomainFactsText      string
-	MergedFactsText      string
-}
-
-// BuildDreamerReport executes the dreamer report template with the given data.
-func BuildDreamerReport(data DreamerReportData) (string, error) {
-	var buf bytes.Buffer
-	if err := dreamerReportTmpl.Execute(&buf, data); err != nil {
-		return "", fmt.Errorf("dreamer report template: %w", err)
-	}
-	return buf.String(), nil
-}
-
-// TagConsolidatorData holds the tag list for the tag consolidator prompt.
-type TagConsolidatorData struct {
-	TagList string // newline-separated list of unique tags
-}
-
-// BuildTagConsolidator executes the tag-consolidator template with the given data.
-func BuildTagConsolidator(data TagConsolidatorData) (string, error) {
-	var buf bytes.Buffer
-	if err := tagConsolidatorTmpl.Execute(&buf, data); err != nil {
-		return "", fmt.Errorf("execute tag consolidator: %w", err)
 	}
 	return buf.String(), nil
 }
