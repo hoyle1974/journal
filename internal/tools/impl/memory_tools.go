@@ -6,9 +6,9 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/hoyle1974/memory"
 	"github.com/jackstrohm/jot/internal/agent"
 	"github.com/jackstrohm/jot/internal/infra"
-	"github.com/hoyle1974/memory"
 	"github.com/jackstrohm/jot/pkg/utils"
 	"github.com/jackstrohm/jot/tools"
 )
@@ -51,7 +51,7 @@ func init() {
 func registerKnowledgeTools() {
 	tools.Register(&tools.Tool{
 		Name:        "upsert_knowledge",
-		Description: "Add or update a piece of knowledge in the knowledge graph. Use ONLY for NEW facts in the CURRENT user input. NEVER upsert information from RECENT CONVERSATION - that data is already saved. Node types: 'person', 'project', 'fact', 'preference', 'list_item', 'goal', 'user_identity'. For node_type 'project' or 'goal', metadata.status must be exactly one of: active, blocked, done, planning, pending, completed (e.g. {\"status\": \"active\"}). Use node_type 'user_identity' for self-referential statements about your core identity (e.g. your name, role, values, traits); these are stored with high priority and are easily retrievable. Relational facts can be stored as SPO triples by supplying optional predicate (e.g. 'works_at') and object_value (e.g. 'Google') — these are persisted as graph edges alongside the content.",
+		Description: "Manual override tool for knowledge corrections. Use ONLY when the user gives an explicit command to remember/store/save/correct/update a specific fact. Do NOT use this for general conversation or routine declarative statements; those are handled automatically by ingest-time Refinery extraction. Node types: 'person', 'project', 'fact', 'preference', 'list_item', 'goal', 'user_identity'. For node_type 'project' or 'goal', metadata.status must be exactly one of: active, blocked, done, planning, pending, completed (e.g. {\"status\": \"active\"}). Use node_type 'user_identity' for self-referential identity facts. Relational facts can be stored as SPO triples by supplying optional predicate (e.g. 'works_at') and object_value (e.g. 'Google').",
 		Category:    "knowledge",
 		Args:        &upsertKnowledgeArgs{},
 		Execute: func(ctx context.Context, env infra.ToolEnv, args any) tools.Result {
@@ -61,6 +61,9 @@ func registerKnowledgeTools() {
 			}
 			if a.NodeType == "" {
 				return tools.MissingParam("node_type")
+			}
+			if !isExplicitKnowledgeOverride(a.Content) {
+				return tools.OK("Blocked: automatic fact extraction is handled by the ingest-time Refinery pipeline. Use upsert_knowledge only for explicit user commands to remember, store, or correct a fact.")
 			}
 			metadata := a.Metadata
 			if metadata == "" {
@@ -225,7 +228,7 @@ func registerKnowledgeTools() {
 
 			// 1-hop traversal: run four lookups in parallel.
 			var discovered, incomingEdges, outgoingEdges []memory.KnowledgeNode
-		var linked []memory.KnowledgeNodeWithLinks
+			var linked []memory.KnowledgeNodeWithLinks
 			var wg sync.WaitGroup
 			wg.Add(4)
 			go func() {
@@ -332,6 +335,42 @@ Output only the profile, no preamble, no JSON.`
 		},
 	})
 
+}
+
+func isExplicitKnowledgeOverride(content string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(content))
+	if normalized == "" {
+		return false
+	}
+	explicitMarkers := []string{
+		"remember that",
+		"remember this",
+		"store that",
+		"store this",
+		"save that",
+		"save this",
+		"make sure you remember",
+		"please remember",
+		"correct this",
+		"correction:",
+		"actually,",
+		"actually ",
+		"update this fact",
+		"that's wrong",
+		"that is wrong",
+		"fix that",
+	}
+	for _, marker := range explicitMarkers {
+		if strings.Contains(normalized, marker) {
+			return true
+		}
+	}
+	// Short imperative overrides such as "remember: X" or "update: X".
+	return strings.HasPrefix(normalized, "remember:") ||
+		strings.HasPrefix(normalized, "store:") ||
+		strings.HasPrefix(normalized, "save:") ||
+		strings.HasPrefix(normalized, "correct:") ||
+		strings.HasPrefix(normalized, "update:")
 }
 
 func registerSignalTools() {
