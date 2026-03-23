@@ -27,7 +27,7 @@ Jot is a personal journaling and memory system. It ingests journal entries, extr
 - **Reserved names**: user_profile (identity), system_evolution (optional audit text for get_system_health_audit).
 
 ## Journal
-- **Entries** (node_type: log in `journal` collection): Timestamped, optional source (cli, telegram, web, etc.). Optional image attachment: CLI `--attach <path>`, API multipart/form-data on POST /log (field `image`), Telegram photo messages; images stored in GCS, entry stores `image_url` (requires JOT_IMAGES_BUCKET). When processed, entity mentions are resolved against existing knowledge nodes and the entry is linked at ingest time. SPO triples are extracted from new entries via LLM in a background goroutine and stored as generic knowledge nodes with bidirectional links.
+- **Entries** (node_type: log in `journal` collection): Timestamped, optional source (cli, telegram, web, etc.). Optional image attachment: CLI `--attach <path>`, API multipart/form-data on POST /log (field `image`), Telegram photo messages; images stored in GCS, entry stores `image_url` (requires JOT_IMAGES_BUCKET). When processed, entity mentions are resolved against existing knowledge nodes and the entry is linked at ingest time. Relationship triples are extracted synchronously through the Refinery pipeline and stored as reified `relationship` nodes with backlinks to subject/object entities.
 - **Queries**: Saved as `node_type: query` in the `journal` collection with question, answer, source, is_gap. Gap queries surface in knowledge-gap block for FOH.
 - **Pending questions**: Saved as `node_type: pending_question` in the `journal` collection for user clarification.
 
@@ -40,11 +40,11 @@ Jot is a personal journaling and memory system. It ingests journal entries, extr
 - **utility**: calculate, date_calc, text_stats, convert_units, random, timezone_convert, encode_decode.
 - **bootstrap**: discovery_search (intent → tool schemas). When using compact tools, invoke discovered tools via key/value lines only: TOOL: name, then ARGS: with param_name | value per line; no JSON, no code fences.
 
-## SPO Triples
-- Relational facts are stored as Subject-Predicate-Object triples. The `predicate` and `object_value` fields are persisted alongside `content` on knowledge nodes.
-- **Ingest-time SPO extraction**: `ExtractAndStoreRelationships` calls the LLM (background goroutine) to extract SPO triples from new journal entries.
-- The `upsert_knowledge` tool supports optional `predicate` and `object_value` parameters.
-- `get_entity_network` uses 1-hop traversal to surface SPO edges.
+## Relationship Triples
+- Relational facts are stored as Subject-Predicate-Object triples and committed as first-class `relationship` nodes.
+- **Ingest-time extraction** runs synchronously in ProcessEntry via the Refinery pipeline (Discovery -> Extraction -> Resolution -> Commit).
+- Relationship nodes store normalized `predicate` plus `subject_id`, `object_uuid`, and `source_entry_id`, and maintain entity backlinks via `entity_links`.
+- The `upsert_knowledge` tool supports optional `predicate` and `object_value` parameters for non-refinery/manual updates.
 
 ## Data terms
 - **Gold**: Permanent, high-value facts for semantic memory.

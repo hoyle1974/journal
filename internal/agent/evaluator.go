@@ -124,7 +124,6 @@ func RunEvaluator(ctx context.Context, app *infra.App, content, entryUUID, times
 			infra.LoggerFrom(ctx).Warn("evaluator upsert failed", "error", err)
 		} else {
 			factStored = true
-			go runSPOEnrichment(context.Background(), app, parsed.FactToStore, nodeType, parsed.Domain, parsed.Significance, entryUUID)
 		}
 	}
 	status := "IGNORE_PROACTIVE"

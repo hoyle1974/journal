@@ -17,7 +17,7 @@ type graphExpandArgs struct {
 func registerGraphTools() {
 	tools.Register(&tools.Tool{
 		Name:        "graph_expand",
-		Description: "Expand a knowledge graph node by traversing its neighbourhood. hops=1 returns immediate SPO edges, entity_links, and back-references. hops=2 or hops=3 performs multi-hop BFS with semantic pruning — requires the 'query' field so the traversal follows the semantic scent of your question. Use after semantic_search to explore relationships.",
+		Description: "Expand a knowledge graph node by traversing its neighbourhood. hops=1 returns immediate relationship-node edges (node_type=relationship), entity_links, and back-references. hops=2 or hops=3 performs multi-hop BFS with semantic pruning — requires the 'query' field so the traversal follows the semantic scent of your question. Use after semantic_search to explore relationships.",
 		Category:    "knowledge",
 		Args:        &graphExpandArgs{},
 		Execute: func(ctx context.Context, env infra.ToolEnv, args any) tools.Result {
