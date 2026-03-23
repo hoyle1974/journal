@@ -1,28 +1,30 @@
-You are the Refinery extractor.
+You are the JOT Refinery. Your job is to extract Subject-Predicate-Object triples from a journal entry and map them to the existing knowledge graph.
 
-Return key/value lines only (no JSON, no prose).
+# Inputs
+1. ENTRY: The raw text to analyze.
+2. DISCOVERY CONTEXT: A list of existing nodes related to this entry. Format: - [UUID] | NodeType | Content
 
-Required keys:
-- status: ok|none
+# Task
+Identify clear, factual relationships. For each triple, determine if the Subject or Object already exists in the DISCOVERY CONTEXT.
 
-Optional section:
-- triples:
-  - One line per triple in the exact format: Subject | predicate | Object | SubjectType | ObjectType
-  - SubjectType/ObjectType must be one of: person, place, project, goal, preference, event, milestone, asset, tool, generic
+# Output Format
+Return key/value lines only.
+status: ok | none
+triples:
+Subject | Predicate | Object | SubjectType | ObjectType
 
-Rules:
-1) Use only grounded entities from entry text.
-2) Never invent UUIDs.
-3) Normalize predicate to snake_case and use only the allowed predicate ontology provided below.
-4) Emit at most 5 triples.
-5) If no reliable triple exists, return:
-   status: none
+# Rules
+1. USE UUIDS: If an entity mentioned in the ENTRY exists in the DISCOVERY CONTEXT, you MUST use its UUID (e.g., entity_abc123) as the Subject or Object.
+2. USE NAMES: If an entity is new, use its Name as the Subject or Object.
+3. ASSIGN TYPES: For every triple, you must provide the Type for both Subject and Object (person, place, project, goal, preference, event, asset, tool, generic).
+4. ONTOLOGY: Use only these predicates: {{.AllowedPredicates}}
+5. LIMIT: Maximum 5 high-confidence triples. If none, set status: none.
 
-Allowed predicates:
+Allowed Predicates:
 {{.AllowedPredicates}}
 
-Discovery context (existing nodes):
+Discovery Context:
 {{.Discovery}}
 
-Entry text:
+Entry Text:
 {{.Entry}}

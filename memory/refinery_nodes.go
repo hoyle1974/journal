@@ -17,18 +17,37 @@ func stableEntityDocID(nodeType, name string) string {
 	return "entity_" + hex.EncodeToString(sum[:])
 }
 
+func looksLikeEntityDocID(identifier string) bool {
+	return strings.HasPrefix(strings.TrimSpace(identifier), "entity_")
+}
+
+func relationshipContent(subjectContent, predicate, objectContent, subjectID, objectID string) string {
+	sub := strings.TrimSpace(subjectContent)
+	obj := strings.TrimSpace(objectContent)
+	if sub == "" {
+		sub = subjectID
+	}
+	if obj == "" {
+		obj = objectID
+	}
+	return fmt.Sprintf("%s %s %s", sub, predicate, obj)
+}
+
 // EnsureNode returns an existing entity node by deterministic key or creates a stub.
 // This prevents duplicate stub nodes under concurrent ingest.
-func (s *Store) EnsureNode(ctx context.Context, name, nodeType, sourceEntryID string) (*KnowledgeNode, error) {
-	cleanName := strings.TrimSpace(name)
-	if cleanName == "" {
+func (s *Store) EnsureNode(ctx context.Context, identifier, nodeType, sourceEntryID string) (*KnowledgeNode, error) {
+	cleanIdentifier := strings.TrimSpace(identifier)
+	if cleanIdentifier == "" {
 		return nil, fmt.Errorf("ensure node: empty name")
 	}
 	if nodeType == "" {
 		nodeType = NodeTypePerson
 	}
 
-	docID := stableEntityDocID(nodeType, cleanName)
+	docID := stableEntityDocID(nodeType, cleanIdentifier)
+	if looksLikeEntityDocID(cleanIdentifier) {
+		docID = cleanIdentifier
+	}
 	ref := s.db.Collection(KnowledgeCollection).Doc(docID)
 
 	if err := s.db.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
@@ -36,15 +55,28 @@ func (s *Store) EnsureNode(ctx context.Context, name, nodeType, sourceEntryID st
 		if err == nil && doc.Exists() {
 			return nil
 		}
+		// Backfill path: if a node with this name_key already exists, point to that
+		// existing node instead of creating a duplicate stub under a different ID.
+		nameKey := strings.ToLower(cleanIdentifier)
+		existingByName := s.db.Collection(KnowledgeCollection).Where("name_key", "==", nameKey).Limit(1)
+		docs, qErr := tx.Documents(existingByName).GetAll()
+		if qErr == nil && len(docs) > 0 && docs[0] != nil && docs[0].Exists() {
+			docID = docs[0].Ref.ID
+			ref = s.db.Collection(KnowledgeCollection).Doc(docID)
+			return nil
+		}
+		if looksLikeEntityDocID(cleanIdentifier) {
+			return fmt.Errorf("ensure node: entity id not found: %s", cleanIdentifier)
+		}
 
-		vector, embErr := s.embedder.GenerateEmbedding(ctx, cleanName, EmbedTaskRetrievalDocument)
+		vector, embErr := s.embedder.GenerateEmbedding(ctx, cleanIdentifier, EmbedTaskRetrievalDocument)
 		if embErr != nil {
 			return fmt.Errorf("ensure node embedding: %w", embErr)
 		}
 		ts := time.Now().Format(time.RFC3339)
 		data := map[string]any{
-			"content":             cleanName,
-			"name_key":            strings.ToLower(cleanName),
+			"content":             cleanIdentifier,
+			"name_key":            strings.ToLower(cleanIdentifier),
 			"node_type":           nodeType,
 			"metadata":            `{"stub":true}`,
 			"timestamp":           ts,
@@ -83,12 +115,12 @@ func (s *Store) EnsureNode(ctx context.Context, name, nodeType, sourceEntryID st
 }
 
 // CreateRelationshipNode creates a reified relationship node with its own embedding.
-func (s *Store) CreateRelationshipNode(ctx context.Context, subjectID, predicate, objectID, sourceEntryID string) (string, error) {
+func (s *Store) CreateRelationshipNode(ctx context.Context, subjectID, predicate, objectID, sourceEntryID, subjectContent, objectContent string) (string, error) {
 	predicate = NormalizedPredicate(predicate)
 	if subjectID == "" || objectID == "" || predicate == "" {
 		return "", fmt.Errorf("create relationship: subject, predicate, object required")
 	}
-	content := fmt.Sprintf("%s %s %s", subjectID, predicate, objectID)
+	content := relationshipContent(subjectContent, predicate, objectContent, subjectID, objectID)
 	vector, err := s.embedder.GenerateEmbedding(ctx, content, EmbedTaskRetrievalDocument)
 	if err != nil {
 		return "", fmt.Errorf("create relationship embedding: %w", err)

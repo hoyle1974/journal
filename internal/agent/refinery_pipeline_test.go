@@ -4,9 +4,9 @@ import "testing"
 
 func TestParseRefineryTriples(t *testing.T) {
 	triples := parseRefineryTriples([]string{
-		"Gloria | works_at | Anthropic",
+		"Gloria | works_at | Anthropic | person | project",
 		"bad line",
-		"Ada | prefers | tea",
+		"Ada | moved_to | Paris",
 	})
 	if len(triples) != 3 {
 		t.Fatalf("expected 3 triples (including reject entry), got %d", len(triples))
@@ -14,10 +14,16 @@ func TestParseRefineryTriples(t *testing.T) {
 	if triples[0].Predicate != "works_at" {
 		t.Fatalf("expected raw predicate works_at, got %q", triples[0].Predicate)
 	}
+	if triples[0].SubType != "person" || triples[0].ObjType != "project" {
+		t.Fatalf("expected typed triple, got sub=%q obj=%q", triples[0].SubType, triples[0].ObjType)
+	}
 	if triples[1].ParseErr == "" {
 		t.Fatalf("expected parse error for malformed line")
 	}
 	if triples[1].RawLine != "bad line" {
 		t.Fatalf("expected raw line to be preserved, got %q", triples[1].RawLine)
+	}
+	if triples[2].SubType != "person" || triples[2].ObjType != "person" {
+		t.Fatalf("expected default person types for 3-field triples, got sub=%q obj=%q", triples[2].SubType, triples[2].ObjType)
 	}
 }

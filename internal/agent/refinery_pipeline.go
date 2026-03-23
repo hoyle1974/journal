@@ -115,7 +115,7 @@ func refineryResolveCommit(ctx context.Context, app *infra.App, entryUUID string
 			infra.LoggerFrom(ctx).Warn("refinery ensure object failed", "entry_uuid", entryUUID, "object", t.Object, "object_type", objType, "error", err)
 			continue
 		}
-		relID, err := app.Memory.CreateRelationshipNode(ctx, subj.UUID, predicate, obj.UUID, entryUUID)
+		relID, err := app.Memory.CreateRelationshipNode(ctx, subj.UUID, predicate, obj.UUID, entryUUID, subj.Content, obj.Content)
 		if err != nil {
 			infra.LoggerFrom(ctx).Warn("refinery create relationship failed", "entry_uuid", entryUUID, "subject_uuid", subj.UUID, "predicate", predicate, "object_uuid", obj.UUID, "error", err)
 			continue
