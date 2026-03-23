@@ -13,8 +13,40 @@ import (
 
 type refineryTriple struct {
 	Subject   string
+	SubType   string
 	Predicate string
 	Object    string
+	ObjType   string
+	RawLine   string
+	ParseErr  string
+}
+
+var refineryAllowedPredicates = []string{
+	"works_at",
+	"prefers",
+	"owns",
+	"lives_in",
+	"located_in",
+	"collaborates_with",
+	"reports_to",
+	"manages",
+}
+
+var refineryPredicateAliases = map[string]string{
+	"work_at":            "works_at",
+	"works_for":          "works_at",
+	"employed_by":        "works_at",
+	"moved_to":           "lives_in",
+	"relocated_to":       "lives_in",
+	"resides_in":         "lives_in",
+	"live_in":            "lives_in",
+	"lives_at":           "lives_in",
+	"located_at":         "located_in",
+	"based_in":           "located_in",
+	"collaborates":       "collaborates_with",
+	"collaboratesw_with": "collaborates_with",
+	"manage":             "manages",
+	"reports":            "reports_to",
 }
 
 func runRefineryPipeline(ctx context.Context, app *infra.App, entryUUID, content string) error {
@@ -61,8 +93,9 @@ func refineryExtract(ctx context.Context, app *infra.App, entryUUID, content, di
 	defer span.End()
 
 	prompt, err := prompts.BuildRefinery(prompts.RefineryData{
-		Discovery: utils.WrapAsUserData(discovery),
-		Entry:     utils.WrapAsUserData(utils.SanitizePrompt(content)),
+		Discovery:         utils.WrapAsUserData(discovery),
+		Entry:             utils.WrapAsUserData(utils.SanitizePrompt(content)),
+		AllowedPredicates: utils.WrapAsUserData(strings.Join(refineryAllowedPredicates, ", ")),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("build refinery prompt: %w", err)
@@ -85,35 +118,31 @@ func refineryResolveCommit(ctx context.Context, app *infra.App, entryUUID string
 	defer span.End()
 	span.SetAttributes(map[string]string{"entry_uuid": entryUUID})
 
-	allowed := map[string]struct{}{
-		"works_at":          {},
-		"prefers":           {},
-		"owns":              {},
-		"lives_in":          {},
-		"located_in":        {},
-		"collaborates_with": {},
-		"reports_to":        {},
-		"manages":           {},
-	}
-
 	for _, t := range triples {
-		if _, ok := allowed[t.Predicate]; !ok {
-			infra.LoggerFrom(ctx).Warn("refinery skipped triple with non-ontology predicate", "entry_uuid", entryUUID, "predicate", t.Predicate, "subject", t.Subject, "object", t.Object)
+		if t.ParseErr != "" {
+			infra.LoggerFrom(ctx).Warn("refinery rejected triple", "entry_uuid", entryUUID, "reason", t.ParseErr, "raw_line", t.RawLine)
 			continue
 		}
-		subj, err := app.Memory.EnsureNode(ctx, t.Subject, memory.NodeTypePerson, entryUUID)
-		if err != nil {
-			infra.LoggerFrom(ctx).Warn("refinery ensure subject failed", "entry_uuid", entryUUID, "subject", t.Subject, "error", err)
+		predicate, ok := snapRefineryPredicate(t.Predicate)
+		if !ok {
+			infra.LoggerFrom(ctx).Warn("refinery dropped triple (unknown predicate)", "entry_uuid", entryUUID, "raw_predicate", t.Predicate, "raw_line", t.RawLine)
 			continue
 		}
-		obj, err := app.Memory.EnsureNode(ctx, t.Object, memory.NodeTypePerson, entryUUID)
+		subType := canonicalRefineryEntityType(t.SubType)
+		objType := canonicalRefineryEntityType(t.ObjType)
+		subj, err := app.Memory.EnsureNode(ctx, t.Subject, subType, entryUUID)
 		if err != nil {
-			infra.LoggerFrom(ctx).Warn("refinery ensure object failed", "entry_uuid", entryUUID, "object", t.Object, "error", err)
+			infra.LoggerFrom(ctx).Warn("refinery ensure subject failed", "entry_uuid", entryUUID, "subject", t.Subject, "subject_type", subType, "error", err)
 			continue
 		}
-		relID, err := app.Memory.CreateRelationshipNode(ctx, subj.UUID, t.Predicate, obj.UUID, entryUUID)
+		obj, err := app.Memory.EnsureNode(ctx, t.Object, objType, entryUUID)
 		if err != nil {
-			infra.LoggerFrom(ctx).Warn("refinery create relationship failed", "entry_uuid", entryUUID, "subject_uuid", subj.UUID, "predicate", t.Predicate, "object_uuid", obj.UUID, "error", err)
+			infra.LoggerFrom(ctx).Warn("refinery ensure object failed", "entry_uuid", entryUUID, "object", t.Object, "object_type", objType, "error", err)
+			continue
+		}
+		relID, err := app.Memory.CreateRelationshipNode(ctx, subj.UUID, predicate, obj.UUID, entryUUID, subj.Content, obj.Content)
+		if err != nil {
+			infra.LoggerFrom(ctx).Warn("refinery create relationship failed", "entry_uuid", entryUUID, "subject_uuid", subj.UUID, "predicate", predicate, "object_uuid", obj.UUID, "error", err)
 			continue
 		}
 		if err := app.Memory.AddEntityLink(ctx, subj.UUID, relID); err != nil {
@@ -122,6 +151,9 @@ func refineryResolveCommit(ctx context.Context, app *infra.App, entryUUID string
 		if err := app.Memory.AddEntityLink(ctx, obj.UUID, relID); err != nil {
 			infra.LoggerFrom(ctx).Warn("refinery object backlink failed", "entry_uuid", entryUUID, "node_uuid", obj.UUID, "relationship_uuid", relID, "error", err)
 		}
+		if err := app.Memory.AddEntityLink(ctx, entryUUID, relID); err != nil {
+			infra.LoggerFrom(ctx).Warn("refinery source-log backlink failed", "entry_uuid", entryUUID, "relationship_uuid", relID, "error", err)
+		}
 	}
 	return nil
 }
@@ -129,15 +161,84 @@ func refineryResolveCommit(ctx context.Context, app *infra.App, entryUUID string
 func parseRefineryTriples(lines []string) []refineryTriple {
 	out := make([]refineryTriple, 0, len(lines))
 	for _, line := range lines {
-		spo := memory.ParseSPOTriple(line)
-		if spo == nil {
+		rawLine := strings.TrimSpace(line)
+		if rawLine == "" {
 			continue
 		}
+		parts := strings.Split(line, "|")
+		if len(parts) != 5 && len(parts) != 3 {
+			out = append(out, refineryTriple{RawLine: rawLine, ParseErr: fmt.Sprintf("expected 3 or 5 pipe-separated fields, got %d", len(parts))})
+			continue
+		}
+		for i := range parts {
+			parts[i] = strings.TrimSpace(parts[i])
+		}
+		sub := parts[0]
+		pred := parts[1]
+		obj := parts[2]
+		if sub == "" || pred == "" || obj == "" {
+			out = append(out, refineryTriple{
+				Subject:   sub,
+				Predicate: pred,
+				Object:    obj,
+				RawLine:   rawLine,
+				ParseErr:  "subject, predicate, and object must all be non-empty",
+			})
+			continue
+		}
+		subType := memory.NodeTypePerson
+		objType := memory.NodeTypePerson
+		if len(parts) == 5 {
+			subType = canonicalRefineryEntityType(parts[3])
+			objType = canonicalRefineryEntityType(parts[4])
+		}
 		out = append(out, refineryTriple{
-			Subject:   strings.TrimSpace(spo.Subject),
-			Predicate: memory.NormalizedPredicate(spo.Predicate),
-			Object:    strings.TrimSpace(spo.Object),
+			Subject:   sub,
+			SubType:   subType,
+			Predicate: pred,
+			Object:    obj,
+			ObjType:   objType,
+			RawLine:   rawLine,
 		})
 	}
 	return out
+}
+
+func snapRefineryPredicate(raw string) (string, bool) {
+	p := memory.NormalizedPredicate(raw)
+	if mapped, ok := refineryPredicateAliases[p]; ok {
+		p = mapped
+	}
+	for _, allowed := range refineryAllowedPredicates {
+		if p == allowed {
+			return p, true
+		}
+	}
+	return "", false
+}
+
+func canonicalRefineryEntityType(raw string) string {
+	t := strings.TrimSpace(strings.ToLower(raw))
+	switch t {
+	case "person", "people", "human":
+		return "person"
+	case "place", "location", "city", "country":
+		return "place"
+	case "project", "work":
+		return "project"
+	case "goal":
+		return "goal"
+	case "preference":
+		return "preference"
+	case "event":
+		return "event"
+	case "asset":
+		return "asset"
+	case "tool":
+		return "tool"
+	case "generic":
+		return "generic"
+	default:
+		return "person"
+	}
 }

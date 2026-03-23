@@ -161,7 +161,6 @@ func ProcessEntry(ctx context.Context, app *infra.App, entryUUID, content, times
 	if parsed != nil {
 		report.Significance = parsed.Significance
 		report.Domain = parsed.Domain
-		report.FactStored = parsed.FactToStore
 	}
 	if taskContent != "" {
 		report.TaskCreated = taskContent

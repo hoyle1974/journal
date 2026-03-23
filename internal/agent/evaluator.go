@@ -23,12 +23,11 @@ const ProactiveAlertSignificanceThreshold = 0.8
 type EvaluatorExtract struct {
 	Significance     float64
 	Domain           string
-	FactToStore      string
 	FutureCommitment float64 // 0-1: extent to which the entry expresses a commitment to do something
 	CommitmentIntent string  // one sentence describing the action, if future_commitment is high
 }
 
-// RunEvaluatorExtract runs the evaluator LLM on content and returns significance, domain, and fact_to_store.
+// RunEvaluatorExtract runs the evaluator LLM on content and returns significance/domain plus commitment signals.
 func RunEvaluatorExtract(ctx context.Context, app *infra.App, content string) (*EvaluatorExtract, error) {
 	if len(strings.TrimSpace(content)) < 10 {
 		return nil, nil
@@ -67,7 +66,6 @@ func RunEvaluatorExtract(ctx context.Context, app *infra.App, content string) (*
 	out := &EvaluatorExtract{
 		Significance:     sig,
 		Domain:           strings.TrimSpace(simple["domain"]),
-		FactToStore:      strings.TrimSpace(simple["fact_to_store"]),
 		FutureCommitment: fc,
 		CommitmentIntent: strings.TrimSpace(simple["commitment_intent"]),
 	}
@@ -95,7 +93,7 @@ const AgencyTaskCommitmentThreshold = 0.6
 // MinCommitmentIntentLen is the minimum length of commitment_intent to auto-create a task (avoid vague commitments).
 const MinCommitmentIntentLen = 10
 
-// RunEvaluator assigns significance to a new entry, optionally upserts high-value facts, and returns the extract for agency (task creation).
+// RunEvaluator assigns significance to a new entry and returns the extract for agency (task creation).
 func RunEvaluator(ctx context.Context, app *infra.App, content, entryUUID, timestamp string) (*EvaluatorExtract, error) {
 	ctx, span := infra.StartSpan(ctx, "evaluator.run")
 	defer span.End()
@@ -110,22 +108,6 @@ func RunEvaluator(ctx context.Context, app *infra.App, content, entryUUID, times
 		return nil, nil
 	}
 
-	factStored := false
-	if parsed.FactToStore != "" && parsed.Significance >= 0.5 {
-		nodeType := "fact"
-		if parsed.Domain == "relationship" {
-			nodeType = "person"
-		} else if parsed.Domain == "work" {
-			nodeType = "project"
-		}
-		bgCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		defer cancel()
-		if _, err := app.Memory.UpsertSemanticMemory(bgCtx, parsed.FactToStore, nodeType, parsed.Domain, parsed.Significance, nil, []string{entryUUID}); err != nil {
-			infra.LoggerFrom(ctx).Warn("evaluator upsert failed", "error", err)
-		} else {
-			factStored = true
-		}
-	}
 	status := "IGNORE_PROACTIVE"
 	if parsed.Significance >= ProactiveAlertSignificanceThreshold {
 		status = "ALERT"
@@ -134,7 +116,7 @@ func RunEvaluator(ctx context.Context, app *infra.App, content, entryUUID, times
 			go runProactiveInsight(context.Background(), app, entryUUID, content)
 		}
 	}
-	infra.LoggerFrom(ctx).Info("evaluator", "entry_uuid", entryUUID, "significance", parsed.Significance, "threshold_for_alert", ProactiveAlertSignificanceThreshold, "status", status, "domain", parsed.Domain, "fact_stored", factStored)
+	infra.LoggerFrom(ctx).Info("evaluator", "entry_uuid", entryUUID, "significance", parsed.Significance, "threshold_for_alert", ProactiveAlertSignificanceThreshold, "status", status, "domain", parsed.Domain)
 	_ = timestamp
 	return parsed, nil
 }
