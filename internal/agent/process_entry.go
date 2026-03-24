@@ -233,6 +233,113 @@ func updateEntryWithRetry(ctx context.Context, client *firestore.Client, entryUU
 	return lastErr
 }
 
+// ProcessLogSequential runs the Project Loom waterfall pipeline for a new log entry.
+// It executes four stages in strict sequential order before returning.
+//
+//   Stage 1: Log Persistence — write the raw log node to Firestore immediately.
+//   Stage 2: Refinery       — extract KG triples and commit graph objects/relationships.
+//   Stage 3: Task Worker    — scan for commitments and create task nodes linked to graph objects.
+//   Stage 4: Response Worker— 2-hop RAG retrieval + proactive response node (stub; Phase 4).
+//
+// Stage 2 and 3 failures are logged heavily but do NOT abort the pipeline — Stage 4
+// always runs, noting degraded context when prior stages failed.
+//
+// This is additive alongside the legacy ProcessEntry function. Callers can migrate
+// incrementally; ProcessEntry is kept intact for backward compatibility.
+func ProcessLogSequential(ctx context.Context, app *infra.App, logUUID, logContent, timestamp, source string) (*ProcessEntryReport, error) {
+	if app == nil || app.Config() == nil {
+		return nil, fmt.Errorf("ProcessLogSequential: app or config is nil")
+	}
+
+	ctx, span := infra.StartSpan(ctx, "loom.process_log_sequential")
+	defer span.End()
+	span.SetAttributes(map[string]string{
+		"log_uuid": logUUID,
+		"source":   source,
+	})
+
+	infra.LoggerFrom(ctx).Info("loom pipeline start",
+		"event", "loom_start",
+		"log_uuid", logUUID,
+		"source", source,
+	)
+
+	// ── Stage 1: Log Persistence ──────────────────────────────────────────────
+	// Write the raw log node before any worker runs. This guarantees the document
+	// exists, eliminating the retry-backoff race in the legacy updateEntryWithRetry path.
+	infra.LoggerFrom(ctx).Debug("loom stage 1: log persistence", "log_uuid", logUUID)
+	fsClient, err := app.Firestore(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("loom stage 1: firestore client: %w", err)
+	}
+	logDoc := map[string]any{
+		"content":             logContent,
+		"source":              source,
+		"timestamp":           timestamp,
+		"node_type":           "log",
+		"significance_weight": 0.3,
+	}
+	if _, setErr := fsClient.Collection(memory.EntriesCollection).Doc(logUUID).Set(ctx, logDoc, firestore.MergeAll); setErr != nil {
+		return nil, fmt.Errorf("loom stage 1: write log node: %w", setErr)
+	}
+	infra.LoggerFrom(ctx).Info("loom stage 1 done: log node persisted", "log_uuid", logUUID)
+
+	// ── Stage 2: Refinery ─────────────────────────────────────────────────────
+	infra.LoggerFrom(ctx).Debug("loom stage 2: refinery", "log_uuid", logUUID)
+	refineryErr := runRefineryPipeline(ctx, app, logUUID, logContent)
+	if refineryErr != nil {
+		infra.LoggerFrom(ctx).Warn("loom stage 2 FAILED: refinery pipeline error — pipeline continues to stage 3",
+			"log_uuid", logUUID,
+			"error", refineryErr,
+		)
+	} else {
+		infra.LoggerFrom(ctx).Info("loom stage 2 done: refinery complete", "log_uuid", logUUID)
+	}
+
+	// ── Stage 3: Task Worker ──────────────────────────────────────────────────
+	// Pass the log UUID as the initial object ID set so tasks backlink to this entry.
+	// Phase 4 will pass actual extracted object IDs from the refinery result.
+	infra.LoggerFrom(ctx).Debug("loom stage 3: task worker", "log_uuid", logUUID)
+	taskErr := runTaskWorker(ctx, app, logContent, []string{logUUID})
+	if taskErr != nil {
+		infra.LoggerFrom(ctx).Warn("loom stage 3 FAILED: task worker error — pipeline continues to stage 4",
+			"log_uuid", logUUID,
+			"error", taskErr,
+		)
+	} else {
+		infra.LoggerFrom(ctx).Info("loom stage 3 done: task worker complete", "log_uuid", logUUID)
+	}
+
+	// ── Stage 4: Response Worker ──────────────────────────────────────────────
+	graphExtractFailed := refineryErr != nil
+	infra.LoggerFrom(ctx).Debug("loom stage 4: response worker",
+		"log_uuid", logUUID,
+		"graph_extract_failed", graphExtractFailed,
+	)
+	responseErr := runResponseWorker(ctx, app, logUUID, logContent, graphExtractFailed)
+	if responseErr != nil {
+		infra.LoggerFrom(ctx).Warn("loom stage 4: response worker error",
+			"log_uuid", logUUID,
+			"error", responseErr,
+		)
+	} else {
+		infra.LoggerFrom(ctx).Info("loom stage 4 done: response worker complete", "log_uuid", logUUID)
+	}
+
+	infra.LoggerFrom(ctx).Info("loom pipeline complete",
+		"event", "loom_done",
+		"log_uuid", logUUID,
+		"stage2_ok", refineryErr == nil,
+		"stage3_ok", taskErr == nil,
+		"stage4_ok", responseErr == nil,
+	)
+
+	return &ProcessEntryReport{
+		Content: utils.TruncateString(logContent, 500),
+		Source:  source,
+	}, nil
+}
+
 func buildBreakdown(start time.Time, llm, embedding, firestoreWrite time.Duration) *infra.LatencyBreakdown {
 	total := time.Since(start)
 	overhead := total - llm - embedding - firestoreWrite

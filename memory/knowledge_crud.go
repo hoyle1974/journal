@@ -46,6 +46,11 @@ type KnowledgeNode struct {
 	// Embedding is the vector representation of this node, populated on all reads.
 	// omitempty prevents serializing the vector in JSON tool output.
 	Embedding []float32 `firestore:"embedding" json:"embedding,omitempty"`
+	// Loom graph caching fields (top-level Firestore fields for queryability during
+	// hot-edge eviction and nightly decay). Present on relationship and object nodes.
+	RelevanceScore float64  `firestore:"relevance_score,omitempty" json:"relevance_score,omitempty"`
+	HotEdges       []string `firestore:"hot_edges,omitempty"       json:"hot_edges,omitempty"`
+	LogicTrace     string   `firestore:"logic_trace,omitempty"     json:"logic_trace,omitempty"`
 }
 
 // KnowledgeNodeWithLinks extends KnowledgeNode with entity_links and journal_entry_ids for graph traversal.
