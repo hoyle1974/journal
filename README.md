@@ -1,57 +1,48 @@
 # JOT: Agentic Second Brain
 
-JOT is a single-user, AI-driven personal assistant and knowledge graph built in Go. It operates on the principle of separating **"Gold"** (permanent facts, relationship details, project milestones) from **"Gravel"** (temporary logistics, conversational filler, one-off errands).
+JOT is a single-user, AI-driven personal assistant and knowledge graph built in Go. It separates **"Gold"** (permanent facts, relationship details, project milestones) from **"Gravel"** (temporary logistics, conversational filler, one-off errands).
 
-It continuously ingests raw, chronological daily logs (Episodic Memory) and uses Google's Gemini LLMs to distill them into a highly structured, vector-searchable Knowledge Graph (Semantic Memory).
+It continuously ingests raw, chronological journal entries (Episodic Memory) and uses Google's Gemini LLMs to distill them into a highly structured, vector-searchable Knowledge Graph (Semantic Memory) via the **Project Loom** pipeline.
 
 ## Features
 
-* **Multi-Channel Ingestion:** Log entries via CLI, Twilio SMS, or by typing into a synced Google Doc.
-* **Agentic Query System:** Ask questions about your life, projects, or the world. JOT uses an agentic loop with tools for semantic search, Wikipedia, web search, and mathematical/date calculations.
-* **The Dreamer (Nightly Consolidation):** A background chron job that reviews the last 24 hours of logs using a "Committee of Minds" (Anthropologist, Architect, Executive, Philosopher, Self-Modeler) to extract facts and update your permanent persona profile.
+* **Multi-Channel Ingestion:** Log entries via CLI or Telegram (text, images, voice notes).
+* **Agentic Query System:** Ask questions about your life, projects, or the world. JOT uses an agentic ReAct loop with tools for semantic search, knowledge graph traversal, task management, web search, and more. Responses include a reasoning trace showing the model's chain of thought.
+* **Project Loom Pipeline:** Every ingested entry synchronously runs the Refinery — extracting relationship triples and distilling Gold facts into the knowledge graph, so memory is always up to date.
+* **Project Engine:** Tasks with subtasks (parent_id hierarchy). Use `decompose_task` to break complex goals into subtasks; the active project is injected into every query prompt.
 
 ## Architecture & Tech Stack
 
-* **Language:** Go 1.26
+* **Language:** Go 1.23+
 * **AI/LLM:** Google Gemini (2.5 Flash) for reasoning and data extraction; Vertex AI (`text-embedding-005`) for vector embeddings.
-* **Database:** Google Cloud Firestore (utilizing native vector search for semantic retrieval).
-* **Infrastructure:** Google Cloud Platform (Cloud Run for the API, Cloud Tasks for debouncing/async work, Cloud Scheduler for crons, Secret Manager).
-* **RAG Implementation:** Uses Reciprocal Rank Fusion (RRF) to combine keyword and vector search results before LLM context injection.
+* **Database:** Google Cloud Firestore (native vector search for semantic retrieval). All documents — episodic logs and semantic knowledge nodes — live in the `journal` collection, distinguished by `node_type`.
+* **Infrastructure:** Google Cloud Platform (Cloud Run for the API, Cloud Tasks for async work, Cloud Scheduler for crons, Secret Manager for secrets).
+* **RAG:** Reciprocal Rank Fusion (RRF) combines keyword and vector search results before LLM context injection.
 
 ## Project Structure
 
-* **`cmd/jot/`**: The CLI client for interacting with the backend API.
-* **`cmd/server/` & `cmd/local/**`: Entry points for the Cloud Run deployment and local testing.
-* **`internal/prompts/`**: System instructions for the various AI personas and extraction tasks.
-* **`internal/tools/`**: The tool registry for the agentic loop (web search, memory upserts, date calculators).
-* **`internal/agent/`** & **`internal/service/cron.go`**: Logic for the Dreamer, Specialists, and background consolidation.
-* **`internal/agent/foh.go`**: The main Front-of-House (FOH) ReAct loop handling user queries.
+* **`cmd/jot/`**: CLI client (`log`, `query`, `edit`, `entries`).
+* **`cmd/server/`**: Cloud Run API entry point.
+* **`internal/prompts/`**: System instructions for the various AI agents and extraction tasks.
+* **`internal/tools/`**: Tool registry for the agentic loop (semantic search, journal, task, web, utility tools).
+* **`internal/agent/foh.go`**: Front-of-House (FOH) ReAct loop handling user queries.
+* **`internal/agent/`**: Project Loom pipeline — Refinery extraction, task workers, decay cron, and RAG stages.
+* **`internal/service/`**: Service layer connecting agents to Firestore and LLM clients.
 
 ## Usage Examples (CLI)
 
-JOT uses natural language processing, so you don't always need strict commands.
-
 ```bash
-# Log a simple entry (Episodic Memory)
+# Log an entry (Episodic Memory — triggers Loom pipeline)
 $ jot Had coffee with Sarah today, she prefers oat milk.
 
-# Query your semantic memory
+# Query your semantic memory (returns reasoning trace + answer)
 $ jot What does Sarah put in her coffee
-
-# Run the nightly distillation manually
-$ jot dream
-
-# Sync with a google doc
-$ jot sync
-
 ```
 
 ## Deployment
 
 This project is designed to be deployed to Google Cloud Platform.
 
-1. **Configure GCP:** When (re)starting the project, run `./scripts/setup-infra.sh` (APIs, Cloud Tasks queue, Scheduler jobs) and `./scripts/setup-secrets.sh` (Secret Manager: Gemini API key, JOT_API_KEY, optional Twilio). Alternatively configure APIs and secrets in the GCP Console or via gcloud.
-2. **Deploy:** Run `./scripts/deploy.sh` (or `./scripts/deploy.sh container`) to build, test, push the image to Cloud Run, and deploy Firestore indexes from `firestore.indexes.json`. The deploy uses a Cloud Run service YAML that includes the **Managed Service for Prometheus sidecar**, which scrapes `GET /metrics` (Prometheus exposition format) and sends custom metrics to Google Cloud.
+1. **Configure GCP:** Run `./scripts/setup-infra.sh` (enables APIs, creates Cloud Tasks queue and Scheduler jobs) and `./scripts/setup-secrets.sh` (sets Secret Manager entries: Gemini API key, JOT_API_KEY, Telegram bot token).
+2. **Deploy:** Run `./scripts/deploy.sh` to build, push the container image to Cloud Run, and deploy Firestore indexes from `firestore.indexes.json`.
 3. **Local testing:** Run `./scripts/test-local.sh` to start the API locally. Tail logs with `./scripts/tail.sh`.
-
-**Viewing custom metrics (Prometheus):** After deploy, custom metrics (e.g. `jot_llm_*`, `jot_embedding_*`, `jot_queries_total`) are scraped by the sidecar and written to [Google Cloud Managed Service for Prometheus](https://cloud.google.com/stackdriver/docs/managed-prometheus). Open [Metrics Explorer](https://console.cloud.google.com/monitoring/metrics-explorer), switch the query language to **PromQL**, and run queries such as `rate(jot_llm_calls_total[5m])` or `jot_embedding_calls_total`.
