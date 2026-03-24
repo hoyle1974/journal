@@ -51,9 +51,19 @@ func (sg *SubGraph) ToMarkdownFull() string {
 	return strings.TrimRight(sb.String(), "\n")
 }
 
+// noisyNodeTypes are node types excluded from rendered graph output because they
+// add structural noise without semantic value (audit responses, raw log entries).
+var noisyNodeTypes = map[string]bool{
+	"response": true,
+	"log":      true,
+}
+
 func (sg *SubGraph) writeEntitiesAndRelationships(sb *strings.Builder) {
 	sb.WriteString("## Entities\n")
 	for uuid, n := range sg.Nodes {
+		if noisyNodeTypes[n.NodeType] {
+			continue
+		}
 		content := n.Content
 		if len(content) > 120 {
 			content = content[:117] + "..."
@@ -64,13 +74,21 @@ func (sg *SubGraph) writeEntitiesAndRelationships(sb *strings.Builder) {
 	if len(sg.Edges) > 0 {
 		sb.WriteString("\n## Relationships\n")
 		for _, e := range sg.Edges {
+			if e.Predicate == "incoming_link" {
+				continue
+			}
+			src, srcOK := sg.Nodes[e.SourceUUID]
+			tgt, tgtOK := sg.Nodes[e.TargetUUID]
+			if (srcOK && noisyNodeTypes[src.NodeType]) || (tgtOK && noisyNodeTypes[tgt.NodeType]) {
+				continue
+			}
 			srcContent := e.SourceUUID
-			if n, ok := sg.Nodes[e.SourceUUID]; ok {
-				srcContent = truncateString(n.Content, 40)
+			if srcOK {
+				srcContent = truncateString(src.Content, 40)
 			}
 			tgtContent := e.TargetUUID
-			if n, ok := sg.Nodes[e.TargetUUID]; ok {
-				tgtContent = truncateString(n.Content, 40)
+			if tgtOK {
+				tgtContent = truncateString(tgt.Content, 40)
 			}
 			fmt.Fprintf(sb, "* [%s] %s -> %s -> [%s] %s\n",
 				e.SourceUUID, srcContent, e.Predicate, e.TargetUUID, tgtContent)
