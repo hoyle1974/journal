@@ -67,7 +67,7 @@ func ProcessLogSequential(ctx context.Context, app *infra.App, logUUID, logConte
 
 	// ── Stage 2: Refinery ─────────────────────────────────────────────────────
 	infra.LoggerFrom(ctx).Debug("loom stage 2: refinery", "log_uuid", logUUID)
-	refineryErr := runRefineryPipeline(ctx, app, logUUID, logContent)
+	_, refineryErr := runRefineryPipeline(ctx, app, logUUID, logContent)
 	if refineryErr != nil {
 		infra.LoggerFrom(ctx).Warn("loom stage 2 FAILED: refinery pipeline error — pipeline continues to stage 3",
 			"log_uuid", logUUID,

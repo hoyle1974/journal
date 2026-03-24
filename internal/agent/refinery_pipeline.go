@@ -106,7 +106,11 @@ func appendPredicateToCanonicalMap(ctx context.Context, app *infra.App, predicat
 	return nil
 }
 
-func runRefineryPipeline(ctx context.Context, app *infra.App, entryUUID, content string) error {
+func runRefineryPipeline(ctx context.Context, app *infra.App, entryUUID, content string) ([]string, error) {
+	if app == nil {
+		return nil, fmt.Errorf("runRefineryPipeline: app required")
+	}
+
 	ctx, span := infra.StartSpan(ctx, "agent.refinery_pipeline")
 	defer span.End()
 	span.SetAttributes(map[string]string{"entry_uuid": entryUUID})
@@ -122,11 +126,11 @@ func runRefineryPipeline(ctx context.Context, app *infra.App, entryUUID, content
 
 	triples, err := refineryExtract(ctx, app, entryUUID, content, canonMap)
 	if err != nil {
-		return fmt.Errorf("refinery extract: %w", err)
+		return nil, fmt.Errorf("refinery extract: %w", err)
 	}
 	if len(triples) == 0 {
 		infra.LoggerFrom(ctx).Debug("refinery: no triples", "entry_uuid", entryUUID)
-		return nil
+		return nil, nil
 	}
 	return refineryResolveCommit(ctx, app, entryUUID, triples, canonMap)
 }
@@ -156,11 +160,12 @@ func refineryExtract(ctx context.Context, app *infra.App, entryUUID, content str
 	return parseRefineryTriples(lines), nil
 }
 
-func refineryResolveCommit(ctx context.Context, app *infra.App, entryUUID string, triples []refineryTriple, canonMap memory.CanonicalMapConfig) error {
+func refineryResolveCommit(ctx context.Context, app *infra.App, entryUUID string, triples []refineryTriple, canonMap memory.CanonicalMapConfig) ([]string, error) {
 	ctx, span := infra.StartSpan(ctx, "agent.refinery_resolve_commit")
 	defer span.End()
 	span.SetAttributes(map[string]string{"entry_uuid": entryUUID})
 
+	nodeIDs := make([]string, 0, len(triples)*3)
 	for _, t := range triples {
 		if t.ParseErr != "" {
 			infra.LoggerFrom(ctx).Warn("refinery rejected triple", "entry_uuid", entryUUID, "reason", t.ParseErr, "raw_line", t.RawLine)
@@ -207,6 +212,7 @@ func refineryResolveCommit(ctx context.Context, app *infra.App, entryUUID string
 			infra.LoggerFrom(ctx).Warn("refinery create relationship failed", "entry_uuid", entryUUID, "subject_uuid", subj.UUID, "predicate", predicate, "object_uuid", obj.UUID, "error", err)
 			continue
 		}
+		nodeIDs = append(nodeIDs, subj.UUID, obj.UUID, relID)
 		if err := app.Memory.AddEntityLink(ctx, subj.UUID, relID); err != nil {
 			infra.LoggerFrom(ctx).Warn("refinery subject backlink failed", "entry_uuid", entryUUID, "node_uuid", subj.UUID, "relationship_uuid", relID, "error", err)
 		}
@@ -221,7 +227,7 @@ func refineryResolveCommit(ctx context.Context, app *infra.App, entryUUID string
 			infra.LoggerFrom(ctx).Warn("refinery: updateHotEdges failed (non-fatal)", "object_uuid", obj.UUID, "rel_id", relID, "error", heErr)
 		}
 	}
-	return nil
+	return nodeIDs, nil
 }
 
 // updateHotEdges maintains a bounded 20-slot hot_edges array on objectNodeID.
