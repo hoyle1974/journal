@@ -109,6 +109,7 @@ func ProcessLogSequential(ctx context.Context, app *infra.App, logUUID, logConte
 
 // ProcessEntrySyncPipeline runs refinery (stage 2) and task worker (stage 3) for an entry
 // that has already been persisted by the caller. Returns the node IDs extracted by the refinery.
+// Stage errors are logged but do not abort the pipeline; the caller always receives a nil error.
 // Use from the unified synchronous pipeline (ProcessAndRespond); use ProcessLogSequential for
 // the async Cloud Task path.
 func ProcessEntrySyncPipeline(ctx context.Context, app *infra.App, logUUID, logContent, source string) ([]string, error) {
@@ -126,5 +127,5 @@ func ProcessEntrySyncPipeline(ctx context.Context, app *infra.App, logUUID, logC
 	if taskErr := runTaskWorker(ctx, app, logContent, []string{logUUID}); taskErr != nil {
 		infra.LoggerFrom(ctx).Warn("sync pipeline: task worker failed", "log_uuid", logUUID, "error", taskErr)
 	}
-	return nodeIDs, refineryErr
+	return nodeIDs, nil
 }
