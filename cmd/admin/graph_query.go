@@ -48,20 +48,19 @@ func runGraphQuery(ctx context.Context, app *infra.App, args []string) {
 
 	fmt.Printf("Query: %q  |  seeds: %d  |  depth: %d\n\n", query, len(seeds), *depth)
 
-	// 3. Expand each seed node and print its subgraph.
-	seen := make(map[string]bool)
+	// 3. Collect seed IDs (deduplicated) and expand into one normalized graph.
+	seedIDs := make([]string, 0, len(seeds))
+	seen := make(map[string]bool, len(seeds))
 	for _, node := range seeds {
-		if seen[node.UUID] {
-			continue
+		if !seen[node.UUID] {
+			seen[node.UUID] = true
+			seedIDs = append(seedIDs, node.UUID)
 		}
-		seen[node.UUID] = true
-
-		sg, err := app.MemoryStore().GraphExpand(ctx, node.UUID, queryVec, *depth, *limitPerEdge)
-		if err != nil {
-			log.Printf("graph_expand %s: %v", node.UUID, err)
-			continue
-		}
-		fmt.Println(sg.ToMarkdown(node.UUID))
-		fmt.Println(strings.Repeat("-", 60))
 	}
+
+	sg, err := app.MemoryStore().ExpandMulti(ctx, seedIDs, queryVec, *depth, *limitPerEdge)
+	if err != nil {
+		log.Fatalf("graph_expand: %v", err)
+	}
+	fmt.Println(sg.ToMarkdownFull())
 }

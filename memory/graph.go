@@ -38,14 +38,27 @@ func (sg *SubGraph) ToMarkdown(seedID string) string {
 	}
 	sb.WriteString("# Knowledge Graph Neighborhood\n")
 	fmt.Fprintf(&sb, "**Seed Concept:** %q (ID: %s)\n\n", seedContent, seedID)
+	sg.writeEntitiesAndRelationships(&sb)
+	return strings.TrimRight(sb.String(), "\n")
+}
 
+// ToMarkdownFull renders the full normalized SubGraph as Markdown without a
+// per-seed header. Use this when the graph was built from multiple seeds.
+func (sg *SubGraph) ToMarkdownFull() string {
+	var sb strings.Builder
+	sb.WriteString("# Knowledge Graph\n\n")
+	sg.writeEntitiesAndRelationships(&sb)
+	return strings.TrimRight(sb.String(), "\n")
+}
+
+func (sg *SubGraph) writeEntitiesAndRelationships(sb *strings.Builder) {
 	sb.WriteString("## Entities\n")
 	for uuid, n := range sg.Nodes {
 		content := n.Content
 		if len(content) > 120 {
 			content = content[:117] + "..."
 		}
-		fmt.Fprintf(&sb, "* [%s] %s: %q\n", uuid, n.NodeType, content)
+		fmt.Fprintf(sb, "* [%s] %s: %q\n", uuid, n.NodeType, content)
 	}
 
 	if len(sg.Edges) > 0 {
@@ -59,11 +72,10 @@ func (sg *SubGraph) ToMarkdown(seedID string) string {
 			if n, ok := sg.Nodes[e.TargetUUID]; ok {
 				tgtContent = truncateString(n.Content, 40)
 			}
-			fmt.Fprintf(&sb, "* [%s] %s -> %s -> [%s] %s\n",
+			fmt.Fprintf(sb, "* [%s] %s -> %s -> [%s] %s\n",
 				e.SourceUUID, srcContent, e.Predicate, e.TargetUUID, tgtContent)
 		}
 	}
-	return strings.TrimRight(sb.String(), "\n")
 }
 
 // pruneCandidates returns the top-maxK candidates sorted by cosine similarity to
@@ -105,15 +117,27 @@ func (s *Store) pruneCandidates(candidates []KnowledgeNodeWithLinks, queryVector
 	return result
 }
 
-// GraphExpand performs a BFS graph traversal starting from seedID.
-// queryVector is used for semantic pruning at each hop (top-K by cosine similarity).
-// If queryVector is nil, a hard cap of limitPerEdge is applied instead.
-// hops controls the traversal depth (1 = immediate neighbourhood only).
-// limitPerEdge caps results per Firestore query per node, and also caps the
-// inter-hop frontier (limitPerHop = limitPerEdge).
+// GraphExpand performs a BFS graph traversal starting from a single seedID.
+// It is a convenience wrapper around GraphExpandMulti.
 func (s *Store) GraphExpand(ctx context.Context, seedID string, queryVector []float32, hops, limitPerEdge int) (*SubGraph, error) {
 	if seedID == "" {
 		return nil, fmt.Errorf("seedID required")
+	}
+	return s.GraphExpandMulti(ctx, []string{seedID}, queryVector, hops, limitPerEdge)
+}
+
+// GraphExpandMulti performs a BFS graph traversal from multiple seed nodes and
+// returns a single normalized SubGraph. All seed neighborhoods are merged into
+// one deduplicated result: nodes are keyed by UUID (no duplicates), edges are
+// deduplicated, and every node referenced by an edge is resolved so that names
+// appear instead of raw IDs in the output.
+//
+// queryVector is used for semantic pruning at each hop (top-K by cosine similarity).
+// If queryVector is nil, a hard cap of limitPerEdge is applied instead.
+// hops controls the traversal depth (1 = immediate neighbourhood only).
+func (s *Store) GraphExpandMulti(ctx context.Context, seedIDs []string, queryVector []float32, hops, limitPerEdge int) (*SubGraph, error) {
+	if len(seedIDs) == 0 {
+		return nil, fmt.Errorf("seedIDs required")
 	}
 	if limitPerEdge <= 0 {
 		limitPerEdge = 10
@@ -127,30 +151,42 @@ func (s *Store) GraphExpand(ctx context.Context, seedID string, queryVector []fl
 		Edges: make([]Edge, 0),
 	}
 
-	// Seed fetch — uses GetKnowledgeNodeByID to obtain EntityLinks.
-	seed, err := s.GetKnowledgeNodeByID(ctx, seedID)
+	// Batch-fetch all seed nodes (GetKnowledgeNodesByIDs returns EntityLinks).
+	seeds, err := s.GetKnowledgeNodesByIDs(ctx, seedIDs)
 	if err != nil {
-		return nil, fmt.Errorf("fetch seed node: %w", err)
+		return nil, fmt.Errorf("fetch seed nodes: %w", err)
 	}
-	sg.Nodes[seedID] = *seed
+	for _, n := range seeds {
+		sg.Nodes[n.UUID] = n
+	}
 
-	visited := map[string]bool{seedID: true}
-	currentHop := []string{seedID}
+	visited := make(map[string]bool, len(seedIDs))
+	for _, id := range seedIDs {
+		visited[id] = true
+	}
+	currentHop := make([]string, len(seedIDs))
+	copy(currentHop, seedIDs)
 
-	var mu sync.Mutex // protects sg.Edges and nextCandidateUUIDs
+	var mu sync.Mutex // protects sg.Edges, sg.Nodes, visited, nextCandidateUUIDs
 
 	for hop := 0; hop < hops && len(currentHop) > 0; hop++ {
-		// For hop > 0, batch-fetch the current frontier nodes.
+		// For hop > 0, batch-fetch frontier nodes not yet in sg.Nodes.
 		if hop > 0 {
-			nodes, err := s.GetKnowledgeNodesByIDs(ctx, currentHop)
-			if err != nil {
-				return nil, fmt.Errorf("hop %d batch fetch: %w", hop, err)
+			toFetch := make([]string, 0, len(currentHop))
+			for _, id := range currentHop {
+				if _, ok := sg.Nodes[id]; !ok {
+					toFetch = append(toFetch, id)
+				}
 			}
-			mu.Lock()
-			for _, n := range nodes {
-				sg.Nodes[n.UUID] = n
+			if len(toFetch) > 0 {
+				nodes, err := s.GetKnowledgeNodesByIDs(ctx, toFetch)
+				if err != nil {
+					return nil, fmt.Errorf("hop %d batch fetch: %w", hop, err)
+				}
+				for _, n := range nodes {
+					sg.Nodes[n.UUID] = n
+				}
 			}
-			mu.Unlock()
 		}
 
 		nextCandidateUUIDs := make(map[string]bool)
@@ -159,7 +195,6 @@ func (s *Store) GraphExpand(ctx context.Context, seedID string, queryVector []fl
 		for _, nodeUUID := range currentHop {
 			nodeUUID := nodeUUID // capture
 			g.Go(func() error {
-				// Read entity links from the already-stored node.
 				mu.Lock()
 				node := sg.Nodes[nodeUUID]
 				mu.Unlock()
@@ -176,50 +211,41 @@ func (s *Store) GraphExpand(ctx context.Context, seedID string, queryVector []fl
 					incoming = nil
 				}
 
+				// Build local edge and new-UUID slices without holding the lock.
+				localEdges := make([]Edge, 0, 1+len(incomingSPO)+len(incoming)+min(len(entityLinks), limitPerEdge))
+				newUUIDs := make([]string, 0, cap(localEdges))
+
+				if node.ObjectUUID != "" {
+					localEdges = append(localEdges, Edge{SourceUUID: nodeUUID, TargetUUID: node.ObjectUUID, Predicate: node.Predicate})
+					newUUIDs = append(newUUIDs, node.ObjectUUID)
+				}
+				for _, n := range incomingSPO {
+					localEdges = append(localEdges, Edge{SourceUUID: n.UUID, TargetUUID: nodeUUID, Predicate: n.Predicate})
+					newUUIDs = append(newUUIDs, n.UUID)
+				}
+				for _, n := range incoming {
+					localEdges = append(localEdges, Edge{SourceUUID: n.UUID, TargetUUID: nodeUUID, Predicate: "incoming_link"})
+					newUUIDs = append(newUUIDs, n.UUID)
+				}
+				linkCap := min(len(entityLinks), limitPerEdge)
+				for _, linkedUUID := range entityLinks[:linkCap] {
+					localEdges = append(localEdges, Edge{SourceUUID: nodeUUID, TargetUUID: linkedUUID, Predicate: "entity_link"})
+					newUUIDs = append(newUUIDs, linkedUUID)
+				}
+				// Also mark all entity_links visited regardless of cap (they exist as nodes).
+				for _, id := range entityLinks {
+					newUUIDs = append(newUUIDs, id)
+				}
+
+				// Single brief lock acquisition to merge into shared state.
 				mu.Lock()
 				defer mu.Unlock()
-
-				// Traverse the node's intrinsic outgoing SPO edge (this node as subject).
-				if node.ObjectUUID != "" {
-					sg.Edges = append(sg.Edges, Edge{SourceUUID: nodeUUID, TargetUUID: node.ObjectUUID, Predicate: node.Predicate})
-					if !visited[node.ObjectUUID] {
-						nextCandidateUUIDs[node.ObjectUUID] = true
+				sg.Edges = append(sg.Edges, localEdges...)
+				for _, id := range newUUIDs {
+					if !visited[id] {
+						nextCandidateUUIDs[id] = true
+						visited[id] = true
 					}
-				}
-				for _, n := range incomingSPO {
-					sg.Edges = append(sg.Edges, Edge{SourceUUID: n.UUID, TargetUUID: nodeUUID, Predicate: n.Predicate})
-					if !visited[n.UUID] {
-						nextCandidateUUIDs[n.UUID] = true
-					}
-				}
-				for _, n := range incoming {
-					sg.Edges = append(sg.Edges, Edge{SourceUUID: n.UUID, TargetUUID: nodeUUID, Predicate: "incoming_link"})
-					if !visited[n.UUID] {
-						nextCandidateUUIDs[n.UUID] = true
-					}
-				}
-				cap := len(entityLinks)
-				if cap > limitPerEdge {
-					cap = limitPerEdge
-				}
-				for _, linkedUUID := range entityLinks[:cap] {
-					sg.Edges = append(sg.Edges, Edge{SourceUUID: nodeUUID, TargetUUID: linkedUUID, Predicate: "entity_link"})
-					if !visited[linkedUUID] {
-						nextCandidateUUIDs[linkedUUID] = true
-					}
-				}
-				// Mark all discovered UUIDs visited before next hop.
-				if node.ObjectUUID != "" {
-					visited[node.ObjectUUID] = true
-				}
-				for _, n := range incomingSPO {
-					visited[n.UUID] = true
-				}
-				for _, n := range incoming {
-					visited[n.UUID] = true
-				}
-				for _, id := range entityLinks {
-					visited[id] = true
 				}
 				return nil
 			})
@@ -241,17 +267,67 @@ func (s *Store) GraphExpand(ctx context.Context, seedID string, queryVector []fl
 			return nil, fmt.Errorf("hop %d candidate fetch: %w", hop, err)
 		}
 		pruned := s.pruneCandidates(candidateNodes, queryVector, limitPerEdge)
+		// Cache pruned nodes now so the hop-start fetch skips them entirely.
+		for _, n := range pruned {
+			sg.Nodes[n.UUID] = n
+		}
 		currentHop = make([]string, 0, len(pruned))
 		for _, n := range pruned {
 			currentHop = append(currentHop, n.UUID)
 		}
 	}
 
+	// Resolve all nodes referenced in edges but not yet fetched (e.g. pruned
+	// candidates that appear as edge targets). This ensures every node in an
+	// edge has a name entry in sg.Nodes so display code never falls back to
+	// raw UUIDs.
+	danglingIDs := make(map[string]bool)
+	for _, e := range sg.Edges {
+		if _, ok := sg.Nodes[e.SourceUUID]; !ok {
+			danglingIDs[e.SourceUUID] = true
+		}
+		if _, ok := sg.Nodes[e.TargetUUID]; !ok {
+			danglingIDs[e.TargetUUID] = true
+		}
+	}
+	if len(danglingIDs) > 0 {
+		ids := make([]string, 0, len(danglingIDs))
+		for id := range danglingIDs {
+			ids = append(ids, id)
+		}
+		resolved, err := s.GetKnowledgeNodesByIDs(ctx, ids)
+		if err != nil {
+			s.log.Debug("graph expand: failed to resolve dangling nodes", "error", err)
+		} else {
+			for _, n := range resolved {
+				sg.Nodes[n.UUID] = n
+			}
+		}
+	}
+
+	// Deduplicate edges accumulated across all seed BFS paths.
+	sg.Edges = deduplicateEdges(sg.Edges)
+
 	s.log.Info("graph expand complete",
-		"seed_id", seedID,
+		"seeds", len(seedIDs),
 		"hops", hops,
 		"nodes", len(sg.Nodes),
 		"edges", len(sg.Edges),
 	)
 	return sg, nil
+}
+
+// deduplicateEdges removes duplicate edges, keeping the first occurrence of
+// each (sourceUUID, predicate, targetUUID) triple.
+func deduplicateEdges(edges []Edge) []Edge {
+	seen := make(map[string]bool, len(edges))
+	result := make([]Edge, 0, len(edges))
+	for _, e := range edges {
+		key := e.SourceUUID + "|" + e.Predicate + "|" + e.TargetUUID
+		if !seen[key] {
+			seen[key] = true
+			result = append(result, e)
+		}
+	}
+	return result
 }

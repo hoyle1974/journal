@@ -42,6 +42,7 @@ type KnowledgeStore interface {
 // GraphStore provides graph traversal and semantic search.
 type GraphStore interface {
 	Expand(ctx context.Context, seedID string, queryVector []float32, hops, limitPerEdge int) (*SubGraph, error)
+	ExpandMulti(ctx context.Context, seedIDs []string, queryVector []float32, hops, limitPerEdge int) (*SubGraph, error)
 	QuerySimilar(ctx context.Context, queryVector []float32, opts SearchOptions) ([]KnowledgeNode, error)
 	SearchKeywords(ctx context.Context, keywords string, limit int) ([]KnowledgeNode, error)
 	Rerank(ctx context.Context, query string, nodes []KnowledgeNode, topN int) ([]KnowledgeNode, error)

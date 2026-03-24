@@ -59,6 +59,12 @@ func (s *Store) Expand(ctx context.Context, seedID string, queryVector []float32
 	return s.GraphExpand(ctx, seedID, queryVector, hops, limitPerEdge)
 }
 
+// ExpandMulti performs a multi-hop BFS traversal from multiple seed nodes and
+// returns a single normalized SubGraph with deduplicated nodes and edges.
+func (s *Store) ExpandMulti(ctx context.Context, seedIDs []string, queryVector []float32, hops, limitPerEdge int) (*SubGraph, error) {
+	return s.GraphExpandMulti(ctx, seedIDs, queryVector, hops, limitPerEdge)
+}
+
 // QuerySimilar performs a vector ANN search with optional significance filtering.
 // opts.Limit defaults to 20 when <= 0.
 func (s *Store) QuerySimilar(ctx context.Context, queryVector []float32, opts SearchOptions) ([]KnowledgeNode, error) {
