@@ -3,8 +3,8 @@ package service
 import (
 	"context"
 
-	"github.com/jackstrohm/jot/internal/api"
 	"github.com/jackstrohm/jot/internal/agent"
+	"github.com/jackstrohm/jot/internal/api"
 	"github.com/jackstrohm/jot/internal/infra"
 	"github.com/jackstrohm/jot/pkg/utils"
 )
@@ -20,6 +20,7 @@ func queryResultToAPI(r *agent.QueryResult) *api.QueryResult {
 		ForcedConclusion: r.ForcedConclusion,
 		Error:            r.Error,
 		DebugLogs:        r.DebugLogs,
+		ReasoningTrace:   r.ReasoningTrace,
 	}
 }
 

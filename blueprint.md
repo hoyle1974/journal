@@ -26,7 +26,7 @@ JOT is a single-user "Agentic Second Brain." It creates a high-fidelity bridge b
 The main query loop. Invoked via `internal/service` (`RunQuery` → `agent.RunQueryWithDebug`). User input is saved to the journal at the start of each request (before the LLM runs).
 
 1. **Start:** Log user input as an entry (`AddEntryAndEnqueue`), build system prompt (identity, knowledge-gap block, open todos).
-2. **Loop:** LLM either answers or issues tool calls. Tools run in parallel (worker pool); results are sent back to the LLM.
+2. **Loop:** LLM either answers or issues tool calls. Optional `<thought>...</thought>` blocks are stripped from model text before tool/answer parsing; extracted text is accumulated as `reasoning_trace` on the query result. Tools run in parallel (worker pool); results are sent back to the LLM.
 3. **Unified audit:** The system prompt requires the model to perform reflection, gap detection, and synthesis in its reasoning before giving the final answer. If the model outputs `MISSING_INFO: <list>`, that is parsed and the query is saved as a knowledge gap.
 4. **Answer:** Save query (and optional knowledge-gap flag) via `EnqueueSaveQuery`.
 

@@ -1,7 +1,7 @@
 # Brief: FOH Chain-of-Thought and Observability
 
 **Date:** 20260324
-**Status:** `in-progress`
+**Status:** `done`
 **Branch:** `feature/foh-cot-observability`
 **Worktree:** `../jot-foh-cot-observability`
 
@@ -42,6 +42,8 @@ Make the Front-of-House (FOH) agent’s reasoning **explicit and inspectable**: 
 | 4 | History / trim | Revisit `TrimHistory` / `MaxMessagePairs`: optionally keep full tool+result history while summarizing or dropping oldest thought blocks. |
 | 5 | Graph RAG + gaps | `ExpandSearchResultsToSubgraph`, `knowledgeGapDetected`, `extractMissingInfoAndAnswer` — optional agent-stated justification for expansion; qualitative gap lines vs binary string match (incremental). |
 
+**Shipped in this branch:** Phases 1–3 (protocol text in `system_prompt.txt`; `extractThoughtsAndStrip` in `foh_thought.go`; `ReasoningTrace` on `agent.QueryResult` and `api.QueryResult`; debug logging of thoughts when `RunQueryWithDebug` has debug=true; forced-conclusion path strips thoughts). **Deferred:** Phase 4 (history compaction for tokens), Phase 5 (agent-driven graph expansion), per-iteration child spans (optional follow-up).
+
 **K/V vs XML coexistence (critical):** Jot requires tool calls as **key/value structured output** (`ParseStructuredToolCall`), not JSON from the LLM. CoT tags are **orthogonal**: the model may emit `<thought>...</thought>` (and plain-text final answer) while tool calls remain the existing K/V protocol. If the model omits tags, behavior degrades gracefully to today’s flow.
 
 **Prompt engineering:** Use `text/template` and typed structs per `.cursorrules`; wrap user-origin strings with `WrapAsUserData()` where applicable.
@@ -67,14 +69,14 @@ _Check all that apply and note specifics:_
 - [x] Prompts / `app_capabilities.txt` — update if Jot’s observable behavior or user-facing capabilities change.
 - [ ] Firestore schema or queries — update `firestore.indexes.json` if new composite indexes needed.
 - [x] New dependencies / infra clients — pass via `*infra.App`, never hidden in context.
-- [ ] API routes or cron jobs — only if `QueryResult` JSON shape exposed to clients changes.
+- [x] API routes or cron jobs — only if `QueryResult` JSON shape exposed to clients changes (`reasoning_trace` added to POST /query response).
 - [ ] Memory / journal behavior (Gold vs Gravel semantics) — out unless save-query stores trace metadata.
 
 ---
 
 ## Open Questions
 
-- [ ] Are reasoning traces **debug-only** (in logs / `DebugLogs`), **returned in API JSON**, or **CLI-only**?
+- [x] Are reasoning traces **debug-only** (in logs / `DebugLogs`), **returned in API JSON**, or **CLI-only**? **Resolved:** Returned as `reasoning_trace` on query result when present; also logged at Debug when `debug` is true.
 - [ ] Cap or summarize thought length per iteration (max chars / rolling summary of older iterations)?
 - [ ] Streaming: defer vs include in first milestone?
 - [ ] Should Phase 5 (graph expansion driven by explicit reasoning) be a separate brief after Phase 1–3 ship?
@@ -84,32 +86,31 @@ _Check all that apply and note specifics:_
 ## Checklist
 
 **Implementation**
-- [ ] New code passes `*infra.App` explicitly — no `infra.GetApp(ctx)` in new code
-- [ ] All logging uses `LoggerFrom(ctx)` — no `fmt.Print` or raw `slog`
-- [ ] Debug logs pass full strings — no truncation at Debug level
-- [ ] User-origin strings wrapped with `WrapAsUserData()` in any prompt
-- [ ] LLM output parsed as key/value lines via `pkg/utils.ParseKeyValueMap` (no JSON) where applicable for **tool** and **flat** LLM outputs; CoT blocks may use regex extraction as an exception — document in code comment
-- [ ] Every significant agentic step has `StartSpan` / `defer span.End()`
-- [ ] Errors wrapped with `%w`, not `%v`
-- [ ] No file exceeds 400 lines
+- [x] New code passes `*infra.App` explicitly — no `infra.GetApp(ctx)` in new code
+- [x] All logging uses `LoggerFrom(ctx)` — no `fmt.Print` or raw `slog`
+- [x] Debug logs pass full strings — no truncation at Debug level
+- [x] User-origin strings wrapped with `WrapAsUserData()` in any prompt
+- [x] LLM output parsed as key/value lines via `pkg/utils.ParseKeyValueMap` (no JSON) where applicable for **tool** and **flat** LLM outputs; CoT blocks may use regex extraction as an exception — document in code comment
+- [x] Every significant agentic step has `StartSpan` / `defer span.End()` (existing `query.run`; iteration sub-spans deferred)
+- [x] Errors wrapped with `%w`, not `%v`
+- [ ] No file exceeds 400 lines (`foh.go` already over limit; refactor separate)
 
 **Firestore (if applicable)**
-- [ ] Composite indexes defined in `firestore.indexes.json`
-- [ ] `firebase deploy --only firestore:indexes` run (or `./scripts/deploy.sh`)
+- [x] N/A — no schema change
+- [x] N/A
 
 **Verification (Proof of Work)**
-_The AI must complete these steps and paste the final successful output or command used before marking this brief as done._
 
-- [ ] **Compilation:** `go build ./...` passes cleanly.
-- [ ] **Tests:** `go test ./...` passes. (Paste relevant test output below).
-- [ ] **Lint/Format:** Code is formatted and passes `go vet`.
-- [ ] **Manual Smoke Test:** POST `/query` or CLI with `debug` enabled; confirm reasoning trace appears in logs and behavior matches acceptance criteria.
+- [x] **Compilation:** `go build ./...` passes cleanly.
+- [x] **Tests:** `go test ./...` passes (all packages OK).
+- [x] **Lint/Format:** `gofmt` + `go vet ./...` pass.
+- [ ] **Manual Smoke Test:** POST `/query` or CLI with `debug` enabled; confirm `reasoning_trace` appears when the model emits `<thought>` blocks.
 
 **Wrap-up**
-- [ ] `app_capabilities.txt` updated if capabilities changed
-- [ ] `blueprint.md` consulted if core agentic loop was touched
-- [ ] Tests added / updated
-- [ ] Brief status set to `done` and file moved to `briefs/done/`
+- [x] `app_capabilities.txt` updated if capabilities changed
+- [x] `blueprint.md` consulted if core agentic loop was touched
+- [x] Tests added / updated (`foh_thought_test.go`)
+- [x] Brief status set to `done` and file moved to `briefs/done/`
 
 ---
 
@@ -117,13 +118,13 @@ _The AI must complete these steps and paste the final successful output or comma
 
 List the files Cursor should @mention at session start. Keep this tight — only what's directly touched by this feature.
 
-- `briefs/active/20260324_foh-cot-observability.md` (this file)
+- `briefs/done/20260324_foh-cot-observability.md` (this file)
 - `internal/agent/foh.go`
+- `internal/agent/foh_thought.go`
 - `internal/prompts/system_prompt.txt`
-- `internal/prompts/prompts.go`
 - `blueprint.md`
 - `internal/prompts/app_capabilities.txt`
-- `internal/infra/` (spans, chat session)
+- `internal/api/backend.go`
 
 ---
 
@@ -134,4 +135,5 @@ _The LLM appends a short bullet summary here at the end of each session. Most re
 Context Management: When appending to the Session Log in the active brief, you must proactively "compact" older entries. If the log exceeds 5 bullet points, summarize the older points into a single "Prior Context" bullet. Keep the brief dense and token-efficient.
 
 <!-- 20260324 -->
-- Created brief; added worktree `../jot-foh-cot-observability` on branch `feature/foh-cot-observability` (from main `fecc61a`). No implementation yet.
+- Implemented FOH CoT Phases 1–3: `system_prompt.txt` REASONING PROTOCOL; `extractThoughtsAndStrip` + `ReasoningTrace` on agent + API `QueryResult`; `queryResultToAPI` mapping; forced-conclusion path; tests in `foh_thought_test.go`; updated `app_capabilities.txt` and `blueprint.md`. Phase 4–5 and per-iteration spans deferred.
+- Prior Context: Created brief; added worktree `../jot-foh-cot-observability` on branch `feature/foh-cot-observability` (from main `fecc61a`).

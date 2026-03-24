@@ -16,7 +16,7 @@ Jot is a personal journaling and memory system. It ingests journal entries, extr
 - **Telegram slash commands**: `/help` — lists available commands. `/skip` — skip the current pending question. Unknown slash commands fall through to FOH.
 
 ## Agents
-- **FOH (Front of House)**: Query loop. Uses system prompt, identity, knowledge-gap block, open todos; can call tools (journal, knowledge, task, web, utility). Before answering, the model performs an in-prompt audit (reflection, gap detection, synthesis). If the model reports missing info via MISSING_INFO:, the query is saved as a knowledge gap (is_gap).
+- **FOH (Front of House)**: Query loop. Uses system prompt, identity, knowledge-gap block, open todos; can call tools (journal, knowledge, task, web, utility). The system prompt may ask the model to emit optional `<thought>...</thought>` blocks (plan, gaps, next step) before tool calls or final answers; the backend strips these for parsing and returns them as `reasoning_trace` on the query result when present. Tool calls remain key/value or native function calls (not JSON from the model). Before answering, the model performs an in-prompt audit (reflection, gap detection, synthesis). If the model reports missing info via MISSING_INFO:, the query is saved as a knowledge gap (is_gap).
 - **Project Engine**: A "project" is a task with subtasks (parent_id hierarchy). Use decompose_task to break a complex task into 3–7 subtasks. FOH automatically injects the most recently active project + pending subtasks into the system prompt (ACTIVE PROJECT block).
 
 ## Storage Architecture

@@ -34,6 +34,7 @@ type QueryResult struct {
 	ForcedConclusion bool                     `json:"forced_conclusion,omitempty"`
 	Error            bool                     `json:"error"`
 	DebugLogs        []string                 `json:"debug_logs,omitempty"`
+	ReasoningTrace   []string                 `json:"reasoning_trace,omitempty"`
 }
 
 // Entry is the API shape for a journal entry (avoids api importing pkg/journal).
