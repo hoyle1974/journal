@@ -1,39 +1,9 @@
 package agent
 
 import (
-	"regexp"
 	"strings"
 	"unicode/utf8"
 )
-
-// thoughtBlockRegex extracts optional <thought>...</thought> blocks from model text.
-// This is an exception to the usual K/V-only parsing for LLM output; FOH still uses
-// ParseKeyValueMap / structured tool calls for tools and final answers after stripping.
-// Tool calls remain K/V or native function calls; CoT is orthogonal (brief: FOH CoT).
-var thoughtBlockRegex = regexp.MustCompile(`(?s)<thought>(.*?)</thought>`)
-
-// extractThoughtsAndStrip removes all <thought>...</thought> regions and returns the
-// concatenated inner text (non-empty blocks joined by "\n---\n") plus the remainder
-// suitable for ParseStructuredToolCall / extractMissingInfoAndAnswer.
-func extractThoughtsAndStrip(raw string) (thought string, stripped string) {
-	raw = strings.TrimSpace(raw)
-	matches := thoughtBlockRegex.FindAllStringSubmatch(raw, -1)
-	var parts []string
-	for _, m := range matches {
-		if len(m) < 2 {
-			continue
-		}
-		t := strings.TrimSpace(m[1])
-		if t != "" {
-			parts = append(parts, t)
-		}
-	}
-	if len(parts) > 0 {
-		thought = strings.Join(parts, "\n---\n")
-	}
-	stripped = strings.TrimSpace(thoughtBlockRegex.ReplaceAllString(raw, ""))
-	return thought, stripped
-}
 
 // maxThoughtCharsPerTrace limits stored/API reasoning_trace size per iteration (UTF-8 safe).
 const maxThoughtCharsPerTrace = 12000
@@ -51,7 +21,7 @@ func truncateThoughtForTrace(th string) string {
 	return strings.TrimSpace(string(runes[:maxThoughtCharsPerTrace])) + "\n… [truncated for trace size]"
 }
 
-// thoughtSuggestsKnowledgeGap returns true when the model's thought block explicitly lists
+// thoughtSuggestsKnowledgeGap returns true when the model's thinking block explicitly lists
 // non-empty "Identified gaps" (CoT-assisted gap detection, phase 5).
 func thoughtSuggestsKnowledgeGap(th string) bool {
 	th = strings.TrimSpace(th)

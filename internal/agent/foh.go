@@ -86,8 +86,14 @@ func RunQuery(ctx context.Context, app FOHEnv, question, source string) *QueryRe
 	return RunQueryWithDebug(ctx, app, question, source, true)
 }
 
-// RunQueryWithDebug runs a query with optional debug logging.
+// RunQueryWithDebug is preserved for backward compat; passes empty ragContext.
 func RunQueryWithDebug(ctx context.Context, app FOHEnv, question, source string, debug bool) *QueryResult {
+	return RunQueryFull(ctx, app, question, source, debug, "")
+}
+
+// RunQueryFull is the unified pipeline entry point.
+// ragContext is injected into the system prompt as GRAPH CONTEXT; pass "" to skip.
+func RunQueryFull(ctx context.Context, app FOHEnv, question, source string, debug bool, ragContext string) *QueryResult {
 	ctx = app.WithContext(ctx)
 	var debugLogs []string
 	logDebug := func(msg string, args ...interface{}) {
@@ -135,7 +141,7 @@ func RunQueryWithDebug(ctx context.Context, app FOHEnv, question, source string,
 	logDebug("[start] Question: %s", question)
 	var reasoningTrace []string
 
-	systemPrompt, err := BuildSystemPrompt(ctx, app, "")
+	systemPrompt, err := BuildSystemPrompt(ctx, app, ragContext)
 	if err != nil {
 		span.RecordError(err)
 		return errQueryResult(fmt.Sprintf("Error building system prompt: %v", err), 0, debugLogs, nil)
@@ -150,7 +156,7 @@ func RunQueryWithDebug(ctx context.Context, app FOHEnv, question, source string,
 	} else {
 		toolDefs = tools.GetDefinitions()
 	}
-	session, err := infra.NewChatSession(ctx, app.App(), systemPrompt, toolDefs, false)
+	session, err := infra.NewChatSession(ctx, app.App(), systemPrompt, toolDefs, true)
 	if err != nil {
 		span.RecordError(err)
 		return errQueryResult(fmt.Sprintf("Error creating chat session: %v", infra.WrapLLMError(err)), 0, debugLogs, nil)
@@ -179,25 +185,23 @@ func RunQueryWithDebug(ctx context.Context, app FOHEnv, question, source string,
 	infra.LoggerFrom(ctx).Debug("FOH: iteration 1 response received", "query_run_id", queryRunID, "phase", "first_turn", "llm_correlation_id", session.LastLLMCorrelationID(), "reason", "initial LLM turn")
 
 	for iteration < MaxIterations {
-		fullModelText := strings.TrimSpace(infra.ExtractTextFromResponse(resp))
-		th, stripped := extractThoughtsAndStrip(fullModelText)
-		if th != "" {
-			if thoughtSuggestsKnowledgeGap(th) {
+		thinking, answerText := infra.ExtractThinkingAndAnswer(resp)
+		if thinking != "" {
+			if thoughtSuggestsKnowledgeGap(thinking) {
 				knowledgeGapDetected = true
 			}
-			reasoningTrace = append(reasoningTrace, truncateThoughtForTrace(th))
-			infra.LoggerFrom(ctx).Debug("FOH: model thought block", "query_run_id", queryRunID, "phase", "cot", "iter", iteration, "thought", th)
+			reasoningTrace = append(reasoningTrace, truncateThoughtForTrace(thinking))
+			infra.LoggerFrom(ctx).Debug("FOH: thinking block", "query_run_id", queryRunID, "iter", iteration, "thinking_len", len(thinking))
 			if debug {
-				logDebug("[iter %d] thought: %s", iteration, th)
+				logDebug("[iter %d] thinking: %s", iteration, thinking)
 			}
 		}
 		span.SetAttributes(map[string]string{
 			"foh_iteration":        fmt.Sprintf("%d", iteration),
-			"foh_last_thought_len": fmt.Sprintf("%d", len(th)),
+			"foh_last_thought_len": fmt.Sprintf("%d", len(thinking)),
 		})
 
 		var hasCalls bool
-		var answerText string
 		if useCompactTools {
 			// Map vs Manual: core tools (semantic_search, upsert_knowledge, discovery_search) come as native function calls; rest via JSON.
 			var discoveredToolName string
@@ -205,7 +209,6 @@ func RunQueryWithDebug(ctx context.Context, app FOHEnv, question, source string,
 			if infra.HasFunctionCalls(resp) {
 				hasCalls = true
 			} else {
-				answerText = stripped
 				infra.LoggerFrom(ctx).Debug("FOH: parsing structured tool call (K/V)", "query_run_id", queryRunID, "raw_text", answerText)
 				discoveredToolName, discoveredToolArgs, hasCalls = ParseStructuredToolCall(answerText)
 			}
@@ -262,9 +265,6 @@ func RunQueryWithDebug(ctx context.Context, app FOHEnv, question, source string,
 			// hasCalls true with native FunctionCalls: fall through to native execution below
 		} else {
 			hasCalls = infra.HasFunctionCalls(resp)
-			if !hasCalls {
-				answerText = stripped
-			}
 		}
 
 		logDebug("[iter %d] LLM response: has_function_calls=%v", iteration, hasCalls)
@@ -553,16 +553,15 @@ func RunQueryWithDebug(ctx context.Context, app FOHEnv, question, source string,
 		}
 	}
 
-	text := strings.TrimSpace(infra.ExtractTextFromResponse(resp))
-	thForced, strippedForced := extractThoughtsAndStrip(text)
-	if thForced != "" {
-		if thoughtSuggestsKnowledgeGap(thForced) {
+	thinkingForced, strippedForced := infra.ExtractThinkingAndAnswer(resp)
+	if thinkingForced != "" {
+		if thoughtSuggestsKnowledgeGap(thinkingForced) {
 			knowledgeGapDetected = true
 		}
-		reasoningTrace = append(reasoningTrace, truncateThoughtForTrace(thForced))
-		infra.LoggerFrom(ctx).Debug("FOH: model thought block", "query_run_id", queryRunID, "phase", "forced_conclusion", "thought", thForced)
+		reasoningTrace = append(reasoningTrace, truncateThoughtForTrace(thinkingForced))
+		infra.LoggerFrom(ctx).Debug("FOH: thinking block (forced conclusion)", "query_run_id", queryRunID, "phase", "forced_conclusion", "thinking_len", len(thinkingForced))
 		if debug {
-			logDebug("[forced] thought: %s", thForced)
+			logDebug("[forced] thinking: %s", thinkingForced)
 		}
 	}
 	if strippedForced != "" {
