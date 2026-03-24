@@ -48,7 +48,7 @@ All node types live in the **single `journal` collection** (`KnowledgeCollection
 
 | `node_type` | Struct | Purpose |
 |-------------|--------|---------|
-| `log` | `Entry` | Raw episodic journal entries. |
+| `log` | `Entry` | Raw episodic journal entries. Must never be deleted by maintenance code. |
 | `person` | `KnowledgeNode` + `PersonMeta` | People in the user's life. |
 | `project` | `KnowledgeNode` + `ProjectGoalMeta` | Projects the user is working on. |
 | `goal` | `KnowledgeNode` + `ProjectGoalMeta` | Goals (may be sub-goals of a project). |
