@@ -118,9 +118,6 @@ func listModelsViaRESTWithLogger(ctx context.Context, log *slog.Logger, apiKey s
 
 func resolveModel(configured string, available []string) string {
 	use := configured
-	if strings.Contains(configured, "2.5-pro") {
-		use = "gemini-2.5-flash"
-	}
 	has := make(map[string]bool)
 	for _, n := range available {
 		has[n] = true
