@@ -62,9 +62,9 @@ func (a *AgentService) RunQuery(ctx context.Context, question, source string) *a
 	return queryResultToAPI(result)
 }
 
-// ProcessEntry processes a single entry (embedding, analysis, etc.).
-func (a *AgentService) ProcessEntry(ctx context.Context, entryUUID, content, timestamp, source string) (*infra.LatencyBreakdown, *agent.ProcessEntryReport, error) {
-	attrs := []any{"fn", "ProcessEntry", "uuid", entryUUID, "source", source, "content_length", len(content)}
+// ProcessLogSequential processes a single log entry through the Project Loom waterfall pipeline.
+func (a *AgentService) ProcessLogSequential(ctx context.Context, logUUID, logContent, timestamp, source string) (*agent.ProcessEntryReport, error) {
+	attrs := []any{"fn", "ProcessLogSequential", "uuid", logUUID, "source", source, "content_length", len(logContent)}
 	if corr := infra.CorrelationFromContext(ctx); corr != nil {
 		if corr.TaskID != "" {
 			attrs = append(attrs, "task_id", corr.TaskID)
@@ -74,11 +74,11 @@ func (a *AgentService) ProcessEntry(ctx context.Context, entryUUID, content, tim
 		}
 	}
 	infra.LoggerFrom(ctx).Info("function call", attrs...)
-	breakdown, report, err := agent.ProcessEntry(ctx, a.app, entryUUID, content, timestamp, source)
+	report, err := agent.ProcessLogSequential(ctx, a.app, logUUID, logContent, timestamp, source)
 	if err != nil {
-		infra.LoggerFrom(ctx).Error("function result", "fn", "ProcessEntry", "uuid", entryUUID, "error", err.Error())
-		return breakdown, nil, err
+		infra.LoggerFrom(ctx).Error("function result", "fn", "ProcessLogSequential", "uuid", logUUID, "error", err.Error())
+		return nil, err
 	}
-	infra.LoggerFrom(ctx).Info("function result", "fn", "ProcessEntry", "uuid", entryUUID)
-	return breakdown, report, nil
+	infra.LoggerFrom(ctx).Info("function result", "fn", "ProcessLogSequential", "uuid", logUUID)
+	return report, nil
 }

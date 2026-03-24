@@ -3,224 +3,30 @@ package agent
 import (
 	"context"
 	"fmt"
-	"strings"
-	"time"
 
 	"cloud.google.com/go/firestore"
 	"github.com/hoyle1974/memory"
 	"github.com/jackstrohm/jot/internal/infra"
 	"github.com/jackstrohm/jot/pkg/utils"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
-// ProcessEntryReport holds structured results from a ProcessEntry run for debug reporting.
+// ProcessEntryReport holds structured results from a ProcessLogSequential run.
 type ProcessEntryReport struct {
-	Content        string
-	Source         string
-	Significance   float64
-	Domain         string
-	TaskCreated    string // commitment intent if an agency task was auto-created; empty if none
-	ContextsLinked int
-	Mood           string
-	Tags           []string
-	EntityNames    []string
-}
-
-// ProcessEntry runs evaluator, refinery, and embedding for an entry.
-// Returns a latency breakdown so callers can log where time was spent.
-//
-// TODO(loom): This is the legacy ingest path. Prefer ProcessLogSequential for new callers.
-// AnalyzeJournalEntry and ResolveAndLinkEntities have been removed — entity extraction
-// is now handled by the Refinery (Stage 2 of ProcessLogSequential).
-func ProcessEntry(ctx context.Context, app *infra.App, entryUUID, content, timestamp, source string) (*infra.LatencyBreakdown, *ProcessEntryReport, error) {
-	start := time.Now()
-	var llm, embeddingDur, firestoreWrite time.Duration
-
-	if app == nil || app.Config() == nil {
-		breakdown := buildBreakdown(start, llm, embeddingDur, firestoreWrite)
-		return breakdown, nil, fmt.Errorf("no app config for process entry")
-	}
-
-	startAttrs := []any{"event", "process_entry_start", "entry_uuid", entryUUID, "content", content, "timestamp", timestamp, "source", source}
-	if corr := infra.CorrelationFromContext(ctx); corr != nil {
-		if corr.TaskID != "" {
-			startAttrs = append(startAttrs, "task_id", corr.TaskID)
-		}
-		if corr.ParentTraceID != "" {
-			startAttrs = append(startAttrs, "parent_trace_id", corr.ParentTraceID)
-		}
-	}
-	infra.LoggerFrom(ctx).Info("process-entry start", startAttrs...)
-
-	// Log when this entry is linked to an image (e.g. Telegram photo).
-	if client, err := app.Firestore(ctx); err == nil {
-		if doc, err := client.Collection(memory.EntriesCollection).Doc(entryUUID).Get(ctx); err == nil {
-			if imageID := infra.GetStringField(doc.Data(), "image_file_id"); imageID != "" {
-				infra.LoggerFrom(ctx).Info("process-entry: entry has linked image", "entry_uuid", entryUUID, "image_file_id", imageID)
-			}
-		}
-	}
-
-	infra.LoggerFrom(ctx).Debug("process-entry: running evaluator extract", "entry_uuid", entryUUID)
-	t0 := time.Now()
-	parsed, err := RunEvaluatorExtract(ctx, app, content)
-	llm += time.Since(t0)
-	if err != nil {
-		infra.LoggerFrom(ctx).Warn("process-entry: evaluator failed", "entry_uuid", entryUUID, "error", err)
-	}
-	// Agency: auto-create a task when the entry expresses a high future commitment.
-	var taskContent string
-	if parsed != nil && parsed.FutureCommitment >= AgencyTaskCommitmentThreshold && len(strings.TrimSpace(parsed.CommitmentIntent)) >= MinCommitmentIntentLen {
-		taskContent = strings.TrimSpace(parsed.CommitmentIntent)
-		t := &memory.Task{
-			Content:         taskContent,
-			Status:          memory.TaskStatusPending,
-			JournalEntryIDs: []string{entryUUID},
-		}
-		if taskUUID, createErr := app.Memory.CreateTask(ctx, t); createErr != nil {
-			infra.LoggerFrom(ctx).Warn("process-entry: agency task create failed", "entry_uuid", entryUUID, "error", createErr)
-		} else {
-			infra.LoggerFrom(ctx).Info("process-entry: agency task created", "entry_uuid", entryUUID, "task_uuid", taskUUID, "content", taskContent)
-		}
-	}
-
-	tRef := time.Now()
-	if err := runRefineryPipeline(ctx, app, entryUUID, content); err != nil {
-		infra.LoggerFrom(ctx).Warn("process-entry: refinery pipeline failed", "entry_uuid", entryUUID, "error", err)
-	}
-	llm += time.Since(tRef)
-
-	t3 := time.Now()
-	vector, err := infra.GenerateEmbedding(ctx, app.Config().GoogleCloudProject, content, infra.EmbedTaskRetrievalDocument)
-	embeddingDur = time.Since(t3)
-	if err != nil {
-		infra.LoggerFrom(ctx).Warn("failed to generate entry embedding", "entry_uuid", entryUUID, "error", err)
-		breakdown := buildBreakdown(start, llm, embeddingDur, firestoreWrite)
-		return breakdown, nil, fmt.Errorf("embedding: %w", err)
-	}
-	infra.LoggerFrom(ctx).Debug("process-entry embedding generated", "entry_uuid", entryUUID, "dimensions", len(vector))
-
-	client, err := app.Firestore(ctx)
-	if err != nil {
-		infra.LoggerFrom(ctx).Warn("failed to get firestore for entry embedding", "error", err)
-		breakdown := buildBreakdown(start, llm, embeddingDur, firestoreWrite)
-		return breakdown, nil, err
-	}
-	updates := []firestore.Update{
-		{Path: "embedding", Value: firestore.Vector32(vector)},
-		{Path: "node_type", Value: "log"},
-		{Path: "significance_weight", Value: 0.3},
-	}
-	infra.LoggerFrom(ctx).Debug("process-entry: writing embedding to Firestore", "entry_uuid", entryUUID)
-	t4 := time.Now()
-	err = updateEntryWithRetry(ctx, client, entryUUID, content, timestamp, source, updates)
-	firestoreWrite += time.Since(t4)
-	if err != nil {
-		infra.LoggerFrom(ctx).Warn("failed to store entry embedding", "entry_uuid", entryUUID, "error", err)
-		breakdown := buildBreakdown(start, llm, embeddingDur, firestoreWrite)
-		return breakdown, nil, err
-	}
-	total := time.Since(start)
-	breakdown := buildBreakdown(start, llm, embeddingDur, firestoreWrite)
-	doneAttrs := []any{"event", "process_entry_done", "entry_uuid", entryUUID, "embedding_dims", len(vector), "duration", total}
-	doneAttrs = append(doneAttrs, breakdown.LogAttrs()...)
-	if corr := infra.CorrelationFromContext(ctx); corr != nil {
-		if corr.TaskID != "" {
-			doneAttrs = append(doneAttrs, "task_id", corr.TaskID)
-		}
-		if corr.ParentTraceID != "" {
-			doneAttrs = append(doneAttrs, "parent_trace_id", corr.ParentTraceID)
-		}
-	}
-	infra.LoggerFrom(ctx).Info("process-entry done", doneAttrs...)
-	report := &ProcessEntryReport{
-		Content: utils.TruncateString(content, 500),
-		Source:  source,
-	}
-	if parsed != nil {
-		report.Significance = parsed.Significance
-		report.Domain = parsed.Domain
-	}
-	if taskContent != "" {
-		report.TaskCreated = taskContent
-	}
-	return breakdown, report, nil
-}
-
-// Deprecated: used only by the legacy ProcessEntry path. Remove after migration to ProcessLogSequential,
-// which guarantees the doc exists at Stage 1 and does not need retry logic.
-//
-// updateEntryWithRetry runs Update on the entry doc, retrying on NotFound with backoff. If the doc is still
-// missing after retries (e.g. entry was never created or create didn't propagate), creates the entry in one
-// Merge Set with base fields and update fields so process-entry does not fail and we avoid a second write.
-func updateEntryWithRetry(ctx context.Context, client *firestore.Client, entryUUID, content, timestamp, source string, updates []firestore.Update) error {
-	const maxAttempts = 6
-	backoff := []time.Duration{
-		200 * time.Millisecond, // give AddEntry write time to propagate before first attempt
-		400 * time.Millisecond, 800 * time.Millisecond, 1600 * time.Millisecond,
-		3200 * time.Millisecond, 3200 * time.Millisecond,
-	}
-	ref := client.Collection(memory.EntriesCollection).Doc(entryUUID)
-	var lastErr error
-	for attempt := 0; attempt < maxAttempts; attempt++ {
-		if attempt > 0 && backoff[attempt] > 0 {
-			infra.LoggerFrom(ctx).Debug("process-entry: retrying entry update after NotFound", "entry_uuid", entryUUID, "attempt", attempt+1, "max_attempts", maxAttempts, "backoff_ms", backoff[attempt].Milliseconds())
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(backoff[attempt]):
-			}
-		} else if attempt == 0 && backoff[0] > 0 {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(backoff[0]):
-			}
-		}
-		_, lastErr = ref.Update(ctx, updates)
-		if lastErr == nil {
-			return nil
-		}
-		if status.Code(lastErr) != codes.NotFound {
-			return lastErr
-		}
-	}
-	// Document still missing after retries: create in one Merge Set (base + embedding/analysis) to avoid race.
-	if status.Code(lastErr) == codes.NotFound {
-		infra.LoggerFrom(ctx).Warn("process-entry: entry doc missing after retries, creating from payload", "entry_uuid", entryUUID, "reason", "entry may not have been written before task ran")
-		merge := map[string]interface{}{
-			"content":             content,
-			"source":              source,
-			"timestamp":           timestamp,
-			"node_type":           "log",
-			"significance_weight": 0.3,
-		}
-		for _, u := range updates {
-			merge[u.Path] = u.Value
-		}
-		_, createErr := ref.Set(ctx, merge, firestore.MergeAll)
-		if createErr != nil {
-			return fmt.Errorf("create entry after NotFound: %w", createErr)
-		}
-		return nil
-	}
-	return lastErr
+	Content     string
+	Source      string
+	TaskCreated string // commitment intent if an agency task was auto-created; empty if none
 }
 
 // ProcessLogSequential runs the Project Loom waterfall pipeline for a new log entry.
 // It executes four stages in strict sequential order before returning.
 //
-//   Stage 1: Log Persistence — write the raw log node to Firestore immediately.
-//   Stage 2: Refinery       — extract KG triples and commit graph objects/relationships.
-//   Stage 3: Task Worker    — scan for commitments and create task nodes linked to graph objects.
-//   Stage 4: Response Worker— 2-hop RAG retrieval + proactive response node (stub; Phase 4).
+//	Stage 1: Log Persistence — write the raw log node to Firestore immediately.
+//	Stage 2: Refinery       — extract KG triples and commit graph objects/relationships.
+//	Stage 3: Task Worker    — scan for commitments and create task nodes linked to graph objects.
+//	Stage 4: Response Worker— 2-hop RAG retrieval + proactive response node.
 //
 // Stage 2 and 3 failures are logged heavily but do NOT abort the pipeline — Stage 4
 // always runs, noting degraded context when prior stages failed.
-//
-// This is additive alongside the legacy ProcessEntry function. Callers can migrate
-// incrementally; ProcessEntry is kept intact for backward compatibility.
 func ProcessLogSequential(ctx context.Context, app *infra.App, logUUID, logContent, timestamp, source string) (*ProcessEntryReport, error) {
 	if app == nil || app.Config() == nil {
 		return nil, fmt.Errorf("ProcessLogSequential: app or config is nil")
@@ -273,7 +79,6 @@ func ProcessLogSequential(ctx context.Context, app *infra.App, logUUID, logConte
 
 	// ── Stage 3: Task Worker ──────────────────────────────────────────────────
 	// Pass the log UUID as the initial object ID set so tasks backlink to this entry.
-	// Phase 4 will pass actual extracted object IDs from the refinery result.
 	infra.LoggerFrom(ctx).Debug("loom stage 3: task worker", "log_uuid", logUUID)
 	taskErr := runTaskWorker(ctx, app, logContent, []string{logUUID})
 	if taskErr != nil {
@@ -313,18 +118,4 @@ func ProcessLogSequential(ctx context.Context, app *infra.App, logUUID, logConte
 		Content: utils.TruncateString(logContent, 500),
 		Source:  source,
 	}, nil
-}
-
-func buildBreakdown(start time.Time, llm, embedding, firestoreWrite time.Duration) *infra.LatencyBreakdown {
-	total := time.Since(start)
-	overhead := total - llm - embedding - firestoreWrite
-	if overhead < 0 {
-		overhead = 0
-	}
-	return &infra.LatencyBreakdown{
-		LLM:            llm,
-		Embedding:      embedding,
-		FirestoreWrite: firestoreWrite,
-		Overhead:       overhead,
-	}
 }

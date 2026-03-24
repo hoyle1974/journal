@@ -27,7 +27,7 @@ Jot is a personal journaling and memory system. It ingests journal entries, extr
 - **Reserved names**: user_profile (identity), system_evolution (optional audit text for get_system_health_audit).
 
 ## Journal
-- **Entries** (node_type: log in `journal` collection): Timestamped, optional source (cli, telegram, web, etc.). Optional image attachment: CLI `--attach <path>`, API multipart/form-data on POST /log (field `image`), Telegram photo messages; images stored in GCS, entry stores `image_url` (requires JOT_IMAGES_BUCKET). When processed, entity mentions are resolved against existing knowledge nodes and the entry is linked at ingest time. Relationship triples are extracted synchronously through the Refinery pipeline and stored as reified `relationship` nodes with backlinks to subject/object entities.
+- **Entries** (node_type: log in `journal` collection): Timestamped, optional source (cli, telegram, web, etc.). Optional image attachment: CLI `--attach <path>`, API multipart/form-data on POST /log (field `image`), Telegram photo messages; images stored in GCS, entry stores `image_url` (requires JOT_IMAGES_BUCKET). Relationship triples are extracted synchronously at ingest by the Refinery (Stage 2 of the Loom pipeline) and stored as reified `relationship` nodes with backlinks to subject/object entities.
 - **Queries**: Saved as `node_type: query` in the `journal` collection with question, answer, source, is_gap. Gap queries surface in knowledge-gap block for FOH.
 - **Pending questions**: Saved as `node_type: pending_question` in the `journal` collection for user clarification.
 
@@ -42,7 +42,7 @@ Jot is a personal journaling and memory system. It ingests journal entries, extr
 
 ## Relationship Triples
 - Relational facts are stored as Subject-Predicate-Object triples and committed as first-class `relationship` nodes.
-- **Ingest-time extraction** runs synchronously in ProcessEntry via the Refinery pipeline (Discovery -> Extraction -> Resolution -> Commit).
+- **Ingest-time extraction** runs synchronously via the Project Loom waterfall pipeline: Stage 1 (Log Persistence) → Stage 2 (Refinery: KG triple extraction) → Stage 3 (Task Worker: commitment detection) → Stage 4 (Response Worker: 2-hop RAG + proactive insight). Stages 2–3 failures do not abort the pipeline.
 - Relationship nodes store normalized `predicate` plus `subject_id`, `object_uuid`, and `source_entry_id`, and maintain entity backlinks via `entity_links` (subject, object, and source log).
 - The `upsert_knowledge` tool is manual-override only: use it only for explicit user commands to remember/store/correct facts. Routine declarative facts are handled by ingest-time Refinery extraction. It supports optional `predicate` and `object_value` parameters for explicit non-refinery/manual updates.
 

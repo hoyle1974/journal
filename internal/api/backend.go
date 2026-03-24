@@ -75,7 +75,7 @@ type MemoryService interface {
 type AgentService interface {
 	AddEntry(ctx context.Context, content, source string, timestamp *string, imageBytes []byte) (string, error)
 	RunQuery(ctx context.Context, question, source string) *QueryResult
-	ProcessEntry(ctx context.Context, entryUUID, content, timestamp, source string) (*infra.LatencyBreakdown, *agent.ProcessEntryReport, error)
+	ProcessLogSequential(ctx context.Context, logUUID, logContent, timestamp, source string) (*agent.ProcessEntryReport, error)
 }
 
 // TelegramService provides Telegram Bot API operations for HTTP handlers.

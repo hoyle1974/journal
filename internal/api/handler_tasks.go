@@ -47,23 +47,8 @@ func handleProcessEntry(s *Server, w http.ResponseWriter, r *http.Request) (any,
 	LogHandlerRequest(ctx, r.Method, path, "uuid", data.UUID, "source", data.Source, "content_length", len(data.Content), "task_id", data.TaskID, "parent_trace_id", data.ParentTraceID)
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
-	breakdown, entryReport, err := s.Agent.ProcessEntry(ctx, data.UUID, data.Content, data.Timestamp, data.Source)
-	if setter, ok := w.(interface{ SetLatencyBreakdown(*infra.LatencyBreakdown) }); ok && breakdown != nil {
-		setter.SetLatencyBreakdown(breakdown)
-	}
-	if err != nil {
+	if _, err := s.Agent.ProcessLogSequential(ctx, data.UUID, data.Content, data.Timestamp, data.Source); err != nil {
 		return nil, err
-	}
-	app, hasApp := s.App.(*infra.App)
-	if s.Config != nil && s.Config.DebugReportEnabled && hasApp && entryReport != nil {
-		asyncCtx := context.WithoutCancel(ctx)
-		report := entryReport
-		app.SubmitAsync(func() {
-			narrative := agent.GenerateProcessEntryReport(asyncCtx, app, report)
-			if narrative != "" {
-				infra.LoggerFrom(asyncCtx).Debug("process-entry report", "narrative", narrative)
-			}
-		})
 	}
 	return map[string]string{"status": "ok"}, nil
 }
