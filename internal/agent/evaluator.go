@@ -14,11 +14,6 @@ import (
 	"github.com/jackstrohm/jot/pkg/utils"
 )
 
-// ProactiveAlertSignificanceThreshold is the minimum significance for an entry to be
-// considered for a proactive alert (e.g. selfmodel thought). Logged so you can see
-// how close low-scoring entries came (e.g. "I feel dizzy" at 0.2 — tune evaluator for health).
-const ProactiveAlertSignificanceThreshold = 0.8
-
 // EvaluatorExtract holds the result of running the evaluator LLM on an entry (no storage).
 type EvaluatorExtract struct {
 	Significance     float64
@@ -87,62 +82,10 @@ func RunEvaluatorExtract(ctx context.Context, app *infra.App, content string) (*
 	return out, nil
 }
 
-// AgencyTaskCommitmentThreshold is the minimum future_commitment score to auto-create a task from an entry.
+// AgencyTaskCommitmentThreshold is the minimum future_commitment score for the Loom task worker
+// to auto-create a task node from a log entry.
 const AgencyTaskCommitmentThreshold = 0.6
 
 // MinCommitmentIntentLen is the minimum length of commitment_intent to auto-create a task (avoid vague commitments).
 const MinCommitmentIntentLen = 10
 
-// RunEvaluator assigns significance to a new entry and returns the extract for agency (task creation).
-func RunEvaluator(ctx context.Context, app *infra.App, content, entryUUID, timestamp string) (*EvaluatorExtract, error) {
-	ctx, span := infra.StartSpan(ctx, "evaluator.run")
-	defer span.End()
-
-	parsed, err := RunEvaluatorExtract(ctx, app, content)
-	if err != nil {
-		infra.LoggerFrom(ctx).Warn("evaluator skipped", "entry_uuid", entryUUID, "reason", "extract failed", "error", err)
-		return nil, err
-	}
-	if parsed == nil {
-		infra.LoggerFrom(ctx).Info("evaluator skipped", "entry_uuid", entryUUID, "reason", "content too short or unparseable")
-		return nil, nil
-	}
-
-	status := "IGNORE_PROACTIVE"
-	if parsed.Significance >= ProactiveAlertSignificanceThreshold {
-		status = "ALERT"
-		// Async: generate one follow-up question/observation and store as proactive signal for FOH.
-		if app != nil && app.Config() != nil {
-			go runProactiveInsight(context.Background(), app, entryUUID, content)
-		}
-	}
-	infra.LoggerFrom(ctx).Info("evaluator", "entry_uuid", entryUUID, "significance", parsed.Significance, "threshold_for_alert", ProactiveAlertSignificanceThreshold, "status", status, "domain", parsed.Domain)
-	_ = timestamp
-	return parsed, nil
-}
-
-const proactiveInsightPrompt = `Based on this highly significant journal entry, generate exactly one insightful follow-up question or brief observation. Output only that single question or observation—no preamble, no numbering.`
-
-func runProactiveInsight(ctx context.Context, app *infra.App, entryUUID, entryContent string) {
-	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
-	defer cancel()
-	cfg := app.Config()
-	if cfg == nil {
-		return
-	}
-	userPrompt := "Entry:\n" + utils.WrapAsUserData(utils.SanitizePrompt(utils.TruncateString(entryContent, 2000)))
-	summary, err := infra.GenerateContentSimple(ctx, app, proactiveInsightPrompt+prompts.DataSafety(), userPrompt, cfg, &infra.GenConfig{MaxOutputTokens: 128})
-	if err != nil || summary == "" {
-		if err != nil {
-			infra.LoggerFrom(ctx).Debug("proactive insight LLM failed", "entry_uuid", entryUUID, "error", err)
-		}
-		return
-	}
-	bgCtx, cancel2 := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel2()
-	if _, err := app.Memory.UpsertSemanticMemory(bgCtx, summary, "thought", "selfmodel", 0.9, nil, []string{entryUUID}); err != nil {
-		infra.LoggerFrom(ctx).Debug("proactive insight upsert failed", "entry_uuid", entryUUID, "error", err)
-		return
-	}
-	infra.LoggerFrom(ctx).Info("proactive insight stored", "entry_uuid", entryUUID, "preview", utils.TruncateString(summary, 60))
-}

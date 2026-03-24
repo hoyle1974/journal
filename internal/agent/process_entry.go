@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -28,8 +27,12 @@ type ProcessEntryReport struct {
 	EntityNames    []string
 }
 
-// ProcessEntry runs evaluator, journal analysis, and embedding for an entry.
-// Returns a latency breakdown so callers can log where time was spent (llm, embedding, firestore_write, overhead).
+// ProcessEntry runs evaluator, refinery, and embedding for an entry.
+// Returns a latency breakdown so callers can log where time was spent.
+//
+// TODO(loom): This is the legacy ingest path. Prefer ProcessLogSequential for new callers.
+// AnalyzeJournalEntry and ResolveAndLinkEntities have been removed — entity extraction
+// is now handled by the Refinery (Stage 2 of ProcessLogSequential).
 func ProcessEntry(ctx context.Context, app *infra.App, entryUUID, content, timestamp, source string) (*infra.LatencyBreakdown, *ProcessEntryReport, error) {
 	start := time.Now()
 	var llm, embeddingDur, firestoreWrite time.Duration
@@ -50,7 +53,7 @@ func ProcessEntry(ctx context.Context, app *infra.App, entryUUID, content, times
 	}
 	infra.LoggerFrom(ctx).Info("process-entry start", startAttrs...)
 
-	// Log when this entry is linked to an image (e.g. Telegram photo); helps debug caption vs placeholder "Photo".
+	// Log when this entry is linked to an image (e.g. Telegram photo).
 	if client, err := app.Firestore(ctx); err == nil {
 		if doc, err := client.Collection(memory.EntriesCollection).Doc(entryUUID).Get(ctx); err == nil {
 			if imageID := infra.GetStringField(doc.Data(), "image_file_id"); imageID != "" {
@@ -59,14 +62,14 @@ func ProcessEntry(ctx context.Context, app *infra.App, entryUUID, content, times
 		}
 	}
 
-	infra.LoggerFrom(ctx).Debug("process-entry: running evaluator", "entry_uuid", entryUUID, "reason", "extract significance and commitment intent")
+	infra.LoggerFrom(ctx).Debug("process-entry: running evaluator extract", "entry_uuid", entryUUID)
 	t0 := time.Now()
-	parsed, err := RunEvaluator(ctx, app, content, entryUUID, timestamp)
+	parsed, err := RunEvaluatorExtract(ctx, app, content)
 	llm += time.Since(t0)
 	if err != nil {
 		infra.LoggerFrom(ctx).Warn("process-entry: evaluator failed", "entry_uuid", entryUUID, "error", err)
 	}
-	// Agency threshold: auto-create a task when the entry expresses a high future commitment.
+	// Agency: auto-create a task when the entry expresses a high future commitment.
 	var taskContent string
 	if parsed != nil && parsed.FutureCommitment >= AgencyTaskCommitmentThreshold && len(strings.TrimSpace(parsed.CommitmentIntent)) >= MinCommitmentIntentLen {
 		taskContent = strings.TrimSpace(parsed.CommitmentIntent)
@@ -82,24 +85,6 @@ func ProcessEntry(ctx context.Context, app *infra.App, entryUUID, content, times
 		}
 	}
 
-	t2 := time.Now()
-	analysis, err := app.Memory.Agent().AnalyzeJournalEntry(ctx, content, entryUUID, timestamp)
-	llm += time.Since(t2)
-	if err != nil {
-		infra.LoggerFrom(ctx).Warn("journal analysis failed", "entry_uuid", entryUUID, "error", err)
-	}
-	var analysisJSON string
-	if analysis != nil {
-		if b, err := json.Marshal(analysis); err == nil {
-			analysisJSON = string(b)
-		}
-	}
-	infra.LoggerFrom(ctx).Debug("process-entry: journal analysis done", "entry_uuid", entryUUID, "has_analysis", analysis != nil, "reason", "mood/tags/entities for search")
-	if analysis != nil && len(analysis.Entities) > 0 {
-		// Synchronous entity resolution with internal timeout. Resolves entity mentions to
-		// existing knowledge nodes and links this entry to them.
-		ResolveAndLinkEntities(ctx, app, entryUUID, analysis.Entities)
-	}
 	tRef := time.Now()
 	if err := runRefineryPipeline(ctx, app, entryUUID, content); err != nil {
 		infra.LoggerFrom(ctx).Warn("process-entry: refinery pipeline failed", "entry_uuid", entryUUID, "error", err)
@@ -114,7 +99,7 @@ func ProcessEntry(ctx context.Context, app *infra.App, entryUUID, content, times
 		breakdown := buildBreakdown(start, llm, embeddingDur, firestoreWrite)
 		return breakdown, nil, fmt.Errorf("embedding: %w", err)
 	}
-	infra.LoggerFrom(ctx).Debug("process-entry embedding generated", "entry_uuid", entryUUID, "dimensions", len(vector), "reason", "for semantic search")
+	infra.LoggerFrom(ctx).Debug("process-entry embedding generated", "entry_uuid", entryUUID, "dimensions", len(vector))
 
 	client, err := app.Firestore(ctx)
 	if err != nil {
@@ -127,10 +112,7 @@ func ProcessEntry(ctx context.Context, app *infra.App, entryUUID, content, times
 		{Path: "node_type", Value: "log"},
 		{Path: "significance_weight", Value: 0.3},
 	}
-	if analysisJSON != "" {
-		updates = append(updates, firestore.Update{Path: "journal_analysis", Value: analysisJSON})
-	}
-	infra.LoggerFrom(ctx).Debug("process-entry: writing embedding and analysis to Firestore", "entry_uuid", entryUUID, "reason", "persist for RAG")
+	infra.LoggerFrom(ctx).Debug("process-entry: writing embedding to Firestore", "entry_uuid", entryUUID)
 	t4 := time.Now()
 	err = updateEntryWithRetry(ctx, client, entryUUID, content, timestamp, source, updates)
 	firestoreWrite += time.Since(t4)
@@ -141,7 +123,7 @@ func ProcessEntry(ctx context.Context, app *infra.App, entryUUID, content, times
 	}
 	total := time.Since(start)
 	breakdown := buildBreakdown(start, llm, embeddingDur, firestoreWrite)
-	doneAttrs := []any{"event", "process_entry_done", "entry_uuid", entryUUID, "embedding_dims", len(vector), "has_analysis", analysisJSON != "", "duration", total}
+	doneAttrs := []any{"event", "process_entry_done", "entry_uuid", entryUUID, "embedding_dims", len(vector), "duration", total}
 	doneAttrs = append(doneAttrs, breakdown.LogAttrs()...)
 	if corr := infra.CorrelationFromContext(ctx); corr != nil {
 		if corr.TaskID != "" {
@@ -152,7 +134,6 @@ func ProcessEntry(ctx context.Context, app *infra.App, entryUUID, content, times
 		}
 	}
 	infra.LoggerFrom(ctx).Info("process-entry done", doneAttrs...)
-	infra.LoggerFrom(ctx).Debug("process-entry: done", "entry_uuid", entryUUID, "reason", "evaluator, analysis, and embedding all completed")
 	report := &ProcessEntryReport{
 		Content: utils.TruncateString(content, 500),
 		Source:  source,
@@ -164,18 +145,12 @@ func ProcessEntry(ctx context.Context, app *infra.App, entryUUID, content, times
 	if taskContent != "" {
 		report.TaskCreated = taskContent
 	}
-	report.ContextsLinked = 0
-	if analysis != nil {
-		report.Mood = analysis.Mood
-		report.Tags = analysis.Tags
-		report.EntityNames = make([]string, 0, len(analysis.Entities))
-		for _, e := range analysis.Entities {
-			report.EntityNames = append(report.EntityNames, e.Name)
-		}
-	}
 	return breakdown, report, nil
 }
 
+// Deprecated: used only by the legacy ProcessEntry path. Remove after migration to ProcessLogSequential,
+// which guarantees the doc exists at Stage 1 and does not need retry logic.
+//
 // updateEntryWithRetry runs Update on the entry doc, retrying on NotFound with backoff. If the doc is still
 // missing after retries (e.g. entry was never created or create didn't propagate), creates the entry in one
 // Merge Set with base fields and update fields so process-entry does not fail and we avoid a second write.
