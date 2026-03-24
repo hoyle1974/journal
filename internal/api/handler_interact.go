@@ -104,3 +104,30 @@ func handleQuery(s *Server, w http.ResponseWriter, r *http.Request) (any, error)
 		"answer_preview", utils.TruncateString(result.Answer, 120))
 	return result, nil
 }
+
+// handleIngest runs the unified synchronous pipeline: log + process + query in one call.
+func handleIngest(s *Server, w http.ResponseWriter, r *http.Request) (any, error) {
+	ctx := r.Context()
+	path := pathForLog(r.URL.Path)
+	var data struct {
+		Content string `json:"content" validate:"required"`
+		Source  string `json:"source"`
+	}
+	if err := DecodeAndValidate(r, &data, s.Validator); err != nil {
+		return nil, handlerError(http.StatusBadRequest, err.Error())
+	}
+	content := strings.TrimSpace(data.Content)
+	if content == "" {
+		return nil, handlerError(http.StatusBadRequest, "content cannot be only whitespace")
+	}
+	source := data.Source
+	if source == "" {
+		source = "api"
+	}
+	LogHandlerRequest(ctx, r.Method, path, "content_preview", utils.TruncateString(content, 80), "source", source)
+	result := s.Agent.ProcessAndRespond(ctx, content, source)
+	infra.LoggerFrom(ctx).Info("ingest completed",
+		"error", result.Error, "iterations", result.Iterations,
+		"answer_preview", utils.TruncateString(result.Answer, 120))
+	return result, nil
+}

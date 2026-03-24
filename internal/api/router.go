@@ -37,6 +37,7 @@ func NewRouter(s *Server) *chi.Mux {
 	r.Group(func(r chi.Router) {
 		r.Use(authMiddleware(s))
 		r.Post("/log", wrapAPI(handleLog))
+		r.Post("/ingest", wrapAPI(handleIngest))
 		r.Post("/query", wrapAPI(handleQuery))
 		r.Get("/entries", wrapAPI(handleEntries))
 		r.Get("/entries/{uuid}", wrapAPI(handleEntries))
