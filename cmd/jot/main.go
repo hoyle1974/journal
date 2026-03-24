@@ -18,8 +18,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackstrohm/jot/internal/timeout"
 	"github.com/hoyle1974/memory"
+	"github.com/jackstrohm/jot/internal/timeout"
 	"github.com/joho/godotenv"
 )
 
@@ -180,6 +180,41 @@ func jsonStr(m map[string]interface{}, key string) string {
 		}
 	}
 	return ""
+}
+
+// jsonStringSlice returns string elements from a JSON array field (e.g. reasoning_trace).
+func jsonStringSlice(m map[string]interface{}, key string) []string {
+	v, ok := m[key]
+	if !ok || v == nil {
+		return nil
+	}
+	arr, ok := v.([]interface{})
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(arr))
+	for _, e := range arr {
+		if s, ok := e.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// printReasoningTraceIfAny prints CoT reasoning blocks from /query JSON before the answer.
+func printReasoningTraceIfAny(result map[string]interface{}) {
+	rt := jsonStringSlice(result, "reasoning_trace")
+	if len(rt) == 0 {
+		return
+	}
+	fmt.Println("Reasoning:")
+	for i, block := range rt {
+		if i > 0 {
+			fmt.Println()
+		}
+		fmt.Printf("[%d]\n%s\n", i+1, strings.TrimSpace(block))
+	}
+	fmt.Println()
 }
 
 // parseTraceFlag removes --trace and -t from args and returns the filtered args and whether trace was set.
@@ -363,6 +398,7 @@ func cmdQuery(question string) {
 		os.Exit(1)
 	}
 	if errFlag, ok := result["error"].(bool); ok && errFlag {
+		printReasoningTraceIfAny(result)
 		if answer := jsonStr(result, "answer"); answer != "" {
 			fmt.Printf("%s\n", answer)
 		} else {
@@ -371,6 +407,7 @@ func cmdQuery(question string) {
 		os.Exit(1)
 	}
 
+	printReasoningTraceIfAny(result)
 	if answer := jsonStr(result, "answer"); answer != "" {
 		fmt.Println(answer)
 	} else {
@@ -519,6 +556,9 @@ jot query <question>
 jot q <question>
 
   Ask a question about your journal using AI. Requires internet.
+
+  When the model emits chain-of-thought, output shows a "Reasoning:" section (per turn),
+  then the answer.
 
   Examples:
     jot query What did I do last week?
