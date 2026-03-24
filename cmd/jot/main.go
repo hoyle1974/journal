@@ -371,6 +371,30 @@ func cmdLog(content, attachPath string) {
 	fmt.Println("Logged.")
 }
 
+func cmdIngest(input string) {
+	result, headers, err := api.Do(context.Background(), "POST", "/ingest", map[string]string{
+		"content": input,
+		"source":  fmt.Sprintf("cli:%s", MachineName),
+	}, time.Duration(timeout.QuerySeconds)*time.Second)
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		os.Exit(1)
+	}
+	if result == nil {
+		fmt.Println("ok")
+		return
+	}
+	if traceFlag && headers != nil {
+		printTraceInfo(headers)
+	}
+	printReasoningTraceIfAny(result)
+	if answer := jsonStr(result, "answer"); answer != "" {
+		fmt.Println(answer)
+	} else {
+		fmt.Println("ok")
+	}
+}
+
 func cmdQuery(question string) {
 	result, headers, err := api.Do(context.Background(), "POST", "/query", map[string]string{
 		"question": question,
@@ -541,30 +565,6 @@ func cmdEdit(limit int) {
 
 func cmdHelp(topic string) {
 	topics := map[string]string{
-		"log": `
-jot log <message>
-jot l <message>
-jot log --attach <image path> <message>
-jot l --attach ./photo.jpg Lunch with the team
-
-  Log a journal entry. Use --attach to include an image (stored in GCS; requires JOT_IMAGES_BUCKET). Requires internet connection.
-
-  Example: jot log Had a great meeting with the team today
-`,
-		"query": `
-jot query <question>
-jot q <question>
-
-  Ask a question about your journal using AI. Requires internet.
-
-  When the model emits chain-of-thought, output shows a "Reasoning:" section (per turn),
-  then the answer.
-
-  Examples:
-    jot query What did I do last week?
-    jot q What meetings did I have in January?
-    jot query How has my mood been lately?
-`,
 		"edit": `
 jot edit [limit]
 
@@ -587,24 +587,18 @@ jot edit [limit]
 		}
 	} else {
 		fmt.Print(`
-Jot - Personal Assistant CLI
+jot <anything>
 
-Usage: jot <anything>
-
-Just talk to your assistant - it figures out what to do:
-  jot Had coffee with Sarah        → Logs entry + extracts knowledge
-  jot What did I do last week?     → Searches and answers
-  jot Who knows about GCP?         → Semantic search of knowledge
-  jot I want to learn Japanese     → Creates task + decomposes into subtasks
-  jot Remember Alice works at Google → Saves to long-term memory
+Just type to your assistant:
+  jot Had coffee with Sarah
+  jot What did I do last week?
+  jot I want to learn Japanese
 
 Commands (optional):
-  log, l <message>     Fast logging (bypasses AI)
+  log, l <message>     Fast logging (bypasses AI, with optional --attach)
   edit [limit]         Interactive entry editor
   entries [limit]      List recent entries
   help [topic]         Show help
-
-Run 'jot help <topic>' for detailed help.
 `)
 	}
 }
@@ -624,11 +618,6 @@ func main() {
 
 	cmd := strings.ToLower(args[0])
 
-	// Before starting a journal/query session, show pending clarification questions when present.
-	if cmd == "log" || cmd == "l" || cmd == "query" || cmd == "q" {
-		maybePromptPendingQuestions()
-	}
-
 	switch cmd {
 	case "log", "l":
 		args, attachPath := parseAttachFlag(args)
@@ -641,14 +630,6 @@ func main() {
 			fmt.Printf("Warning: Entry is very long (%d chars)\n", len(content))
 		}
 		cmdLog(content, attachPath)
-
-	case "query", "q":
-		if len(args) < 2 {
-			fmt.Println("Error: input is required")
-			os.Exit(1)
-		}
-		input := strings.Join(args[1:], " ")
-		cmdQuery(input)
 
 	case "edit":
 		limit := 10
@@ -684,7 +665,7 @@ func main() {
 	default:
 		maybePromptPendingQuestions()
 		input := strings.Join(args, " ")
-		cmdQuery(input)
+		cmdIngest(input)
 	}
 }
 
