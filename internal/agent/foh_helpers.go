@@ -54,6 +54,15 @@ func AddEntryAndEnqueue(ctx context.Context, app *infra.App, content, source str
 	return entryUUID, nil
 }
 
+// AddEntryOnly saves the journal entry and returns its UUID without enqueueing async processing.
+// Use for the unified synchronous pipeline where processing happens inline after this call.
+func AddEntryOnly(ctx context.Context, app *infra.App, content, source string, timestamp *string, imageURL string) (string, error) {
+	if app == nil {
+		return "", fmt.Errorf("app required for AddEntryOnly")
+	}
+	return app.Memory.AddEntry(ctx, content, source, timestamp, imageURL)
+}
+
 // EnqueueSaveQuery enqueues a task to save the query and answer (and whether it was a knowledge gap).
 // app is passed explicitly by the caller (e.g. FOH loop).
 func EnqueueSaveQuery(ctx context.Context, app *infra.App, question, answer, source string, isGap bool) error {

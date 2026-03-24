@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"time"
 
 	"github.com/jackstrohm/jot/internal/agent"
 	"github.com/jackstrohm/jot/internal/api"
@@ -60,6 +61,45 @@ func (a *AgentService) RunQuery(ctx context.Context, question, source string) *a
 	infra.LoggerFrom(ctx).Info("function call", "fn", "RunQuery", "source", source, "question_preview", utils.TruncateString(question, 80))
 	result := RunQuery(ctx, a.app, question, source)
 	infra.LoggerFrom(ctx).Info("function result", "fn", "RunQuery", "error", result.Error, "iterations", result.Iterations, "tool_call_count", len(result.ToolCalls), "answer_preview", utils.TruncateString(result.Answer, 100))
+	return queryResultToAPI(result)
+}
+
+// ProcessAndRespond runs the unified synchronous pipeline for a user input:
+// save entry → refinery + task worker → 2-hop Loom RAG → FOH with native thinking.
+func (a *AgentService) ProcessAndRespond(ctx context.Context, input, source string) *api.QueryResult {
+	infra.LoggerFrom(ctx).Info("function call", "fn", "ProcessAndRespond", "source", source, "input_len", len(input))
+
+	// 1. Save entry (no enqueue — pipeline runs synchronously below).
+	ts := time.Now().Format(time.RFC3339)
+	entryUUID, err := agent.AddEntryOnly(ctx, a.app, input, source, &ts, "")
+	if err != nil {
+		infra.LoggerFrom(ctx).Error("ProcessAndRespond: save entry failed", "error", err)
+		return queryResultToAPI(agent.ErrQueryResult("Error saving entry: "+err.Error(), 0, nil, nil))
+	}
+
+	// 2. Refinery + task worker (stages 2-3 only — entry already persisted by AddEntryOnly).
+	nodeIDs, err := agent.ProcessEntrySyncPipeline(ctx, a.app, entryUUID, input, source)
+	if err != nil {
+		infra.LoggerFrom(ctx).Warn("ProcessAndRespond: pipeline failed (continuing to FOH)", "error", err)
+	}
+
+	// 3. Build 2-hop Loom RAG context from just-extracted nodes.
+	ragCtx, err := agent.BuildLoomRAGContext(ctx, a.app, entryUUID, nodeIDs)
+	if err != nil {
+		infra.LoggerFrom(ctx).Warn("ProcessAndRespond: loom RAG failed (continuing without context)", "error", err)
+	}
+	ragContext := ""
+	if ragCtx != nil {
+		ragContext = ragCtx.FormatForPrompt()
+	}
+
+	// 4. FOH with native thinking + RAG context.
+	// WithEntryAlreadyAdded signals to FOH that the entry was already persisted in step 1.
+	fohCtx := agent.WithEntryAlreadyAdded(ctx, entryUUID)
+	result := agent.RunQueryFull(fohCtx, a.app, input, source, false, ragContext)
+	infra.LoggerFrom(ctx).Info("function result", "fn", "ProcessAndRespond",
+		"error", result.Error, "iterations", result.Iterations,
+		"has_thinking", len(result.ReasoningTrace) > 0)
 	return queryResultToAPI(result)
 }
 

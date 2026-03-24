@@ -77,6 +77,7 @@ type AgentService interface {
 	AddEntry(ctx context.Context, content, source string, timestamp *string, imageBytes []byte) (string, error)
 	RunQuery(ctx context.Context, question, source string) *QueryResult
 	ProcessLogSequential(ctx context.Context, logUUID, logContent, timestamp, source string) (*agent.ProcessEntryReport, error)
+	ProcessAndRespond(ctx context.Context, input, source string) *QueryResult
 }
 
 // TelegramService provides Telegram Bot API operations for HTTP handlers.

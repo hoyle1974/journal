@@ -75,9 +75,9 @@ type QueryResult struct {
 	ReasoningTrace []string `json:"reasoning_trace,omitempty"`
 }
 
-// errQueryResult returns a failed QueryResult.
+// ErrQueryResult returns a failed QueryResult.
 // span.RecordError must still be called at the site when a span is active.
-func errQueryResult(answer string, iteration int, debugLogs []string, reasoningTrace []string) *QueryResult {
+func ErrQueryResult(answer string, iteration int, debugLogs []string, reasoningTrace []string) *QueryResult {
 	return &QueryResult{Answer: answer, Iterations: iteration, Error: true, DebugLogs: debugLogs, ReasoningTrace: reasoningTrace}
 }
 
@@ -117,7 +117,7 @@ func RunQueryFull(ctx context.Context, app FOHEnv, question, source string, debu
 	})
 
 	if app == nil {
-		return errQueryResult("Error: no app in context (GEMINI_API_KEY not configured?)", 0, nil, nil)
+		return ErrQueryResult("Error: no app in context (GEMINI_API_KEY not configured?)", 0, nil, nil)
 	}
 
 	var entryUUID string
@@ -132,7 +132,7 @@ func RunQueryFull(ctx context.Context, app FOHEnv, question, source string, debu
 		if err != nil {
 			infra.LoggerFrom(ctx).Error("failed to log user input", "error", err)
 			span.RecordError(err)
-			return errQueryResult(fmt.Sprintf("Error saving input: %v", err), 0, debugLogs, nil)
+			return ErrQueryResult(fmt.Sprintf("Error saving input: %v", err), 0, debugLogs, nil)
 		}
 		ctx = withCurrentEntryUUID(ctx, entryUUID)
 		infra.LoggerFrom(ctx).Debug("FOH: user input logged as entry", "query_run_id", queryRunID, "phase", "start", "event", "query_start", "question", question, "entry_uuid", entryUUID, "source", source)
@@ -144,7 +144,7 @@ func RunQueryFull(ctx context.Context, app FOHEnv, question, source string, debu
 	systemPrompt, err := BuildSystemPrompt(ctx, app, ragContext)
 	if err != nil {
 		span.RecordError(err)
-		return errQueryResult(fmt.Sprintf("Error building system prompt: %v", err), 0, debugLogs, nil)
+		return ErrQueryResult(fmt.Sprintf("Error building system prompt: %v", err), 0, debugLogs, nil)
 	}
 	infra.LoggerFrom(ctx).Debug("FOH: system prompt built", "query_run_id", queryRunID, "phase", "start", "prompt_len", len(systemPrompt), "reason", "inject date, recent history, tasks, project")
 	logDebug("[prompt] %s", systemPrompt)
@@ -159,7 +159,7 @@ func RunQueryFull(ctx context.Context, app FOHEnv, question, source string, debu
 	session, err := infra.NewChatSession(ctx, app.App(), systemPrompt, toolDefs, true)
 	if err != nil {
 		span.RecordError(err)
-		return errQueryResult(fmt.Sprintf("Error creating chat session: %v", infra.WrapLLMError(err)), 0, debugLogs, nil)
+		return ErrQueryResult(fmt.Sprintf("Error creating chat session: %v", infra.WrapLLMError(err)), 0, debugLogs, nil)
 	}
 	logDebug("[init] Chat session created with %d tools (compact=%v)", len(toolDefs), useCompactTools)
 	infra.LoggerFrom(ctx).Debug("FOH: sending question to LLM", "query_run_id", queryRunID, "phase", "first_turn", "tool_count", len(toolDefs), "compact_tools", useCompactTools, "reason", "first turn")
@@ -177,7 +177,7 @@ func RunQueryFull(ctx context.Context, app FOHEnv, question, source string, debu
 	resp, err := session.SendMessage(ctx, &genai.Part{Text: question})
 	if err != nil {
 		span.RecordError(err)
-		return errQueryResult(fmt.Sprintf("Error calling Gemini API: %v", infra.WrapLLMError(err)), 1, debugLogs, nil)
+		return ErrQueryResult(fmt.Sprintf("Error calling Gemini API: %v", infra.WrapLLMError(err)), 1, debugLogs, nil)
 	}
 	iteration++
 
