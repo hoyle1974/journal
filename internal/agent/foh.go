@@ -150,7 +150,7 @@ func RunQueryWithDebug(ctx context.Context, app FOHEnv, question, source string,
 	} else {
 		toolDefs = tools.GetDefinitions()
 	}
-	session, err := infra.NewChatSession(ctx, app.App(), systemPrompt, toolDefs)
+	session, err := infra.NewChatSession(ctx, app.App(), systemPrompt, toolDefs, false)
 	if err != nil {
 		span.RecordError(err)
 		return errQueryResult(fmt.Sprintf("Error creating chat session: %v", infra.WrapLLMError(err)), 0, debugLogs, nil)

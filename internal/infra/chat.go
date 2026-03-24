@@ -52,6 +52,33 @@ func EmptyResponseReason(resp *genai.GenerateContentResponse) string {
 	return fmt.Sprintf("Finish reason: %s.", c.FinishReason)
 }
 
+// ExtractThinkingAndAnswer splits a response into native thinking tokens and answer text.
+// Parts with Thought==true are reasoning; all other text parts are the answer.
+// Returns empty strings when the response is nil or contains only function calls.
+func ExtractThinkingAndAnswer(resp *genai.GenerateContentResponse) (thinking, answer string) {
+	if resp == nil {
+		return "", ""
+	}
+	var thinkParts, answerParts []string
+	for _, cand := range resp.Candidates {
+		if cand == nil || cand.Content == nil {
+			continue
+		}
+		for _, p := range cand.Content.Parts {
+			if p == nil {
+				continue
+			}
+			if p.Thought && p.Text != "" {
+				thinkParts = append(thinkParts, p.Text)
+			} else if !p.Thought && p.Text != "" {
+				answerParts = append(answerParts, p.Text)
+			}
+		}
+	}
+	return strings.TrimSpace(strings.Join(thinkParts, "\n")),
+		strings.TrimSpace(strings.Join(answerParts, "\n"))
+}
+
 // ChatSession manages a multi-turn conversation with Gemini.
 type ChatSession struct {
 	app                   *App
@@ -63,7 +90,8 @@ type ChatSession struct {
 }
 
 // NewChatSession creates a new chat session with tools enabled. app is passed explicitly by the caller.
-func NewChatSession(ctx context.Context, app *App, systemPrompt string, tools []*genai.FunctionDeclaration) (*ChatSession, error) {
+// Set withThinking=true to enable native Gemini 2.5 thinking (ThinkingConfig{IncludeThoughts: true}).
+func NewChatSession(ctx context.Context, app *App, systemPrompt string, tools []*genai.FunctionDeclaration, withThinking bool) (*ChatSession, error) {
 	ctx, span := StartSpan(ctx, "gemini.new_chat_session")
 	defer span.End()
 
@@ -86,6 +114,9 @@ func NewChatSession(ctx context.Context, app *App, systemPrompt string, tools []
 	}
 	if len(tools) > 0 {
 		config.Tools = []*genai.Tool{{FunctionDeclarations: tools}}
+	}
+	if withThinking {
+		config.ThinkingConfig = &genai.ThinkingConfig{IncludeThoughts: true}
 	}
 
 	chat, err := client.Chats.Create(ctx, modelName, config, nil)
