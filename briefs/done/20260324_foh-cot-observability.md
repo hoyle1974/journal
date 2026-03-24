@@ -42,7 +42,7 @@ Make the Front-of-House (FOH) agent’s reasoning **explicit and inspectable**: 
 | 4 | History / trim | Revisit `TrimHistory` / `MaxMessagePairs`: optionally keep full tool+result history while summarizing or dropping oldest thought blocks. |
 | 5 | Graph RAG + gaps | `ExpandSearchResultsToSubgraph`, `knowledgeGapDetected`, `extractMissingInfoAndAnswer` — optional agent-stated justification for expansion; qualitative gap lines vs binary string match (incremental). |
 
-**Shipped in this branch:** Phases 1–3 (protocol text in `system_prompt.txt`; `extractThoughtsAndStrip` in `foh_thought.go`; `ReasoningTrace` on `agent.QueryResult` and `api.QueryResult`; debug logging of thoughts when `RunQueryWithDebug` has debug=true; forced-conclusion path strips thoughts). **Deferred:** Phase 4 (history compaction for tokens), Phase 5 (agent-driven graph expansion), per-iteration child spans (optional follow-up).
+**Shipped:** Phases 1–3 as above. **Phase 4:** Prompt guidance for concise `<thought>` blocks; `reasoning_trace` entries capped via `truncateThoughtForTrace`; root span attributes `foh_iteration` / `foh_last_thought_len`; documented that `TrimHistory` is SDK no-op (no server-side history stripping). **Phase 5:** Removed automatic `ExpandSearchResultsToSubgraph` injection after `semantic_search`; added `graph_expand` to compact core tools; `thoughtSuggestsKnowledgeGap` merges CoT “Identified gaps:” with `knowledgeGapDetected`; `semantic_search` tool description points at `graph_expand`. Per-iteration child spans still optional (not added — use span attributes instead).
 
 **K/V vs XML coexistence (critical):** Jot requires tool calls as **key/value structured output** (`ParseStructuredToolCall`), not JSON from the LLM. CoT tags are **orthogonal**: the model may emit `<thought>...</thought>` (and plain-text final answer) while tool calls remain the existing K/V protocol. If the model omits tags, behavior degrades gracefully to today’s flow.
 
@@ -135,5 +135,5 @@ _The LLM appends a short bullet summary here at the end of each session. Most re
 Context Management: When appending to the Session Log in the active brief, you must proactively "compact" older entries. If the log exceeds 5 bullet points, summarize the older points into a single "Prior Context" bullet. Keep the brief dense and token-efficient.
 
 <!-- 20260324 -->
-- Implemented FOH CoT Phases 1–3: `system_prompt.txt` REASONING PROTOCOL; `extractThoughtsAndStrip` + `ReasoningTrace` on agent + API `QueryResult`; `queryResultToAPI` mapping; forced-conclusion path; tests in `foh_thought_test.go`; updated `app_capabilities.txt` and `blueprint.md`. Phase 4–5 and per-iteration spans deferred.
-- Prior Context: Created brief; added worktree `../jot-foh-cot-observability` on branch `feature/foh-cot-observability` (from main `fecc61a`).
+- Completed Phases 4–5: concise-thought prompt + trace truncation + span iteration attrs; agent-driven graph (`graph_expand` in core tools, auto subgraph inject removed); `thoughtSuggestsKnowledgeGap`; docs (`app_capabilities`, `blueprint`, brief).
+- Prior Context: Phases 1–3 (CoT protocol, `ReasoningTrace`, tests); brief/worktree creation on `feature/foh-cot-observability`.

@@ -16,7 +16,7 @@ Jot is a personal journaling and memory system. It ingests journal entries, extr
 - **Telegram slash commands**: `/help` — lists available commands. `/skip` — skip the current pending question. Unknown slash commands fall through to FOH.
 
 ## Agents
-- **FOH (Front of House)**: Query loop. Uses system prompt, identity, knowledge-gap block, open todos; can call tools (journal, knowledge, task, web, utility). The system prompt may ask the model to emit optional `<thought>...</thought>` blocks (plan, gaps, next step) before tool calls or final answers; the backend strips these for parsing and returns them as `reasoning_trace` on the query result when present. Tool calls remain key/value or native function calls (not JSON from the model). Before answering, the model performs an in-prompt audit (reflection, gap detection, synthesis). If the model reports missing info via MISSING_INFO:, the query is saved as a knowledge gap (is_gap).
+- **FOH (Front of House)**: Query loop. Uses system prompt, identity, knowledge-gap block, open todos; can call tools (journal, knowledge, task, web, utility). The system prompt may ask the model to emit optional `<thought>...</thought>` blocks (plan, gaps, next step) before tool calls or final answers; the backend strips these for parsing and returns them as `reasoning_trace` on the query result when present (per-iteration text capped for trace size). Non-trivial "Identified gaps:" lines in a thought also contribute to the knowledge-gap flag. Tool calls remain key/value or native function calls (not JSON from the model). Before answering, the model performs an in-prompt audit (reflection, gap detection, synthesis). If the model reports missing info via MISSING_INFO:, the query is saved as a knowledge gap (is_gap). Graph neighbourhood context is obtained via the `graph_expand` tool (compact tools include it); FOH does not auto-inject subgraphs after `semantic_search`.
 - **Project Engine**: A "project" is a task with subtasks (parent_id hierarchy). Use decompose_task to break a complex task into 3–7 subtasks. FOH automatically injects the most recently active project + pending subtasks into the system prompt (ACTIVE PROJECT block).
 
 ## Storage Architecture
@@ -38,7 +38,7 @@ Jot is a personal journaling and memory system. It ingests journal entries, extr
 - **query**: get_recent_queries, search_queries, get_queries_by_date.
 - **web**: fetch_url, define_word, wikipedia, web_search, bookmark, countdown, github_read, get_weather (Open-Meteo; default unit: fahrenheit).
 - **utility**: calculate, date_calc, text_stats, convert_units, random, timezone_convert, encode_decode.
-- **bootstrap**: discovery_search (intent → tool schemas). When using compact tools, invoke discovered tools via key/value lines only: TOOL: name, then ARGS: with param_name | value per line; no JSON, no code fences.
+- **bootstrap**: discovery_search (intent → tool schemas). When using compact tools, core tools include semantic_search, graph_expand, upsert_knowledge, discovery_search, get_recent_entries, retrieve_image; invoke other tools via discovery_search then key/value lines only: TOOL: name, then ARGS: with param_name | value per line; no JSON, no code fences.
 
 ## Relationship Triples
 - Relational facts are stored as Subject-Predicate-Object triples and committed as first-class `relationship` nodes.

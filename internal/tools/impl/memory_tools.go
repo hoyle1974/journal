@@ -97,7 +97,7 @@ func registerKnowledgeTools() {
 
 	tools.Register(&tools.Tool{
 		Name:        "semantic_search",
-		Description: "Search semantic memory (high-significance facts) using vector similarity. Routes to knowledge nodes with significance_weight >= 0.7 — people, facts, preferences, projects, goals. Use this FIRST for factual questions (who is X, what do I prefer, what's the status of Y). For searching past events or log entries use search_entries instead. When answering, include the source date when results show one (e.g. 'Buy ice [Source: 2026-02-15]').",
+		Description: "Search semantic memory (high-significance facts) using vector similarity. Routes to knowledge nodes with significance_weight >= 0.7 — people, facts, preferences, projects, goals. Use this FIRST for factual questions (who is X, what do I prefer, what's the status of Y). For searching past events or log entries use search_entries instead. When answering, include the source date when results show one (e.g. 'Buy ice [Source: 2026-02-15]'). Results include UUID: lines — call graph_expand(node_id=<that uuid>, hops=1) when you need relationships or neighbourhood context around a hit; expansion is not injected automatically.",
 		Category:    "knowledge",
 		Args:        &semanticSearchArgs{},
 		Execute: func(ctx context.Context, env infra.ToolEnv, args any) tools.Result {

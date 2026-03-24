@@ -143,6 +143,7 @@ const discoverySearchName = "discovery_search"
 // Keep this set small (~5–8 tools) to avoid bloating the prompt; everything else is discoverable.
 var CoreToolNames = []string{
 	"semantic_search",
+	"graph_expand",
 	"upsert_knowledge",
 	discoverySearchName,
 	"get_recent_entries",
@@ -177,7 +178,7 @@ func SearchRegistry(query string, limit int) []ToolSummary {
 	}
 
 	type scored struct {
-		t    *Tool
+		t     *Tool
 		score int
 	}
 	var scoredList []scored
@@ -239,7 +240,7 @@ func SearchRegistryTools(query string, limit int) []*Tool {
 		words = []string{query}
 	}
 	type scored struct {
-		t    *Tool
+		t     *Tool
 		score int
 	}
 	var scoredList []scored

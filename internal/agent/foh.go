@@ -184,12 +184,19 @@ func RunQueryWithDebug(ctx context.Context, app FOHEnv, question, source string,
 		fullModelText := strings.TrimSpace(infra.ExtractTextFromResponse(resp))
 		th, stripped := extractThoughtsAndStrip(fullModelText)
 		if th != "" {
-			reasoningTrace = append(reasoningTrace, th)
+			if thoughtSuggestsKnowledgeGap(th) {
+				knowledgeGapDetected = true
+			}
+			reasoningTrace = append(reasoningTrace, truncateThoughtForTrace(th))
 			infra.LoggerFrom(ctx).Debug("FOH: model thought block", "query_run_id", queryRunID, "phase", "cot", "iter", iteration, "thought", th)
 			if debug {
 				logDebug("[iter %d] thought: %s", iteration, th)
 			}
 		}
+		span.SetAttributes(map[string]string{
+			"foh_iteration":        fmt.Sprintf("%d", iteration),
+			"foh_last_thought_len": fmt.Sprintf("%d", len(th)),
+		})
 
 		var hasCalls bool
 		var answerText string
@@ -474,22 +481,6 @@ func RunQueryWithDebug(ctx context.Context, app FOHEnv, question, source string,
 				},
 			})
 
-			// Graph RAG: after semantic_search, auto-expand the top result nodes 1 hop and
-			// inject the subgraph context so the LLM has richer entity information.
-			if r.fcName == "semantic_search" && r.result.Success {
-				vec, _ := infra.GenerateEmbedding(ctx, app.Config().GoogleCloudProject, question, infra.EmbedTaskRetrievalQuery)
-				if graphCtx := ExpandSearchResultsToSubgraph(ctx, app, r.result.Result, vec); graphCtx != "" {
-					functionResponses = append(functionResponses, &genai.Part{
-						FunctionResponse: &genai.FunctionResponse{
-							Name:     "graph_expand",
-							Response: map[string]any{"result": graphCtx},
-						},
-					})
-					retrievedContent.WriteString(graphCtx)
-					retrievedContent.WriteString("\n\n")
-				}
-			}
-
 			if searchTools[r.fcName] {
 				searchToolCalled = true
 				searchToolCallCount++
@@ -567,7 +558,10 @@ func RunQueryWithDebug(ctx context.Context, app FOHEnv, question, source string,
 	text := strings.TrimSpace(infra.ExtractTextFromResponse(resp))
 	thForced, strippedForced := extractThoughtsAndStrip(text)
 	if thForced != "" {
-		reasoningTrace = append(reasoningTrace, thForced)
+		if thoughtSuggestsKnowledgeGap(thForced) {
+			knowledgeGapDetected = true
+		}
+		reasoningTrace = append(reasoningTrace, truncateThoughtForTrace(thForced))
 		infra.LoggerFrom(ctx).Debug("FOH: model thought block", "query_run_id", queryRunID, "phase", "forced_conclusion", "thought", thForced)
 		if debug {
 			logDebug("[forced] thought: %s", thForced)

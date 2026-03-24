@@ -28,7 +28,8 @@ func extractUUIDsFromSearchResult(result string) []string {
 
 // ExpandSearchResultsToSubgraph parses node UUIDs from a semantic_search result string,
 // traverses 1 hop from each (capped at 3 seed nodes), and returns a combined Markdown
-// subgraph for injection into the LLM's next turn.
+// subgraph. FOH does not call this automatically (agent uses the graph_expand tool instead);
+// kept for tests and any future batch/helpers.
 // queryVector is the embedding of the user's query (from the semantic_search step).
 // A nil queryVector disables semantic pruning (hard cap only).
 func ExpandSearchResultsToSubgraph(ctx context.Context, env infra.ToolEnv, searchResult string, queryVector []float32) string {
