@@ -31,18 +31,14 @@ var appCapabilitiesTxt string
 //go:embed debug_report_prompt.txt
 var debugReportPromptTxt string
 
-//go:embed relationship_extractor.txt
-var relationshipExtractorTxt string
-
 //go:embed refinery.txt
 var refineryTxt string
 
 var (
-	systemPromptTmpl          = template.Must(template.New("system").Parse(systemPromptTxt))
-	activityHistoryTmpl       = template.Must(template.New("activityHistory").Parse(activityHistoryTxt))
-	debugReportTmpl           = template.Must(template.New("debugReport").Parse(debugReportPromptTxt))
-	relationshipExtractorTmpl = template.Must(template.New("relationshipExtractor").Parse(relationshipExtractorTxt))
-	refineryTmpl              = template.Must(template.New("refinery").Parse(refineryTxt))
+	systemPromptTmpl    = template.Must(template.New("system").Parse(systemPromptTxt))
+	activityHistoryTmpl = template.Must(template.New("activityHistory").Parse(activityHistoryTxt))
+	debugReportTmpl     = template.Must(template.New("debugReport").Parse(debugReportPromptTxt))
+	refineryTmpl        = template.Must(template.New("refinery").Parse(refineryTxt))
 )
 
 // SystemPromptData holds all inputs for the main FOH system prompt.
@@ -116,20 +112,6 @@ func BuildDebugReport(data DebugReportData) (string, error) {
 	var buf bytes.Buffer
 	if err := debugReportTmpl.Execute(&buf, data); err != nil {
 		return "", fmt.Errorf("execute debug report: %w", err)
-	}
-	return buf.String(), nil
-}
-
-// RelationshipExtractorData holds the entry content for SPO relationship extraction.
-type RelationshipExtractorData struct {
-	Content string
-}
-
-// BuildRelationshipExtractor executes the relationship-extractor template.
-func BuildRelationshipExtractor(data RelationshipExtractorData) (string, error) {
-	var buf bytes.Buffer
-	if err := relationshipExtractorTmpl.Execute(&buf, data); err != nil {
-		return "", fmt.Errorf("execute relationship extractor: %w", err)
 	}
 	return buf.String(), nil
 }

@@ -426,13 +426,10 @@ func GenerateEmbeddingsBatch(ctx context.Context, projectID string, texts []stri
 		req.Header.Set("Authorization", "Bearer "+token.AccessToken)
 
 		httpClient := &http.Client{Timeout: 30 * time.Second}
-		embedStart := time.Now()
 		resp, err := httpClient.Do(req)
-		embedLatency := time.Since(embedStart)
 		if err != nil {
 			span.RecordError(err)
 			LoggerFrom(ctx).Error("batch embedding request failed", "error", err)
-			RecordEmbeddingPrometheusMetrics(task, 0, embedLatency, totalBytes, err)
 			return nil, fmt.Errorf("Embedding API error: %w", err)
 		}
 		defer resp.Body.Close()
@@ -442,7 +439,6 @@ func GenerateEmbeddingsBatch(ctx context.Context, projectID string, texts []stri
 			apiErr := fmt.Errorf("embedding API returned %d: %s", resp.StatusCode, string(body))
 			span.RecordError(apiErr)
 			LoggerFrom(ctx).Error("batch embedding failed", "status", resp.StatusCode, "body", string(body))
-			RecordEmbeddingPrometheusMetrics(task, 0, embedLatency, totalBytes, apiErr)
 			return nil, WrapLLMError(apiErr)
 		}
 
@@ -470,7 +466,6 @@ func GenerateEmbeddingsBatch(ctx context.Context, projectID string, texts []stri
 			dims = len(pred.Embeddings.Values)
 		}
 		LoggerFrom(ctx).Debug("batch embedding generated", "count", len(ch.texts), "dimensions", dims)
-		RecordEmbeddingPrometheusMetrics(task, dims, embedLatency, totalBytes, nil)
 	}
 
 	return results, nil
@@ -485,7 +480,6 @@ func GenerateEmbedding(ctx context.Context, projectID string, text string, taskT
 	if len(taskType) > 0 && taskType[0] != "" {
 		task = taskType[0]
 	}
-	inputBytes := len(text)
 
 	endpoint := fmt.Sprintf("https://us-central1-aiplatform.googleapis.com/v1/projects/%s/locations/us-central1/publishers/google/models/text-embedding-005:predict", projectID)
 	instance := map[string]interface{}{"content": text, "task_type": task}
@@ -495,14 +489,12 @@ func GenerateEmbedding(ctx context.Context, projectID string, text string, taskT
 	jsonBody, err := json.Marshal(requestBody)
 	if err != nil {
 		span.RecordError(err)
-		RecordEmbeddingPrometheusMetrics(task, 0, 0, inputBytes, err)
 		return nil, err
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewReader(jsonBody))
 	if err != nil {
 		span.RecordError(err)
-		RecordEmbeddingPrometheusMetrics(task, 0, 0, inputBytes, err)
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -510,13 +502,11 @@ func GenerateEmbedding(ctx context.Context, projectID string, text string, taskT
 	tokenSource, err := google.DefaultTokenSource(ctx, "https://www.googleapis.com/auth/cloud-platform")
 	if err != nil {
 		span.RecordError(err)
-		RecordEmbeddingPrometheusMetrics(task, 0, 0, inputBytes, err)
 		return nil, fmt.Errorf("failed to get token source: %w", err)
 	}
 	token, err := tokenSource.Token()
 	if err != nil {
 		span.RecordError(err)
-		RecordEmbeddingPrometheusMetrics(task, 0, 0, inputBytes, err)
 		return nil, fmt.Errorf("failed to get token: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+token.AccessToken)
@@ -528,7 +518,6 @@ func GenerateEmbedding(ctx context.Context, projectID string, text string, taskT
 	if err != nil {
 		span.RecordError(err)
 		LoggerFrom(ctx).Error("embedding request failed", "error", err)
-		RecordEmbeddingPrometheusMetrics(task, 0, embedLatency, inputBytes, err)
 		return nil, fmt.Errorf("Embedding API error: %w", err)
 	}
 	defer resp.Body.Close()
@@ -538,7 +527,6 @@ func GenerateEmbedding(ctx context.Context, projectID string, text string, taskT
 		apiErr := fmt.Errorf("embedding API returned %d: %s", resp.StatusCode, string(body))
 		span.RecordError(apiErr)
 		LoggerFrom(ctx).Error("embedding failed", "status", resp.StatusCode, "body", string(body))
-		RecordEmbeddingPrometheusMetrics(task, 0, embedLatency, inputBytes, apiErr)
 		return nil, WrapLLMError(apiErr)
 	}
 
@@ -551,17 +539,13 @@ func GenerateEmbedding(ctx context.Context, projectID string, text string, taskT
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		span.RecordError(err)
-		RecordEmbeddingPrometheusMetrics(task, 0, embedLatency, inputBytes, err)
 		return nil, fmt.Errorf("failed to decode embedding response: %w", err)
 	}
 	if len(result.Predictions) == 0 || len(result.Predictions[0].Embeddings.Values) == 0 {
-		err := fmt.Errorf("no embedding returned")
-		RecordEmbeddingPrometheusMetrics(task, 0, embedLatency, inputBytes, err)
-		return nil, err
+		return nil, fmt.Errorf("no embedding returned")
 	}
 	dims := len(result.Predictions[0].Embeddings.Values)
 	LoggerFrom(ctx).Debug("embedding generated", "dimensions", dims)
 	LogEmbeddingStats(ctx, dims, embedLatency)
-	RecordEmbeddingPrometheusMetrics(task, dims, embedLatency, inputBytes, nil)
 	return result.Predictions[0].Embeddings.Values, nil
 }

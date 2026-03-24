@@ -56,33 +56,6 @@ func formatCost(usd float64) string {
 	return fmt.Sprintf("$%.6f", usd)
 }
 
-// EstimateLLMCostUSD returns the approximate cost in USD for the given model and token counts (for Prometheus metrics).
-func EstimateLLMCostUSD(model string, promptTokens, completionTokens int) float64 {
-	key := model
-	if key == "" {
-		key = "gemini-2.5-flash"
-	}
-	if idx := strings.LastIndex(key, "/"); idx >= 0 {
-		key = key[idx+1:]
-	}
-	costs, ok := modelCostPer1M[key]
-	if !ok {
-		for k, v := range modelCostPer1M {
-			if strings.HasPrefix(key, k) || strings.HasPrefix(k, key) {
-				costs = v
-				ok = true
-				break
-			}
-		}
-	}
-	if !ok {
-		costs = modelCostPer1M["gemini-2.5-flash"]
-	}
-	in := float64(promptTokens) / 1e6 * costs.input
-	out := float64(completionTokens) / 1e6 * costs.output
-	return in + out
-}
-
 // ContextAuditTelemetry holds pre-call token breakdown and post-call actual usage for context-caching analysis.
 // Static = system + tools + archive (candidate for caching). Dynamic = recent turns + current prompt.
 type ContextAuditTelemetry struct {

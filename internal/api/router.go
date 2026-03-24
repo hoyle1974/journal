@@ -28,30 +28,29 @@ func NewRouter(s *Server) *chi.Mux {
 	r.Group(func(r chi.Router) {
 		r.Get("/", wrapAPI(handleHealth))
 		r.Get("/health", wrapAPI(handleHealth))
-		r.Get("/metrics", wrap(handleMetrics))
 		r.Get("/privacy-policy", wrap(handlePrivacyPolicy))
 		r.Get("/terms-and-conditions", wrap(handleTermsAndConditions))
 		r.Post("/telegram", wrap(handleTelegram))
 	})
 
-	// Protected routes (auth + per-route rate limits)
+	// Protected routes (auth required)
 	r.Group(func(r chi.Router) {
 		r.Use(authMiddleware(s))
-		r.With(RateLimitMiddleware(60)).Post("/log", wrapAPI(handleLog))
-		r.With(RateLimitMiddleware(30)).Post("/query", wrapAPI(handleQuery))
-		r.With(RateLimitMiddleware(60)).Get("/entries", wrapAPI(handleEntries))
-		r.With(RateLimitMiddleware(60)).Get("/entries/{uuid}", wrapAPI(handleEntries))
-		r.With(RateLimitMiddleware(60)).Patch("/entries", wrapAPI(handleEntries))
-		r.With(RateLimitMiddleware(60)).Patch("/entries/{uuid}", wrapAPI(handleEntries))
-		r.With(RateLimitMiddleware(60)).Delete("/entries", wrapAPI(handleEntries))
-		r.With(RateLimitMiddleware(60)).Delete("/entries/{uuid}", wrapAPI(handleEntries))
-		r.With(RateLimitMiddleware(60)).Get("/pending-questions", wrapAPI(handlePendingQuestions))
-		r.With(RateLimitMiddleware(60)).Post("/pending-questions/{id}/resolve", wrapAPI(handlePendingQuestionResolve))
-		r.With(RateLimitMiddleware(2)).Post("/backfill-embeddings", wrapAPI(handleBackfillEmbeddings))
-		r.With(RateLimitMiddleware(120)).Post("/internal/process-entry", wrapAPI(handleProcessEntry))
-		r.With(RateLimitMiddleware(120)).Post("/internal/process-telegram-query", wrapAPI(handleProcessTelegramQuery))
-		r.With(RateLimitMiddleware(120)).Post("/internal/save-query", wrapAPI(handleSaveQuery))
-		r.With(RateLimitMiddleware(300)).Post("/internal/replay", wrapAPI(handleReplay))
+		r.Post("/log", wrapAPI(handleLog))
+		r.Post("/query", wrapAPI(handleQuery))
+		r.Get("/entries", wrapAPI(handleEntries))
+		r.Get("/entries/{uuid}", wrapAPI(handleEntries))
+		r.Patch("/entries", wrapAPI(handleEntries))
+		r.Patch("/entries/{uuid}", wrapAPI(handleEntries))
+		r.Delete("/entries", wrapAPI(handleEntries))
+		r.Delete("/entries/{uuid}", wrapAPI(handleEntries))
+		r.Get("/pending-questions", wrapAPI(handlePendingQuestions))
+		r.Post("/pending-questions/{id}/resolve", wrapAPI(handlePendingQuestionResolve))
+		r.Post("/backfill-embeddings", wrapAPI(handleBackfillEmbeddings))
+		r.Post("/internal/process-entry", wrapAPI(handleProcessEntry))
+		r.Post("/internal/process-telegram-query", wrapAPI(handleProcessTelegramQuery))
+		r.Post("/internal/save-query", wrapAPI(handleSaveQuery))
+		r.Post("/internal/replay", wrapAPI(handleReplay))
 	})
 
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
@@ -62,7 +61,7 @@ func NewRouter(s *Server) *chi.Mux {
 		WriteJSON(w, http.StatusNotFound, map[string]interface{}{
 			"error": "Not found", "path": path,
 			"available_routes": []string{
-				"GET  /health", "GET  /metrics", "GET  /privacy-policy", "GET  /terms-and-conditions",
+				"GET  /health", "GET  /privacy-policy", "GET  /terms-and-conditions",
 				"POST /log", "POST /query", "GET  /entries", "POST /telegram",
 				"POST /backfill-embeddings", "GET  /pending-questions", "POST /pending-questions/:id/resolve",
 			},
@@ -164,7 +163,7 @@ func authMiddleware(s *Server) func(http.Handler) http.Handler {
 			}
 			if apiKey != s.Config.JotAPIKey {
 				s.Logger.Warn("invalid API key attempted",
-					"path", r.URL.Path, "method", r.Method, "ip", GetClientIP(r),
+					"path", r.URL.Path, "method", r.Method,
 					"user_agent", r.UserAgent(), "key_length", len(apiKey))
 				WriteJSON(w, http.StatusForbidden, map[string]string{"error": "Invalid API key"})
 				return

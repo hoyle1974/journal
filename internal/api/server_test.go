@@ -76,18 +76,3 @@ func TestHandleHealth(t *testing.T) {
 	}
 }
 
-func TestHandleMetrics(t *testing.T) {
-	srv := testServerForAPI(nil)
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/metrics", nil)
-	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Errorf("GET /metrics status = %d, want 200", rec.Code)
-	}
-	body := rec.Body.String()
-	for _, key := range []string{"queries_total", "entries_total", "tool_calls_total", "gemini_calls_total", "errors_total"} {
-		if !strings.Contains(body, key) {
-			t.Errorf("body should contain %q, got %q", key, body)
-		}
-	}
-}
