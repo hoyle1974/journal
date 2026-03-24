@@ -57,6 +57,7 @@ type SystemPromptData struct {
 	KnowledgeGapBlock  string
 	OpenTodoBlock      string
 	ActiveProjectBlock string
+	LoomContextBlock   string // 2-hop RAG context from refinery; empty string = omit section
 }
 
 // BuildSystemPrompt executes the system prompt template with the given data.

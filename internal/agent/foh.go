@@ -135,7 +135,7 @@ func RunQueryWithDebug(ctx context.Context, app FOHEnv, question, source string,
 	logDebug("[start] Question: %s", question)
 	var reasoningTrace []string
 
-	systemPrompt, err := BuildSystemPrompt(ctx, app)
+	systemPrompt, err := BuildSystemPrompt(ctx, app, "")
 	if err != nil {
 		span.RecordError(err)
 		return errQueryResult(fmt.Sprintf("Error building system prompt: %v", err), 0, debugLogs, nil)

@@ -14,8 +14,9 @@ import (
 
 // BuildSystemPrompt creates the system prompt with current date context and recent history.
 // env supplies Firestore for journal queries; pass from the caller (e.g. FOHEnv).
+// ragContext is the 2-hop Loom RAG context for the current input; pass "" to omit the section.
 // For which parts are static vs dynamic (context caching), see docs/context-caching-analysis.md.
-func BuildSystemPrompt(ctx context.Context, env infra.ToolEnv) (string, error) {
+func BuildSystemPrompt(ctx context.Context, env infra.ToolEnv, ragContext string) (string, error) {
 	now := time.Now()
 	today := now.Format("2006-01-02")
 	currentTime := now.Format("15:04 MST")
@@ -83,6 +84,12 @@ func BuildSystemPrompt(ctx context.Context, env infra.ToolEnv) (string, error) {
 		activeProjectBlockWrapped = utils.WrapAsUserData(activeProjectBlock)
 	}
 
+	// 6. Loom RAG context (2-hop graph expansion of nodes from the current input)
+	loomContextBlock := ""
+	if ragContext != "" {
+		loomContextBlock = utils.WrapAsUserData(ragContext)
+	}
+
 	// Log the actual injected context at Info so it appears in production (e.g. tail.sh / LLM_CONTEXT_SENT).
 	injectedSections := strings.TrimSpace(identityBlock + recentConversation + proactiveSignals + knowledgeGapBlock + openTodoBlock + activeProjectBlock)
 	if injectedSections == "" {
@@ -107,6 +114,7 @@ func BuildSystemPrompt(ctx context.Context, env infra.ToolEnv) (string, error) {
 		KnowledgeGapBlock:  knowledgeGapBlockWrapped,
 		OpenTodoBlock:      openTodoBlockWrapped,
 		ActiveProjectBlock: activeProjectBlockWrapped,
+		LoomContextBlock:   loomContextBlock,
 	}
 	prompt, err := prompts.BuildSystemPrompt(promptData)
 	if err != nil {

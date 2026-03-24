@@ -85,3 +85,10 @@ Current time context:
 - Current month: {{.CurrentMonth}}
 {{.IdentityBlock}}
 {{.RecentConversation}}{{.ProactiveSignals}}{{.KnowledgeGapBlock}}{{.OpenTodoBlock}}{{.ActiveProjectBlock}}
+{{if .LoomContextBlock}}
+---
+## GRAPH CONTEXT (from this entry)
+# Nodes and relationships extracted from the current input and their 2-hop neighbours.
+
+{{.LoomContextBlock}}
+{{end}}
