@@ -49,7 +49,6 @@ func RunEvaluatorExtract(ctx context.Context, app *infra.App, content string) (*
 		Model:        app.QueryModel(),
 		GenConfig:    &infra.GenConfig{MaxOutputTokens: 1024},
 	}
-	infra.GeminiCallsTotal.Inc()
 	resp, err := app.Dispatch(bgCtx, req)
 	if err != nil {
 		return nil, err

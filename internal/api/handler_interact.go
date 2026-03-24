@@ -57,10 +57,8 @@ func handleLog(s *Server, w http.ResponseWriter, r *http.Request) (any, error) {
 		source = "api"
 	}
 	LogHandlerRequest(ctx, r.Method, path, "source", source, "content_length", len(content), "has_image", len(imageBytes) > 0)
-	infra.EntriesTotal.Inc()
 	entryUUID, err := s.Agent.AddEntry(ctx, content, source, timestamp, imageBytes)
 	if err != nil {
-		infra.ErrorsTotal.Inc()
 		infra.LoggerFrom(ctx).Error("entry failed", "error", err)
 		return nil, err
 	}

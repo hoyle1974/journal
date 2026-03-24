@@ -15,7 +15,6 @@ import (
 
 	cloudtrace "github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/trace"
 	"github.com/jackstrohm/jot/internal/config"
-	"github.com/prometheus/client_golang/prometheus"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -422,35 +421,3 @@ func LogOperation(ctx context.Context, operation string, duration time.Duration,
 	}
 }
 
-// Application-level metrics (Prometheus counters for scraping by Google Cloud Prometheus).
-var (
-	QueriesTotal = prometheus.NewCounter(prometheus.CounterOpts{
-		Namespace: "jot",
-		Name:      "queries_total",
-		Help:      "Total number of user queries.",
-	})
-	EntriesTotal = prometheus.NewCounter(prometheus.CounterOpts{
-		Namespace: "jot",
-		Name:      "entries_total",
-		Help:      "Total number of journal entries processed.",
-	})
-	ToolCallsTotal = prometheus.NewCounter(prometheus.CounterOpts{
-		Namespace: "jot",
-		Name:      "tool_calls_total",
-		Help:      "Total number of agent tool calls.",
-	})
-	GeminiCallsTotal = prometheus.NewCounter(prometheus.CounterOpts{
-		Namespace: "jot",
-		Name:      "gemini_calls_total",
-		Help:      "Total number of Gemini API calls.",
-	})
-	ErrorsTotal = prometheus.NewCounter(prometheus.CounterOpts{
-		Namespace: "jot",
-		Name:      "errors_total",
-		Help:      "Total number of errors.",
-	})
-)
-
-func init() {
-	prometheus.MustRegister(QueriesTotal, EntriesTotal, ToolCallsTotal, GeminiCallsTotal, ErrorsTotal)
-}

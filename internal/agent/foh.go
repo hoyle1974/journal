@@ -75,10 +75,9 @@ type QueryResult struct {
 	ReasoningTrace []string `json:"reasoning_trace,omitempty"`
 }
 
-// errQueryResult increments the error counter and returns a failed QueryResult.
+// errQueryResult returns a failed QueryResult.
 // span.RecordError must still be called at the site when a span is active.
 func errQueryResult(answer string, iteration int, debugLogs []string, reasoningTrace []string) *QueryResult {
-	infra.ErrorsTotal.Inc()
 	return &QueryResult{Answer: answer, Iterations: iteration, Error: true, DebugLogs: debugLogs, ReasoningTrace: reasoningTrace}
 }
 
@@ -104,7 +103,6 @@ func RunQueryWithDebug(ctx context.Context, app FOHEnv, question, source string,
 
 	queryRunID := infra.GenShortRunID()
 	startTime := time.Now()
-	infra.QueriesTotal.Inc()
 	infra.LoggerFrom(ctx).Debug("FOH: query started", "query_run_id", queryRunID, "phase", "start", "question", question, "source", source)
 
 	span.SetAttributes(map[string]string{
@@ -122,7 +120,7 @@ func RunQueryWithDebug(ctx context.Context, app FOHEnv, question, source string,
 		ctx = withCurrentEntryUUID(ctx, entryUUID)
 		infra.LoggerFrom(ctx).Debug("FOH: using caller-provided entry (skip log)", "query_run_id", queryRunID, "phase", "start", "event", "query_start", "question", question, "entry_uuid", entryUUID, "source", source)
 	} else {
-		infra.EntriesTotal.Inc()
+	
 		var err error
 		entryUUID, err = AddEntryAndEnqueue(ctx, app.App(), question, source, nil, "")
 		if err != nil {
@@ -176,7 +174,7 @@ func RunQueryWithDebug(ctx context.Context, app FOHEnv, question, source string,
 		return errQueryResult(fmt.Sprintf("Error calling Gemini API: %v", infra.WrapLLMError(err)), 1, debugLogs, nil)
 	}
 	iteration++
-	infra.GeminiCallsTotal.Inc()
+
 	logDebug("[iter %d] Sent question to LLM", iteration)
 	infra.LoggerFrom(ctx).Debug("FOH: iteration 1 response received", "query_run_id", queryRunID, "phase", "first_turn", "llm_correlation_id", session.LastLLMCorrelationID(), "reason", "initial LLM turn")
 
@@ -215,7 +213,7 @@ func RunQueryWithDebug(ctx context.Context, app FOHEnv, question, source string,
 				// Discovered tool invoked via JSON block
 				logDebug("[iter %d] LLM response: discovered tool_call=%s", iteration, discoveredToolName)
 				infra.LoggerFrom(ctx).Debug("FOH: discovered tool call (K/V)", "query_run_id", queryRunID, "phase", "tool_execution", "iter", iteration, "tool", discoveredToolName)
-				infra.ToolCallsTotal.Inc()
+			
 				toolResult := tools.Execute(ctx, app, discoveredToolName, discoveredToolArgs)
 				toolCalls = append(toolCalls, map[string]interface{}{
 					"tool":           discoveredToolName,
@@ -244,7 +242,7 @@ func RunQueryWithDebug(ctx context.Context, app FOHEnv, question, source string,
 				resultMsg := "Tool result (" + discoveredToolName + "): " + toolResult.Result
 				resp, err = session.SendMessage(ctx, &genai.Part{Text: utils.SanitizePrompt(resultMsg)})
 				if err != nil {
-					infra.ErrorsTotal.Inc()
+				
 					span.RecordError(err)
 					return &QueryResult{
 						Answer:         fmt.Sprintf("Error calling Gemini API: %v", infra.WrapLLMError(err)),
@@ -256,7 +254,7 @@ func RunQueryWithDebug(ctx context.Context, app FOHEnv, question, source string,
 					}
 				}
 				iteration++
-				infra.GeminiCallsTotal.Inc()
+			
 				session.TrimHistory(MaxMessagePairs)
 				logDebug("[iter %d] tool_result sent to LLM", iteration)
 				continue
@@ -331,7 +329,7 @@ func RunQueryWithDebug(ctx context.Context, app FOHEnv, question, source string,
 				time.Sleep(delay)
 				resp2, err2 := session.SendMessage(ctx, &genai.Part{Text: question})
 				if err2 != nil {
-					infra.ErrorsTotal.Inc()
+				
 					return &QueryResult{
 						Answer:         fmt.Sprintf("Error calling Gemini API: %v", infra.WrapLLMError(err2)),
 						Iterations:     iteration,
@@ -340,7 +338,7 @@ func RunQueryWithDebug(ctx context.Context, app FOHEnv, question, source string,
 						ReasoningTrace: reasoningTrace,
 					}
 				}
-				infra.GeminiCallsTotal.Inc()
+			
 				if infra.ExtractTextFromResponse(resp2) != "" || infra.HasFunctionCalls(resp2) {
 					resp = resp2
 					logDebug("[retry] Retry had content, continuing")
@@ -361,7 +359,7 @@ func RunQueryWithDebug(ctx context.Context, app FOHEnv, question, source string,
 			}
 
 			reason := infra.EmptyResponseReason(resp)
-			infra.ErrorsTotal.Inc()
+		
 			logDebug("[error] No text or function calls in response: %s", reason)
 			msg := "The model returned no content. This can happen occasionally; please try again."
 			if !strings.Contains(strings.ToLower(reason), "stop") {
@@ -430,7 +428,7 @@ func RunQueryWithDebug(ctx context.Context, app FOHEnv, question, source string,
 
 			execFunc := func() {
 				defer wg.Done()
-				infra.ToolCallsTotal.Inc()
+			
 				toolResult := tools.Execute(ctx, app, fcName, args)
 				mu.Lock()
 				results[idx] = toolExecResult{index: idx, fcName: fcName, args: args, result: toolResult}
@@ -520,7 +518,7 @@ func RunQueryWithDebug(ctx context.Context, app FOHEnv, question, source string,
 
 		resp, err = session.SendMessage(ctx, messageParts...)
 		if err != nil {
-			infra.ErrorsTotal.Inc()
+		
 			span.RecordError(err)
 			return &QueryResult{
 				Answer:         fmt.Sprintf("Error calling Gemini API: %v", infra.WrapLLMError(err)),
@@ -532,7 +530,7 @@ func RunQueryWithDebug(ctx context.Context, app FOHEnv, question, source string,
 			}
 		}
 		iteration++
-		infra.GeminiCallsTotal.Inc()
+	
 		session.TrimHistory(MaxMessagePairs)
 		infra.LoggerFrom(ctx).Debug("FOH: tool results sent to LLM", "query_run_id", queryRunID, "phase", "tool_execution", "iter", iteration, "next_llm_correlation_id", session.LastLLMCorrelationID(), "reason", "reflect: next turn may answer or call more tools")
 	}
@@ -543,7 +541,7 @@ func RunQueryWithDebug(ctx context.Context, app FOHEnv, question, source string,
 
 	resp, err = session.SendMessage(ctx, &genai.Part{Text: "Please provide your best answer based on the information gathered so far."})
 	if err != nil {
-		infra.ErrorsTotal.Inc()
+	
 		span.RecordError(err)
 		return &QueryResult{
 			Answer:         fmt.Sprintf("Error calling Gemini API: %v", infra.WrapLLMError(err)),
@@ -554,7 +552,7 @@ func RunQueryWithDebug(ctx context.Context, app FOHEnv, question, source string,
 			ReasoningTrace: reasoningTrace,
 		}
 	}
-	infra.GeminiCallsTotal.Inc()
+
 	text := strings.TrimSpace(infra.ExtractTextFromResponse(resp))
 	thForced, strippedForced := extractThoughtsAndStrip(text)
 	if thForced != "" {
@@ -601,7 +599,7 @@ func RunQueryWithDebug(ctx context.Context, app FOHEnv, question, source string,
 	}
 
 	logDebug("[error] Unable to complete within iteration limits")
-	infra.ErrorsTotal.Inc()
+
 	return &QueryResult{
 		Answer:         "Error: Unable to complete query within iteration limits.",
 		Iterations:     iteration,

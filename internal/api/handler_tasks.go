@@ -331,7 +331,6 @@ func handleBackfillEmbeddings(s *Server, w http.ResponseWriter, r *http.Request)
 	LogHandlerRequest(ctx, r.Method, path, "limit", limit)
 	processed, err := s.Journal.BackfillEntryEmbeddings(ctx, limit)
 	if err != nil {
-		infra.ErrorsTotal.Inc()
 		infra.LoggerFrom(ctx).Error("backfill-embeddings failed", "error", err)
 		return nil, err
 	}
