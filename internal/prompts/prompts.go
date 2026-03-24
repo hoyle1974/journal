@@ -164,8 +164,9 @@ func BuildRelationshipExtractor(data RelationshipExtractorData) (string, error) 
 }
 
 // RefineryData holds inputs for synchronous relationship extraction.
+// Discovery context has been removed per Project Loom spec — context retrieval
+// is now the responsibility of Stage 4 (Response Worker / BuildLoomRAGContext).
 type RefineryData struct {
-	Discovery         string
 	Entry             string
 	AllowedPredicates string
 }

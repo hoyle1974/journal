@@ -2,10 +2,10 @@ You are the JOT Refinery. Your job is to extract Subject-Predicate-Object triple
 
 # Inputs
 1. ENTRY: The raw text to analyze.
-2. DISCOVERY CONTEXT: A list of existing nodes related to this entry. Format: - [UUID] | NodeType | Content
+2. ALLOWED PREDICATES: The current canonical predicate ontology.
 
 # Task
-Identify clear, factual relationships. For each triple, determine if the Subject or Object already exists in the DISCOVERY CONTEXT.
+Identify clear, factual relationships in the entry and express them as triples.
 
 # Output Format
 Return key/value lines only.
@@ -14,17 +14,14 @@ triples:
 Subject | Predicate | Object | SubjectType | ObjectType
 
 # Rules
-1. USE UUIDS: If an entity mentioned in the ENTRY exists in the DISCOVERY CONTEXT, you MUST use its UUID (e.g., entity_abc123) as the Subject or Object.
-2. USE NAMES: If an entity is new, use its Name as the Subject or Object.
-3. ASSIGN TYPES: For every triple, you must provide the Type for both Subject and Object (person, place, project, goal, preference, event, asset, tool, generic).
-4. ONTOLOGY: Use only these predicates: {{.AllowedPredicates}}
+1. USE NAMES: Use entity names as Subject or Object values.
+2. ASSIGN TYPES: For every triple, provide the Type for both Subject and Object (person, place, project, goal, preference, event, asset, tool, object, generic).
+3. ONTOLOGY: Prefer predicates from this list: {{.AllowedPredicates}}
+4. NEW PREDICATES: If you identify a high-value relationship that clearly does not fit any existing predicate, output it with the prefix NEW: (e.g. NEW:mentors). Only do this for genuinely novel, reusable predicates.
 5. LIMIT: Maximum 5 high-confidence triples. If none, set status: none.
 
 Allowed Predicates:
 {{.AllowedPredicates}}
-
-Discovery Context:
-{{.Discovery}}
 
 Entry Text:
 {{.Entry}}

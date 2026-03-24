@@ -5,10 +5,19 @@ import (
 	"fmt"
 	"strings"
 
+	"cloud.google.com/go/firestore"
 	"github.com/hoyle1974/memory"
 	"github.com/jackstrohm/jot/internal/infra"
 	"github.com/jackstrohm/jot/internal/prompts"
 	"github.com/jackstrohm/jot/pkg/utils"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+)
+
+const (
+	canonicalMapCollection = "_config"
+	canonicalMapDocID      = "canonical_map"
+	maxHotEdges            = 20
 )
 
 type refineryTriple struct {
@@ -21,16 +30,97 @@ type refineryTriple struct {
 	ParseErr  string
 }
 
+// fetchCanonicalMap retrieves the live CanonicalMapConfig from Firestore at
+// _config/canonical_map. Falls back to memory.AllowedPredicates on cold start
+// (doc not found) or any fetch error.
+func fetchCanonicalMap(ctx context.Context, app *infra.App) (memory.CanonicalMapConfig, error) {
+	client, err := app.Firestore(ctx)
+	if err != nil {
+		return fallbackCanonicalMap(), fmt.Errorf("fetchCanonicalMap: firestore client: %w", err)
+	}
+	doc, err := client.Collection(canonicalMapCollection).Doc(canonicalMapDocID).Get(ctx)
+	if err != nil {
+		if status.Code(err) == codes.NotFound {
+			infra.LoggerFrom(ctx).Info("canonical map doc not found, using defaults")
+			return fallbackCanonicalMap(), nil
+		}
+		return fallbackCanonicalMap(), fmt.Errorf("fetchCanonicalMap: get doc: %w", err)
+	}
+	data := doc.Data()
+	cfg := memory.CanonicalMapConfig{}
+	if v, ok := data["allowed_predicates"].([]any); ok {
+		cfg.AllowedPredicates = make([]string, 0, len(v))
+		for _, p := range v {
+			if s, ok := p.(string); ok && s != "" {
+				cfg.AllowedPredicates = append(cfg.AllowedPredicates, s)
+			}
+		}
+	}
+	if v, ok := data["entity_types"].([]any); ok {
+		cfg.EntityTypes = make([]string, 0, len(v))
+		for _, t := range v {
+			if s, ok := t.(string); ok && s != "" {
+				cfg.EntityTypes = append(cfg.EntityTypes, s)
+			}
+		}
+	}
+	if len(cfg.AllowedPredicates) == 0 {
+		cfg.AllowedPredicates = memory.AllowedPredicates
+	}
+	return cfg, nil
+}
+
+func fallbackCanonicalMap() memory.CanonicalMapConfig {
+	return memory.CanonicalMapConfig{
+		AllowedPredicates: memory.AllowedPredicates,
+		EntityTypes: []string{
+			memory.NodeTypePerson, memory.NodeTypePlace, memory.NodeTypeProject,
+			memory.NodeTypeEvent, memory.NodeTypeTool, memory.NodeTypeAsset,
+			memory.NodeTypeObject,
+		},
+	}
+}
+
+// appendPredicateToCanonicalMap appends a new predicate to the canonical_map singleton.
+// If the doc doesn't exist, it is created with the default predicates plus the new one.
+func appendPredicateToCanonicalMap(ctx context.Context, app *infra.App, predicate string) error {
+	client, err := app.Firestore(ctx)
+	if err != nil {
+		return fmt.Errorf("appendPredicateToCanonicalMap: firestore client: %w", err)
+	}
+	ref := client.Collection(canonicalMapCollection).Doc(canonicalMapDocID)
+	_, err = ref.Update(ctx, []firestore.Update{
+		{Path: "allowed_predicates", Value: firestore.ArrayUnion(predicate)},
+	})
+	if err != nil {
+		if status.Code(err) == codes.NotFound {
+			initial := map[string]any{
+				"allowed_predicates": append(memory.AllowedPredicates, predicate),
+				"entity_types":       fallbackCanonicalMap().EntityTypes,
+			}
+			_, err = ref.Set(ctx, initial)
+			return err
+		}
+		return fmt.Errorf("appendPredicateToCanonicalMap: update: %w", err)
+	}
+	return nil
+}
+
 func runRefineryPipeline(ctx context.Context, app *infra.App, entryUUID, content string) error {
 	ctx, span := infra.StartSpan(ctx, "agent.refinery_pipeline")
 	defer span.End()
 	span.SetAttributes(map[string]string{"entry_uuid": entryUUID})
 
-	discovery, err := refineryDiscovery(ctx, app, content)
+	canonMap, err := fetchCanonicalMap(ctx, app)
 	if err != nil {
-		return fmt.Errorf("refinery discovery: %w", err)
+		// Non-fatal: fallback was already returned; log and proceed.
+		infra.LoggerFrom(ctx).Warn("refinery: canonical map fetch failed, using fallback", "error", err)
 	}
-	triples, err := refineryExtract(ctx, app, entryUUID, content, discovery)
+
+	// NOTE: Pre-refinery Discovery (12-node vector search for prior context) is removed
+	// per Project Loom spec. Context retrieval is now Stage 4 (Response Worker) only.
+
+	triples, err := refineryExtract(ctx, app, entryUUID, content, canonMap)
 	if err != nil {
 		return fmt.Errorf("refinery extract: %w", err)
 	}
@@ -38,36 +128,17 @@ func runRefineryPipeline(ctx context.Context, app *infra.App, entryUUID, content
 		infra.LoggerFrom(ctx).Debug("refinery: no triples", "entry_uuid", entryUUID)
 		return nil
 	}
-	return refineryResolveCommit(ctx, app, entryUUID, triples)
+	return refineryResolveCommit(ctx, app, entryUUID, triples, canonMap)
 }
 
-func refineryDiscovery(ctx context.Context, app *infra.App, content string) (string, error) {
-	ctx, span := infra.StartSpan(ctx, "agent.refinery_discovery")
-	defer span.End()
-
-	queryVec, err := infra.GenerateEmbedding(ctx, app.Config().GoogleCloudProject, content, infra.EmbedTaskRetrievalQuery)
-	if err != nil {
-		return "", fmt.Errorf("discovery embedding: %w", err)
-	}
-	nodes, err := app.Memory.QuerySimilarNodes(ctx, queryVec, 12)
-	if err != nil {
-		return "", fmt.Errorf("discovery query similar: %w", err)
-	}
-	var b strings.Builder
-	for _, n := range nodes {
-		fmt.Fprintf(&b, "- %s | %s | %s\n", n.UUID, n.NodeType, n.Content)
-	}
-	return strings.TrimSpace(b.String()), nil
-}
-
-func refineryExtract(ctx context.Context, app *infra.App, entryUUID, content, discovery string) ([]refineryTriple, error) {
+func refineryExtract(ctx context.Context, app *infra.App, entryUUID, content string, canonMap memory.CanonicalMapConfig) ([]refineryTriple, error) {
 	ctx, span := infra.StartSpan(ctx, "agent.refinery_extract")
 	defer span.End()
 
+	predicateList := strings.Join(canonMap.AllowedPredicates, ", ")
 	prompt, err := prompts.BuildRefinery(prompts.RefineryData{
-		Discovery:         utils.WrapAsUserData(discovery),
 		Entry:             utils.WrapAsUserData(utils.SanitizePrompt(content)),
-		AllowedPredicates: utils.WrapAsUserData(strings.Join(memory.AllowedPredicates, ", ")),
+		AllowedPredicates: utils.WrapAsUserData(predicateList),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("build refinery prompt: %w", err)
@@ -85,7 +156,7 @@ func refineryExtract(ctx context.Context, app *infra.App, entryUUID, content, di
 	return parseRefineryTriples(lines), nil
 }
 
-func refineryResolveCommit(ctx context.Context, app *infra.App, entryUUID string, triples []refineryTriple) error {
+func refineryResolveCommit(ctx context.Context, app *infra.App, entryUUID string, triples []refineryTriple, canonMap memory.CanonicalMapConfig) error {
 	ctx, span := infra.StartSpan(ctx, "agent.refinery_resolve_commit")
 	defer span.End()
 	span.SetAttributes(map[string]string{"entry_uuid": entryUUID})
@@ -95,6 +166,22 @@ func refineryResolveCommit(ctx context.Context, app *infra.App, entryUUID string
 			infra.LoggerFrom(ctx).Warn("refinery rejected triple", "entry_uuid", entryUUID, "reason", t.ParseErr, "raw_line", t.RawLine)
 			continue
 		}
+
+		// Handle NEW: prefix — LLM has proposed a novel high-value predicate.
+		rawPred := t.Predicate
+		if strings.HasPrefix(strings.ToUpper(rawPred), "NEW:") {
+			newPred := memory.NormalizedPredicate(strings.TrimPrefix(strings.TrimPrefix(rawPred, "NEW:"), "new:"))
+			if newPred != "" {
+				if appendErr := appendPredicateToCanonicalMap(ctx, app, newPred); appendErr != nil {
+					infra.LoggerFrom(ctx).Warn("refinery: failed to append new predicate to canonical map",
+						"predicate", newPred, "error", appendErr)
+				} else {
+					infra.LoggerFrom(ctx).Info("refinery: new predicate appended to canonical map", "predicate", newPred)
+				}
+				t.Predicate = newPred
+			}
+		}
+
 		predicate := memory.CanonicalizePredicate(t.Predicate)
 		if predicate == "" {
 			infra.LoggerFrom(ctx).Warn("refinery rejected triple", "entry_uuid", entryUUID, "reason", "empty predicate after canonicalization", "raw_line", t.RawLine)
@@ -129,8 +216,101 @@ func refineryResolveCommit(ctx context.Context, app *infra.App, entryUUID string
 		if err := app.Memory.AddEntityLink(ctx, entryUUID, relID); err != nil {
 			infra.LoggerFrom(ctx).Warn("refinery source-log backlink failed", "entry_uuid", entryUUID, "relationship_uuid", relID, "error", err)
 		}
+		// Update hot-edges on the object node for Loom graph cache maintenance.
+		if heErr := updateHotEdges(ctx, app, obj.UUID, relID); heErr != nil {
+			infra.LoggerFrom(ctx).Warn("refinery: updateHotEdges failed (non-fatal)", "object_uuid", obj.UUID, "rel_id", relID, "error", heErr)
+		}
 	}
 	return nil
+}
+
+// updateHotEdges maintains a bounded 20-slot hot_edges array on objectNodeID.
+// The new relationship node is assigned relevance_score = 1.0.
+// When the array is full, the existing edge with the lowest relevance_score is evicted.
+func updateHotEdges(ctx context.Context, app *infra.App, objectNodeID, newRelationshipID string) error {
+	ctx, span := infra.StartSpan(ctx, "loom.update_hot_edges")
+	defer span.End()
+	span.SetAttributes(map[string]string{
+		"object_node_id":    objectNodeID,
+		"new_relationship_id": newRelationshipID,
+	})
+
+	client, err := app.Firestore(ctx)
+	if err != nil {
+		return fmt.Errorf("updateHotEdges: firestore client: %w", err)
+	}
+	col := client.Collection(memory.KnowledgeCollection)
+
+	// Set the new relationship's relevance_score to 1.0 (freshly observed).
+	if _, updErr := col.Doc(newRelationshipID).Update(ctx, []firestore.Update{
+		{Path: "relevance_score", Value: 1.0},
+	}); updErr != nil {
+		infra.LoggerFrom(ctx).Warn("updateHotEdges: failed to set new rel score", "rel_id", newRelationshipID, "error", updErr)
+	}
+
+	// Fetch the object node's current hot_edges.
+	objDoc, err := col.Doc(objectNodeID).Get(ctx)
+	if err != nil {
+		return fmt.Errorf("updateHotEdges: fetch object node: %w", err)
+	}
+	data := objDoc.Data()
+	var hotEdges []string
+	if v, ok := data["hot_edges"].([]any); ok {
+		hotEdges = make([]string, 0, len(v))
+		for _, e := range v {
+			if s, ok := e.(string); ok && s != "" {
+				hotEdges = append(hotEdges, s)
+			}
+		}
+	}
+
+	if len(hotEdges) < maxHotEdges {
+		// Slot available — append and write.
+		hotEdges = append(hotEdges, newRelationshipID)
+		_, err = col.Doc(objectNodeID).Update(ctx, []firestore.Update{
+			{Path: "hot_edges", Value: hotEdges},
+		})
+		return err
+	}
+
+	// Array full — fetch relevance_scores of all existing edges and evict the lowest.
+	type edgeScore struct {
+		id    string
+		score float64
+	}
+	scores := make([]edgeScore, 0, len(hotEdges))
+	for _, edgeID := range hotEdges {
+		edgeDoc, edgeErr := col.Doc(edgeID).Get(ctx)
+		if edgeErr != nil {
+			// Treat unfetchable edges as score 0 (safe to evict).
+			scores = append(scores, edgeScore{id: edgeID, score: 0})
+			infra.LoggerFrom(ctx).Warn("updateHotEdges: fetch edge score failed, treating as 0", "edge_id", edgeID, "error", edgeErr)
+			continue
+		}
+		var score float64
+		if v, ok := edgeDoc.Data()["relevance_score"].(float64); ok {
+			score = v
+		}
+		scores = append(scores, edgeScore{id: edgeID, score: score})
+	}
+
+	// Find lowest-scored edge index.
+	lowestIdx := 0
+	for i, s := range scores {
+		if s.score < scores[lowestIdx].score {
+			lowestIdx = i
+		}
+	}
+	infra.LoggerFrom(ctx).Info("updateHotEdges: evicting low-score edge",
+		"object_node_id", objectNodeID,
+		"evicted_edge_id", scores[lowestIdx].id,
+		"evicted_score", scores[lowestIdx].score,
+	)
+	hotEdges[lowestIdx] = newRelationshipID
+	_, err = col.Doc(objectNodeID).Update(ctx, []firestore.Update{
+		{Path: "hot_edges", Value: hotEdges},
+	})
+	return err
 }
 
 func parseRefineryTriples(lines []string) []refineryTriple {
