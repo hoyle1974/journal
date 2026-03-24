@@ -49,7 +49,7 @@ type GraphStore interface {
 
 // TaskStore manages tasks and subtask decomposition.
 // Method names match existing Store methods exactly to avoid collisions with
-// EntryStore (GetEntry vs GetTask) and ContextStore (CreateContext vs CreateTask).
+// EntryStore (GetEntry vs GetTask).
 type TaskStore interface {
 	CreateTask(ctx context.Context, t *Task) (string, error)
 	GetTask(ctx context.Context, uuid string) (*Task, error)
@@ -59,20 +59,8 @@ type TaskStore interface {
 	GetOpenRootTasks(ctx context.Context, limit int) ([]Task, error)
 }
 
-// ContextStore manages living context briefings.
-// CreateContext keeps its original name to avoid collision with TaskStore.CreateTask
-// on the concrete *Store type.
-type ContextStore interface {
-	CreateContext(ctx context.Context, name, content, contextType string, entities, sourceEntries []string) (string, error)
-	Touch(ctx context.Context, uuid string, newSourceEntry *string, relevanceBoost float64) error
-	GetActive(ctx context.Context, limit int) ([]KnowledgeNode, []ContextMetadata, error)
-	Synthesize(ctx context.Context, uuid string) error
-}
-
 // AgentOps groups agentic and background synthesis operations.
 type AgentOps interface {
-	AnalyzeJournalEntry(ctx context.Context, content, uuid, timestamp string) (*JournalAnalysis, error)
-	PromoteIncubatingClusters(ctx context.Context, tagMapping map[string]string) (int, error)
 	SaveQuery(ctx context.Context, question, answer, source string, isGap bool) (string, error)
 	InsertPendingQuestions(ctx context.Context, questions []PendingQuestion) error
 	GetUnresolvedQuestions(ctx context.Context, limit int) ([]PendingQuestion, error)
@@ -82,9 +70,6 @@ type AgentOps interface {
 // AdminOps covers maintenance, GC, and migrations.
 // Do not call these on hot paths.
 type AdminOps interface {
-	EvictStaleNodes(ctx context.Context, weightThreshold float64, staleDays int) (int, error)
 	MigrateMetadata(ctx context.Context, dryRun bool) (int, error)
 	BackfillEmbeddings(ctx context.Context, limit int) (int, error)
-	DecayContexts(ctx context.Context) (int, error)
-	CreatePulseAuditSignals(ctx context.Context, importanceThreshold float64, staleDays int) (*PulseAuditResult, error)
 }

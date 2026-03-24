@@ -1,18 +1,6 @@
 package memory
 
-import (
-	"context"
-	"testing"
-)
-
-func TestAnalyzeJournalEntry_ShortContent(t *testing.T) {
-	// Content shorter than 20 chars should return nil, nil (no analysis)
-	s := New(nil, nil, nil)
-	result, err := s.AnalyzeJournalEntry(context.Background(), "short", "uuid1", "2026-03-19")
-	if result != nil || err != nil {
-		t.Errorf("short content: expected (nil, nil), got (%v, %v)", result, err)
-	}
-}
+import "testing"
 
 func TestNormalizeEntityStatus_Values(t *testing.T) {
 	cases := []struct{ in, want string }{

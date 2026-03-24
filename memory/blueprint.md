@@ -8,13 +8,10 @@ The library handles:
 - Persistent, typed **knowledge nodes** backed by Firestore (episodic logs, semantic facts, tasks, queries, contexts, pending questions).
 - **Vector + keyword hybrid search** with Reciprocal Rank Fusion (RRF) and optional LLM re-ranking.
 - **Graph traversal** (1-hop neighbourhood expansion via SPO edges and entity links).
-- **Journal analysis** (extract mood, tags, entities, open loops from raw entries).
 - **Rollup** (weekly and monthly summary nodes).
 - **Task management** (create, update, query tasks with LLM-driven decomposition).
-- **Incubation** (promote recurring theme clusters to formal context nodes).
-- **Janitor** (evict stale, low-significance nodes; archive content into completed projects).
-- **Context nodes** (active briefings with relevance decay).
-- **Pending questions** (knowledge gaps and contradictions surfaced by the Dreamer).
+- **Context nodes** (active briefings).
+- **Pending questions** (knowledge gaps and contradictions to be clarified by the user).
 - **Schema validation and normalization** for all node metadata types.
 
 ## 2. Core Abstraction: `Store`
@@ -51,7 +48,7 @@ All node types live in the **single `journal` collection** (`KnowledgeCollection
 
 | `node_type` | Struct | Purpose |
 |-------------|--------|---------|
-| `log` | `Entry` | Raw episodic journal entries (never deleted by janitor). |
+| `log` | `Entry` | Raw episodic journal entries. |
 | `person` | `KnowledgeNode` + `PersonMeta` | People in the user's life. |
 | `project` | `KnowledgeNode` + `ProjectGoalMeta` | Projects the user is working on. |
 | `goal` | `KnowledgeNode` + `ProjectGoalMeta` | Goals (may be sub-goals of a project). |
@@ -95,7 +92,7 @@ Relational knowledge nodes use three extra fields:
 | `knowledge_project.go` | Project/goal status mutations (`UpdateProjectStatus`), archive-summary append (`AppendToProjectArchiveSummary`), completed-project lookup (`GetLinkedCompletedProjectID`). |
 | `entry_nodes.go` | CRUD for `Entry` (episodic log nodes): `AddEntry`, `GetEntries*`, `GetEntriesWithAnalysis*`, `SearchEntriesByKeyword`, etc. |
 | `entry_nodes_extended.go` | Extended entry helpers: date-range queries, source filtering, pagination. |
-| `context.go` | Context node operations: `CreateContext`, `GetActiveContexts`, `UpdateContext`, `SynthesizeContext`, `DecayContexts`. |
+| `context.go` | Context node operations: `CreateContext`, `GetActiveContexts`, `UpdateContext`, `SynthesizeContext`. |
 | `query_nodes.go` | Query log operations: `SaveQuery`, `GetRecentQueries`, `GetQueryByID`. |
 | `pending.go` | Pending question operations: `InsertPendingQuestions`, `GetPendingQuestions`, `ResolvePendingQuestion`. |
 | `pending_dedup_test.go` | Tests for pending-question deduplication. |
@@ -105,10 +102,8 @@ Relational knowledge nodes use three extra fields:
 | `graph.go` | `GraphExpand`: BFS multi-hop graph traversal returning `*SubGraph` with `Nodes map[string]KnowledgeNodeWithLinks` and `Edges []Edge`. `SubGraph.ToMarkdown` serializes for LLM injection. `pruneCandidates` prunes BFS frontiers by cosine similarity. |
 | `rag.go` | `HybridSearch` pipeline: vector search + keyword search + RRF fusion + optional re-rank. Log helpers for search confidence. |
 | `rerank.go` | `RerankNodes`: LLM-based relevance re-ranking of a candidate node list. |
-| `analysis.go` | `AnalyzeEntry`: LLM-driven journal entry analysis (summary, mood, category, tags, entities, open loops). |
+| `analysis.go` | `JournalAnalysis`, `Entity`, `OpenLoop` types; `NormalizeEntityStatus` helper. |
 | `rollup.go` | `GetWeeklySummaryNodesInRange`, `GetMonthlySummaryNodesInRange`. |
-| `incubation.go` | `PromoteIncubatingClusters`: detect recurring themes over the last N days and promote them to context nodes. |
-| `janitor.go` | `EvictStaleNodes`: GC for low-significance nodes; archive content to completed projects before deletion. |
 | `migrate.go` | `MigrateKnowledgeMetadata`: one-off schema migration with optional dry-run. |
 | `math.go` | Cosine similarity, vector utilities. |
 | `text.go` | String utilities: `truncateString`, `sanitizePrompt`, `wrapAsUserData`, `parseKeyValueMap`, tag normalization. |
@@ -120,8 +115,8 @@ Relational knowledge nodes use three extra fields:
 | `entry_nodes_test.go` | Tests for entry node operations. |
 | `query_nodes_test.go` | Tests for query node operations. |
 | `task_nodes_test.go` | Tests for task engine. |
-| `analysis_test.go` | Tests for journal analysis. |
-| `prompts/` | Embedded prompt text files (`.txt`) used by analysis, context synthesis, and executive summary operations. |
+| `analysis_test.go` | Tests for `NormalizeEntityStatus`. |
+| `prompts/` | Embedded prompt text files (`.txt`) used by context synthesis and executive summary operations. |
 | `gemini/` | Gemini-specific adapter implementations (embedder, LLM dispatcher). |
 
 ## 5. Key Algorithms
@@ -146,14 +141,6 @@ Relational knowledge nodes use three extra fields:
 
 `KnowledgeNode` now includes an `Embedding []float32` field populated on all reads (extracted from Firestore `Vector32`).
 
-### Incubation
-
-`PromoteIncubatingClusters` scans the last 7 days of journal entries, counts distinct days per normalized theme (tags + category), and creates or touches a `context` node for any theme appearing on ≥ 2 distinct days.
-
-### Janitor GC
-
-`EvictStaleNodes(ctx, weightThreshold, staleDays)` deletes nodes where `significance_weight < threshold` and `last_recalled_at < cutoff`. Protected types (`identity_anchor`, `user_identity`, `log`) are never deleted. Content from nodes linked to completed projects is appended to the project's `archive_summary` before deletion.
-
 ## 6. Schema Registration
 
 To add a new node type:
@@ -163,7 +150,6 @@ To add a new node type:
 3. Implement `validate*` and `normalize*` functions.
 4. Register in the `registry` map in `schema.go`.
 5. Add the node type to the table in this blueprint.
-6. Add janitor protection if the node type must never be deleted.
 
 ## 7. Prompt Files
 
@@ -171,7 +157,6 @@ Prompt text files live in `prompts/` and are embedded at compile time using `//g
 
 | File | Used by |
 |------|---------|
-| `journal_analyze.txt` | `AnalyzeEntry` |
 | `context_analyze.txt` | Context synthesis |
 | `executive_summary.txt` | Executive summary generation |
 
@@ -188,7 +173,7 @@ Prompt text files live in `prompts/` and are embedded at compile time using `//g
 
 ## 9. Domain-Segregated Interfaces
 
-`Store` exposes seven domain-specific interfaces via getter methods. Accept the narrowest interface your code actually needs.
+`Store` exposes six domain-specific interfaces via getter methods. Accept the narrowest interface your code actually needs.
 
 | Getter | Interface | Purpose |
 |--------|-----------|---------|
@@ -196,9 +181,8 @@ Prompt text files live in `prompts/` and are embedded at compile time using `//g
 | `s.Knowledge()` | `KnowledgeStore` | Semantic knowledge graph CRUD |
 | `s.Graph()` | `GraphStore` | Graph traversal and vector search |
 | `s.Tasks()` | `TaskStore` | Task CRUD and LLM decomposition |
-| `s.Contexts()` | `ContextStore` | Living context briefings |
-| `s.Agent()` | `AgentOps` | Agentic analysis, synthesis, pending questions |
-| `s.Admin()` | `AdminOps` | Maintenance, GC, migrations |
+| `s.Agent()` | `AgentOps` | Pending questions and query logging |
+| `s.Admin()` | `AdminOps` | Maintenance and migrations |
 
 ### Option Structs
 

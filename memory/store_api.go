@@ -8,7 +8,6 @@ var (
 	_ KnowledgeStore = (*Store)(nil)
 	_ GraphStore     = (*Store)(nil)
 	_ TaskStore      = (*Store)(nil)
-	_ ContextStore   = (*Store)(nil)
 	_ AgentOps       = (*Store)(nil)
 	_ AdminOps       = (*Store)(nil)
 )
@@ -80,21 +79,6 @@ func (s *Store) Rerank(ctx context.Context, query string, nodes []KnowledgeNode,
 	return s.RerankNodes(ctx, query, nodes, topN)
 }
 
-// Touch updates the relevance of a context node.
-func (s *Store) Touch(ctx context.Context, uuid string, newSourceEntry *string, relevanceBoost float64) error {
-	return s.TouchContext(ctx, uuid, newSourceEntry, relevanceBoost)
-}
-
-// GetActive returns the currently active context briefings.
-func (s *Store) GetActive(ctx context.Context, limit int) ([]KnowledgeNode, []ContextMetadata, error) {
-	return s.GetActiveContexts(ctx, limit)
-}
-
-// Synthesize rebuilds a context node's content via LLM from its source entries.
-func (s *Store) Synthesize(ctx context.Context, uuid string) error {
-	return s.SynthesizeContext(ctx, uuid)
-}
-
 // GetUnresolvedQuestions returns pending questions not yet answered.
 func (s *Store) GetUnresolvedQuestions(ctx context.Context, limit int) ([]PendingQuestion, error) {
 	return s.GetUnresolvedPendingQuestions(ctx, limit)
@@ -126,9 +110,6 @@ func (s *Store) Graph() GraphStore { return s }
 
 // Tasks returns the TaskStore view of this Store.
 func (s *Store) Tasks() TaskStore { return s }
-
-// Contexts returns the ContextStore view of this Store.
-func (s *Store) Contexts() ContextStore { return s }
 
 // Agent returns the AgentOps view of this Store.
 func (s *Store) Agent() AgentOps { return s }

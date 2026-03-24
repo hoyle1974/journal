@@ -33,7 +33,7 @@ const (
 	NodeTypeTask = "task"
 	// NodeTypeQuery is for logged queries (Q&A pairs) from the FOH loop.
 	NodeTypeQuery = "query"
-	// NodeTypePendingQuestion is for gap/contradiction questions from the Dreamer.
+	// NodeTypePendingQuestion is for gap/contradiction questions to be clarified by the user.
 	NodeTypePendingQuestion = "pending_question"
 	// NodeTypeRelationship is a reified edge connecting two entity nodes.
 	NodeTypeRelationship = "relationship"

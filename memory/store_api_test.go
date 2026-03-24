@@ -16,7 +16,6 @@ func TestStoreImplementsAllDomainInterfaces(t *testing.T) {
 		{"KnowledgeStore", func() { var _ KnowledgeStore = (*Store)(nil) }},
 		{"GraphStore",     func() { var _ GraphStore     = (*Store)(nil) }},
 		{"TaskStore",      func() { var _ TaskStore      = (*Store)(nil) }},
-		{"ContextStore",   func() { var _ ContextStore   = (*Store)(nil) }},
 		{"AgentOps",       func() { var _ AgentOps       = (*Store)(nil) }},
 		{"AdminOps",       func() { var _ AdminOps       = (*Store)(nil) }},
 	}

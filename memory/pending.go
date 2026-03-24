@@ -17,7 +17,7 @@ const PendingQuestionsCollection = KnowledgeCollection
 // asked to each client. Documents are keyed by clientID string.
 const ActiveQuestionStateCollection = "telegram_question_state"
 
-// PendingQuestion is a gap or contradiction detected during Dreamer synthesis, to be clarified by the user.
+// PendingQuestion is a gap or contradiction detected during knowledge synthesis, to be clarified by the user.
 type PendingQuestion struct {
 	UUID           string    `firestore:"-" json:"uuid"`
 	Question       string    `firestore:"question" json:"question"`
