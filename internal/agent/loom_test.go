@@ -27,3 +27,27 @@ func TestProcessEntryReportHasExtractedNodeIDs(t *testing.T) {
 		t.Fatalf("expected 2 node IDs, got %d", len(r.ExtractedNodeIDs))
 	}
 }
+
+func TestBuildLoomRAGContextNilApp(t *testing.T) {
+	ctx := context.Background()
+	result, err := BuildLoomRAGContext(ctx, nil, "log-uuid", []string{"node-1"})
+	if err == nil {
+		t.Fatal("expected error for nil app")
+	}
+	_ = result
+}
+
+func TestBuildLoomRAGContextEmptySeeds(t *testing.T) {
+	ctx := context.Background()
+	result, err := BuildLoomRAGContext(ctx, nil, "log-uuid", nil)
+	_ = result
+	_ = err
+	// nil app still errors, but we verify no panic on empty seeds
+}
+
+func TestLoomRAGContextFormatForPromptEmpty(t *testing.T) {
+	r := &LoomRAGContext{}
+	if r.FormatForPrompt() != "" {
+		t.Fatal("expected empty string for empty context")
+	}
+}
