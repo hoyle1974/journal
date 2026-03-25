@@ -22,13 +22,14 @@ func (s *Store) QueryNodesLinkingTo(ctx context.Context, targetUUID string, limi
 	nodes, err := queryDocuments(ctx, query, func(doc *firestore.DocumentSnapshot) (KnowledgeNode, error) {
 		data := doc.Data()
 		n := KnowledgeNode{
-			UUID:       doc.Ref.ID,
-			Content:    getStringField(data, "content"),
-			NodeType:   getStringField(data, "node_type"),
-			Metadata:   getStringField(data, "metadata"),
-			Timestamp:  getStringField(data, "timestamp"),
-			Predicate:  getStringField(data, "predicate"),
-			ObjectUUID: getStringField(data, "object_uuid"),
+			UUID:        doc.Ref.ID,
+			Content:     getStringField(data, "content"),
+			NodeType:    getStringField(data, "node_type"),
+			Metadata:    getStringField(data, "metadata"),
+			Timestamp:   getStringField(data, "timestamp"),
+			Predicate:   getStringField(data, "predicate"),
+			SubjectUUID: getStringField(data, "subject_uuid"),
+			ObjectUUID:  getStringField(data, "object_uuid"),
 		}
 		if v, ok := data["embedding"].(firestore.Vector32); ok {
 			n.Embedding = []float32(v)
@@ -50,13 +51,14 @@ func (s *Store) QueryIncomingSPOEdges(ctx context.Context, targetUUID string, li
 	nodes, err := queryDocuments(ctx, query, func(doc *firestore.DocumentSnapshot) (KnowledgeNode, error) {
 		data := doc.Data()
 		n := KnowledgeNode{
-			UUID:       doc.Ref.ID,
-			Content:    getStringField(data, "content"),
-			NodeType:   getStringField(data, "node_type"),
-			Metadata:   getStringField(data, "metadata"),
-			Timestamp:  getStringField(data, "timestamp"),
-			Predicate:  getStringField(data, "predicate"),
-			ObjectUUID: getStringField(data, "object_uuid"),
+			UUID:        doc.Ref.ID,
+			Content:     getStringField(data, "content"),
+			NodeType:    getStringField(data, "node_type"),
+			Metadata:    getStringField(data, "metadata"),
+			Timestamp:   getStringField(data, "timestamp"),
+			Predicate:   getStringField(data, "predicate"),
+			SubjectUUID: getStringField(data, "subject_uuid"),
+			ObjectUUID:  getStringField(data, "object_uuid"),
 		}
 		if v, ok := data["embedding"].(firestore.Vector32); ok {
 			n.Embedding = []float32(v)

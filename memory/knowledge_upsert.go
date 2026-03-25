@@ -80,7 +80,6 @@ func (s *Store) UpsertKnowledge(ctx context.Context, content, nodeType, metadata
 		"timestamp":           timestamp,
 		"significance_weight": significanceWeight,
 		"domain":              domain,
-		"last_recalled_at":    timestamp,
 	}
 	if len(journalEntryIDs) > 0 {
 		data["journal_entry_ids"] = journalEntryIDs
@@ -167,7 +166,6 @@ func (s *Store) upsertSemanticMemoryWithVector(ctx context.Context, content, nod
 	metadata := fmt.Sprintf(`{"domain":"%s"}`, domain)
 
 	timestamp := time.Now().Format(time.RFC3339)
-	now := timestamp
 	distanceThreshold := 0.25
 	vectorQuery := s.db.Collection(KnowledgeCollection).
 		FindNearest("embedding", firestore.Vector32(vector), 1, firestore.DistanceMeasureCosine,
@@ -185,7 +183,6 @@ func (s *Store) upsertSemanticMemoryWithVector(ctx context.Context, content, nod
 		"timestamp":           timestamp,
 		"significance_weight": significanceWeight,
 		"domain":              domain,
-		"last_recalled_at":    now,
 	}
 	if len(entityLinks) > 0 {
 		data["entity_links"] = entityLinks
@@ -195,7 +192,6 @@ func (s *Store) upsertSemanticMemoryWithVector(ctx context.Context, content, nod
 	}
 	if spo != nil && spo.Predicate != "" {
 		data["predicate"] = spo.Predicate
-		data["object_value"] = spo.ObjectValue
 	}
 
 	var nodeUUID string

@@ -19,7 +19,7 @@ type decomposeTaskArgs struct {
 
 type createTaskArgs struct {
 	Content      string `json:"content" description:"Task description or title" required:"true"`
-	ParentID     string `json:"parent_id" description:"Parent task UUID for hierarchy"`
+	ParentID     string `json:"parent_uuid" description:"Parent task UUID for hierarchy"`
 	DueDate      string `json:"due_date" description:"Due date (YYYY-MM-DD)"`
 	SystemPrompt string `json:"system_prompt" description:"Instructions for the LLM when working on this task"`
 }
@@ -31,7 +31,7 @@ type getTaskArgs struct {
 type updateTaskArgs struct {
 	TaskID                string  `json:"task_id" description:"Task UUID" required:"true"`
 	Content               string  `json:"content" description:"New task description/title"`
-	ParentID              string  `json:"parent_id" description:"New parent task UUID, or empty to make root"`
+	ParentID              string  `json:"parent_uuid" description:"New parent task UUID, or empty to make root"`
 	DueDate               string  `json:"due_date" description:"Due date (YYYY-MM-DD), or empty to clear"`
 	SystemPrompt          string  `json:"system_prompt" description:"Instructions for the LLM when working on this task"`
 	AddJournalEntryIDs    string  `json:"add_journal_entry_ids" description:"Comma-separated journal entry UUIDs to link to this task"`

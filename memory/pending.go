@@ -23,7 +23,7 @@ type PendingQuestion struct {
 	Question       string    `firestore:"question" json:"question"`
 	Kind           string    `firestore:"kind" json:"kind"` // "gap" or "contradiction"
 	Context        string    `firestore:"context" json:"context,omitempty"`
-	SourceEntryIDs []string  `firestore:"source_entry_ids" json:"source_entry_ids,omitempty"`
+	SourceEntryIDs []string  `firestore:"source_entry_uuids" json:"source_entry_uuids,omitempty"`
 	CreatedAt      string    `firestore:"created_at" json:"created_at"`
 	ResolvedAt     string    `firestore:"resolved_at" json:"resolved_at,omitempty"`
 	Answer         string    `firestore:"answer" json:"answer,omitempty"`
@@ -66,7 +66,7 @@ func (s *Store) InsertPendingQuestions(ctx context.Context, questions []PendingQ
 				"question":            q.Question,
 				"kind":                q.Kind,
 				"context":             q.Context,
-				"source_entry_ids":    q.SourceEntryIDs,
+				"source_entry_uuids":    q.SourceEntryIDs,
 				"created_at":          q.CreatedAt,
 				"resolved_at":         q.ResolvedAt,
 				"answer":              q.Answer,
@@ -120,7 +120,7 @@ func (s *Store) GetUnresolvedPendingQuestions(ctx context.Context, limit int) ([
 			Answer:     getStringField(data, "answer"),
 			Embedding:  getFloat32SliceField(data, "embedding"),
 		}
-		q.SourceEntryIDs = getStringSliceField(data, "source_entry_ids")
+		q.SourceEntryIDs = getStringSliceField(data, "source_entry_uuids")
 		return q, nil
 	})
 	if err != nil {
@@ -155,7 +155,7 @@ func (s *Store) GetRecentlyResolvedPendingQuestions(ctx context.Context, since t
 			Answer:     getStringField(data, "answer"),
 			Embedding:  getFloat32SliceField(data, "embedding"),
 		}
-		q.SourceEntryIDs = getStringSliceField(data, "source_entry_ids")
+		q.SourceEntryIDs = getStringSliceField(data, "source_entry_uuids")
 		return q, nil
 	})
 	if err != nil {

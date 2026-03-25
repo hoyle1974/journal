@@ -230,6 +230,15 @@ func printReasoningTraceIfAny(result map[string]interface{}) {
 	fmt.Println()
 }
 
+// printResponseSeparatorIfDebug prints a visual separator before the answer when debug output
+// (graph context or reasoning trace) was printed above it.
+func printResponseSeparatorIfDebug(result map[string]interface{}) {
+	hasDebug := len(jsonStringSlice(result, "graph_context")) > 0 || len(jsonStringSlice(result, "reasoning_trace")) > 0
+	if hasDebug {
+		fmt.Println("---------------------")
+	}
+}
+
 // parseTraceFlag removes --trace and -t from args and returns the filtered args and whether trace was set.
 func parseTraceFlag(args []string) ([]string, bool) {
 	var out []string
@@ -402,6 +411,7 @@ func cmdIngest(input string) {
 	}
 	printGraphContextIfAny(result)
 	printReasoningTraceIfAny(result)
+	printResponseSeparatorIfDebug(result)
 	if answer := jsonStr(result, "answer"); answer != "" {
 		fmt.Println(answer)
 	} else {
@@ -437,6 +447,7 @@ func cmdQuery(question string) {
 	}
 	if errFlag, ok := result["error"].(bool); ok && errFlag {
 		printReasoningTraceIfAny(result)
+		printResponseSeparatorIfDebug(result)
 		if answer := jsonStr(result, "answer"); answer != "" {
 			fmt.Printf("%s\n", answer)
 		} else {
@@ -446,6 +457,7 @@ func cmdQuery(question string) {
 	}
 
 	printReasoningTraceIfAny(result)
+	printResponseSeparatorIfDebug(result)
 	if answer := jsonStr(result, "answer"); answer != "" {
 		fmt.Println(answer)
 	} else {

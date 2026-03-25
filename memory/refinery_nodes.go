@@ -33,8 +33,8 @@ func relationshipContent(subjectContent, predicate, objectContent, subjectID, ob
 	return fmt.Sprintf("%s %s %s", sub, predicate, obj)
 }
 
-// EnsureNode returns an existing entity node by deterministic key or creates a stub.
-// This prevents duplicate stub nodes under concurrent ingest.
+// EnsureNode returns an existing entity node by deterministic key or creates one.
+// This prevents duplicate nodes under concurrent ingest.
 func (s *Store) EnsureNode(ctx context.Context, identifier, nodeType, sourceEntryID string) (*KnowledgeNode, error) {
 	cleanIdentifier := strings.TrimSpace(identifier)
 	if cleanIdentifier == "" {
@@ -78,9 +78,7 @@ func (s *Store) EnsureNode(ctx context.Context, identifier, nodeType, sourceEntr
 			"content":             cleanIdentifier,
 			"name_key":            strings.ToLower(cleanIdentifier),
 			"node_type":           nodeType,
-			"metadata":            `{"stub":true}`,
 			"timestamp":           ts,
-			"domain":              "relationship",
 			"significance_weight": 0.55,
 			"embedding":           firestore.Vector32(vector),
 		}
@@ -105,8 +103,8 @@ func (s *Store) EnsureNode(ctx context.Context, identifier, nodeType, sourceEntr
 		Timestamp:     getStringField(data, "timestamp"),
 		Predicate:     getStringField(data, "predicate"),
 		ObjectUUID:    getStringField(data, "object_uuid"),
-		SubjectUUID:   getStringField(data, "subject_id"),
-		SourceEntryID: getStringField(data, "source_entry_id"),
+		SubjectUUID:   getStringField(data, "subject_uuid"),
+		SourceEntryID: getStringField(data, "source_entry_uuid"),
 	}
 	if v, ok := data["embedding"].(firestore.Vector32); ok {
 		out.Embedding = []float32(v)
@@ -131,9 +129,9 @@ func (s *Store) CreateRelationshipNode(ctx context.Context, subjectID, predicate
 		"content":             content,
 		"node_type":           NodeTypeRelationship,
 		"predicate":           predicate,
-		"subject_id":          subjectID,
+		"subject_uuid":        subjectID,
 		"object_uuid":         objectID,
-		"source_entry_id":     sourceEntryID,
+		"source_entry_uuid":     sourceEntryID,
 		"entity_links":        []string{subjectID, objectID},
 		"timestamp":           ts,
 		"domain":              "relationship",

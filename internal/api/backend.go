@@ -22,7 +22,7 @@ type PendingQuestion struct {
 	Question       string   `json:"question"`
 	Kind           string   `json:"kind"`
 	Context        string   `json:"context,omitempty"`
-	SourceEntryIDs []string `json:"source_entry_ids,omitempty"`
+	SourceEntryIDs []string `json:"source_entry_uuids,omitempty"`
 	CreatedAt      string   `json:"created_at"`
 }
 

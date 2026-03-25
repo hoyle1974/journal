@@ -98,7 +98,7 @@ func (s *Store) BrainstormSubtasks(ctx context.Context, parentTaskID string) (st
 		resultLines = append(resultLines, fmt.Sprintf("%d. %s (ID: %s)", i+1, e.title, uuid))
 	}
 
-	s.log.Info("engine: subtasks created", "parent_id", parentTaskID, "count", len(entries))
+	s.log.Info("engine: subtasks created", "parent_uuid", parentTaskID, "count", len(entries))
 	return strings.Join(resultLines, "\n"), nil
 }
 
@@ -111,7 +111,7 @@ func (s *Store) GetChildTasks(ctx context.Context, parentID string, limit int) (
 
 	iter := s.db.Collection(KnowledgeCollection).
 		Where("node_type", "==", NodeTypeTask).
-		Where("parent_id", "==", parentID).
+		Where("parent_uuid", "==", parentID).
 		OrderBy("timestamp", firestore.Asc).
 		Limit(limit * 3).
 		Documents(ctx)

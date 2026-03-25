@@ -408,11 +408,11 @@ func normalizeProjectGoal(m map[string]any) (map[string]any, error) {
 		pid = getString(m, "parent_goal_id")
 	}
 	if pid == "" {
-		pid = getString(m, "project_id")
+		pid = getString(m, "project_uuid")
 	}
 	if pid != "" {
 		out["parent_goal"] = pid
-		out["project_id"] = pid
+		out["project_uuid"] = pid
 	}
 	s := getString(m, "status")
 	if s != "" {
@@ -539,7 +539,7 @@ func validateResponse(m map[string]any) error { return nil }
 func normalizeResponse(m map[string]any) (map[string]any, error) {
 	out := make(map[string]any)
 	setString(out, "logic_trace", getString(m, "logic_trace"))
-	setString(out, "source_entry_id", getString(m, "source_entry_id"))
+	setString(out, "source_entry_uuid", getString(m, "source_entry_uuid"))
 	return out, nil
 }
 

@@ -24,7 +24,7 @@ const reflectionSystemPrompt = `You are a summarizer. Given context about why a 
 // A "project" is simply a Task with subtasks (child tasks whose ParentID == this task's UUID).
 type Task struct {
 	UUID            string             `firestore:"-" json:"uuid"`
-	ParentID        string             `firestore:"parent_id" json:"parent_id"`
+	ParentID        string             `firestore:"parent_uuid" json:"parent_uuid"`
 	Content         string             `firestore:"content" json:"content"`
 	Status          string             `firestore:"status" json:"status"` // pending, active, completed, abandoned
 	DueDate         string             `firestore:"due_date" json:"due_date"`
@@ -188,7 +188,7 @@ func (s *Store) CreateTask(ctx context.Context, t *Task) (string, error) {
 	doc := map[string]interface{}{
 		"node_type":           NodeTypeTask,
 		"significance_weight": 0.7,
-		"parent_id":           t.ParentID,
+		"parent_uuid":           t.ParentID,
 		"content":             t.Content,
 		"status":              NormalizeTaskStatus(t.Status),
 		"due_date":            t.DueDate,
@@ -338,7 +338,7 @@ func (s *Store) UpdateTask(ctx context.Context, uuid string, opts *UpdateTaskOpt
 		updates = append(updates, firestore.Update{Path: "content", Value: content})
 	}
 	if opts.ParentID != nil {
-		updates = append(updates, firestore.Update{Path: "parent_id", Value: *opts.ParentID})
+		updates = append(updates, firestore.Update{Path: "parent_uuid", Value: *opts.ParentID})
 	}
 	if opts.DueDate != nil {
 		updates = append(updates, firestore.Update{Path: "due_date", Value: *opts.DueDate})

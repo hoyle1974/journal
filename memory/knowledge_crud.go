@@ -34,15 +34,15 @@ type KnowledgeNode struct {
 	NodeType        string   `firestore:"node_type" json:"node_type"`
 	Metadata        string   `firestore:"metadata" json:"metadata"`
 	Timestamp       string   `firestore:"timestamp" json:"timestamp"`
-	JournalEntryIDs []string `firestore:"-" json:"journal_entry_ids,omitempty"`
+	JournalEntryIDs []string `firestore:"journal_entry_ids,omitempty" json:"journal_entry_ids,omitempty"`
 	// SPO triple fields. Predicate is non-empty only for relational nodes extracted in
 	// Subject | Predicate | Object format (e.g. "prefers", "works_at", "is_part_of").
 	// ObjectUUID is the UUID of the object entity node when it corresponds to an existing
 	// knowledge node; empty when the object is a raw string with no node.
 	Predicate     string `firestore:"predicate,omitempty" json:"predicate,omitempty"`
 	ObjectUUID    string `firestore:"object_uuid,omitempty" json:"object_uuid,omitempty"`
-	SubjectUUID   string `firestore:"subject_id,omitempty" json:"subject_id,omitempty"`
-	SourceEntryID string `firestore:"source_entry_id,omitempty" json:"source_entry_id,omitempty"`
+	SubjectUUID   string `firestore:"subject_uuid,omitempty" json:"subject_uuid,omitempty"`
+	SourceEntryID string `firestore:"source_entry_uuid,omitempty" json:"source_entry_uuid,omitempty"`
 	// Embedding is the vector representation of this node, populated on all reads.
 	// omitempty prevents serializing the vector in JSON tool output.
 	Embedding []float32 `firestore:"embedding" json:"embedding,omitempty"`
@@ -216,7 +216,7 @@ func (s *Store) GetKnowledgeNodesByIDs(ctx context.Context, ids []string) ([]Kno
 					Timestamp:  getStringField(data, "timestamp"),
 					Predicate:   getStringField(data, "predicate"),
 					ObjectUUID:  getStringField(data, "object_uuid"),
-					SubjectUUID: getStringField(data, "subject_id"),
+					SubjectUUID: getStringField(data, "subject_uuid"),
 				},
 				EntityLinks:     getStringSliceField(data, "entity_links"),
 				JournalEntryIDs: getStringSliceField(data, "journal_entry_ids"),

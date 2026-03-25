@@ -6,12 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
 
 	"cloud.google.com/go/firestore"
 )
 
-// UpdateProjectStatus sets the status field on a project or goal node's metadata and updates last_recalled_at.
+// UpdateProjectStatus sets the status field on a project or goal node's metadata.
 // The node must exist and have node_type "project" or "goal"; status is validated against the project/goal schema.
 func (s *Store) UpdateProjectStatus(ctx context.Context, nodeID, status string) error {
 	node, err := s.GetKnowledgeNodeByID(ctx, nodeID)
@@ -47,7 +46,6 @@ func (s *Store) UpdateProjectStatus(ctx context.Context, nodeID, status string) 
 
 	_, err = s.db.Collection(KnowledgeCollection).Doc(nodeID).Update(ctx, []firestore.Update{
 		{Path: "metadata", Value: metaJSON},
-		{Path: "last_recalled_at", Value: time.Now().Format(time.RFC3339)},
 	})
 	return err
 }
@@ -116,7 +114,7 @@ func (s *Store) GetLinkedCompletedProjectID(ctx context.Context, nodeData map[st
 				return pid
 			}
 		}
-		if pid, ok := meta["project_id"].(string); ok && pid != "" {
+		if pid, ok := meta["project_uuid"].(string); ok && pid != "" {
 			if s.isCompletedProjectByID(ctx, pid) {
 				return pid
 			}
