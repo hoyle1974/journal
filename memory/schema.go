@@ -267,8 +267,8 @@ type GenericNodeMeta struct {
 type GraphNodeMeta struct {
 	RelevanceScore float64  `json:"relevance_score"` // 0.0 to 1.0; decays over time via nightly cron
 	HotEdges       []string `json:"hot_edges"`       // up to 20 high-relevance relationship node IDs
-	SubjectID      string   `json:"subject_id"`      // for relationship nodes: subject entity UUID
-	ObjectID       string   `json:"object_id"`       // for relationship nodes: object entity UUID
+	SubjectUUID    string   `json:"subject_uuid"`    // for relationship nodes: subject entity UUID
+	ObjectUUID     string   `json:"object_uuid"`     // for relationship nodes: object entity UUID
 	LogicTrace     string   `json:"logic_trace"`     // for response nodes: LLM reasoning paragraph
 }
 

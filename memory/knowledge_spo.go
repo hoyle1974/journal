@@ -13,6 +13,25 @@ type SPOExtra struct {
 	ObjectValue string
 }
 
+// knowledgeNodeFromDoc builds a KnowledgeNode from a Firestore document snapshot.
+func knowledgeNodeFromDoc(doc *firestore.DocumentSnapshot) KnowledgeNode {
+	data := doc.Data()
+	n := KnowledgeNode{
+		UUID:        doc.Ref.ID,
+		Content:     getStringField(data, "content"),
+		NodeType:    getStringField(data, "node_type"),
+		Metadata:    getStringField(data, "metadata"),
+		Timestamp:   getStringField(data, "timestamp"),
+		Predicate:   getStringField(data, "predicate"),
+		SubjectUUID: getStringField(data, "subject_uuid"),
+		ObjectUUID:  getStringField(data, "object_uuid"),
+	}
+	if v, ok := data["embedding"].(firestore.Vector32); ok {
+		n.Embedding = []float32(v)
+	}
+	return n
+}
+
 // QueryNodesLinkingTo returns nodes whose entity_links array contains targetUUID (incoming edges).
 // This finds all nodes that explicitly reference the target as a linked entity.
 func (s *Store) QueryNodesLinkingTo(ctx context.Context, targetUUID string, limit int) ([]KnowledgeNode, error) {
@@ -20,21 +39,7 @@ func (s *Store) QueryNodesLinkingTo(ctx context.Context, targetUUID string, limi
 		Where("entity_links", "array-contains", targetUUID).
 		Limit(limit)
 	nodes, err := queryDocuments(ctx, query, func(doc *firestore.DocumentSnapshot) (KnowledgeNode, error) {
-		data := doc.Data()
-		n := KnowledgeNode{
-			UUID:        doc.Ref.ID,
-			Content:     getStringField(data, "content"),
-			NodeType:    getStringField(data, "node_type"),
-			Metadata:    getStringField(data, "metadata"),
-			Timestamp:   getStringField(data, "timestamp"),
-			Predicate:   getStringField(data, "predicate"),
-			SubjectUUID: getStringField(data, "subject_uuid"),
-			ObjectUUID:  getStringField(data, "object_uuid"),
-		}
-		if v, ok := data["embedding"].(firestore.Vector32); ok {
-			n.Embedding = []float32(v)
-		}
-		return n, nil
+		return knowledgeNodeFromDoc(doc), nil
 	})
 	if err != nil {
 		return nil, wrapFirestoreIndexError(err)
@@ -49,21 +54,7 @@ func (s *Store) QueryIncomingSPOEdges(ctx context.Context, targetUUID string, li
 		Where("object_uuid", "==", targetUUID).
 		Limit(limit)
 	nodes, err := queryDocuments(ctx, query, func(doc *firestore.DocumentSnapshot) (KnowledgeNode, error) {
-		data := doc.Data()
-		n := KnowledgeNode{
-			UUID:        doc.Ref.ID,
-			Content:     getStringField(data, "content"),
-			NodeType:    getStringField(data, "node_type"),
-			Metadata:    getStringField(data, "metadata"),
-			Timestamp:   getStringField(data, "timestamp"),
-			Predicate:   getStringField(data, "predicate"),
-			SubjectUUID: getStringField(data, "subject_uuid"),
-			ObjectUUID:  getStringField(data, "object_uuid"),
-		}
-		if v, ok := data["embedding"].(firestore.Vector32); ok {
-			n.Embedding = []float32(v)
-		}
-		return n, nil
+		return knowledgeNodeFromDoc(doc), nil
 	})
 	if err != nil {
 		return nil, wrapFirestoreIndexError(err)

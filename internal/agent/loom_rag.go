@@ -61,7 +61,7 @@ func BuildLoomRAGContext(ctx context.Context, app *infra.App, logUUID, logConten
 				if n.NodeType == memory.NodeTypeRelationship {
 					result.RelationshipSummaries = append(result.RelationshipSummaries,
 						formatRelNode(n, sg.Nodes))
-				} else if n.NodeType != "log" && n.NodeType != "response" {
+				} else if n.NodeType != memory.NodeTypeLog && n.NodeType != memory.NodeTypeResponse {
 					seed := sg.SeedUUIDs[uuid]
 					result.HopNodeSummaries = append(result.HopNodeSummaries,
 						formatEntityNode(n, seed))

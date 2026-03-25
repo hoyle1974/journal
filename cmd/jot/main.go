@@ -202,23 +202,24 @@ func jsonStringSlice(m map[string]interface{}, key string) []string {
 }
 
 // printGraphContextIfAny prints graph context (Loom RAG + graph_expand results) before CoT.
-func printGraphContextIfAny(result map[string]interface{}) {
+func printGraphContextIfAny(result map[string]interface{}) bool {
 	gc := jsonStringSlice(result, "graph_context")
 	if len(gc) == 0 {
-		return
+		return false
 	}
 	fmt.Println("Graph Context:")
 	for _, block := range gc {
 		fmt.Println(strings.TrimSpace(block))
 		fmt.Println()
 	}
+	return true
 }
 
 // printReasoningTraceIfAny prints CoT reasoning blocks from /query JSON before the answer.
-func printReasoningTraceIfAny(result map[string]interface{}) {
+func printReasoningTraceIfAny(result map[string]interface{}) bool {
 	rt := jsonStringSlice(result, "reasoning_trace")
 	if len(rt) == 0 {
-		return
+		return false
 	}
 	fmt.Println("Reasoning:")
 	for i, block := range rt {
@@ -228,13 +229,11 @@ func printReasoningTraceIfAny(result map[string]interface{}) {
 		fmt.Printf("[%d]\n%s\n", i+1, strings.TrimSpace(block))
 	}
 	fmt.Println()
+	return true
 }
 
-// printResponseSeparatorIfDebug prints a visual separator before the answer when debug output
-// (graph context or reasoning trace) was printed above it.
-func printResponseSeparatorIfDebug(result map[string]interface{}) {
-	hasDebug := len(jsonStringSlice(result, "graph_context")) > 0 || len(jsonStringSlice(result, "reasoning_trace")) > 0
-	if hasDebug {
+func printResponseSeparatorIfDebug(hadDebug bool) {
+	if hadDebug {
 		fmt.Println("---------------------")
 	}
 }
@@ -409,9 +408,9 @@ func cmdIngest(input string) {
 	if traceFlag && headers != nil {
 		printTraceInfo(headers)
 	}
-	printGraphContextIfAny(result)
-	printReasoningTraceIfAny(result)
-	printResponseSeparatorIfDebug(result)
+	hadDebug := printGraphContextIfAny(result)
+	hadDebug = printReasoningTraceIfAny(result) || hadDebug
+	printResponseSeparatorIfDebug(hadDebug)
 	if answer := jsonStr(result, "answer"); answer != "" {
 		fmt.Println(answer)
 	} else {
@@ -446,8 +445,7 @@ func cmdQuery(question string) {
 		os.Exit(1)
 	}
 	if errFlag, ok := result["error"].(bool); ok && errFlag {
-		printReasoningTraceIfAny(result)
-		printResponseSeparatorIfDebug(result)
+		printResponseSeparatorIfDebug(printReasoningTraceIfAny(result))
 		if answer := jsonStr(result, "answer"); answer != "" {
 			fmt.Printf("%s\n", answer)
 		} else {
@@ -456,8 +454,7 @@ func cmdQuery(question string) {
 		os.Exit(1)
 	}
 
-	printReasoningTraceIfAny(result)
-	printResponseSeparatorIfDebug(result)
+	printResponseSeparatorIfDebug(printReasoningTraceIfAny(result))
 	if answer := jsonStr(result, "answer"); answer != "" {
 		fmt.Println(answer)
 	} else {

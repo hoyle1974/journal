@@ -150,11 +150,14 @@ func (s *Store) GetKnowledgeNodeByID(ctx context.Context, id string) (*Knowledge
 	data := doc.Data()
 	n := &KnowledgeNodeWithLinks{
 		KnowledgeNode: KnowledgeNode{
-			UUID:      doc.Ref.ID,
-			Content:   getStringField(data, "content"),
-			NodeType:  getStringField(data, "node_type"),
-			Metadata:  getStringField(data, "metadata"),
-			Timestamp: getStringField(data, "timestamp"),
+			UUID:        doc.Ref.ID,
+			Content:     getStringField(data, "content"),
+			NodeType:    getStringField(data, "node_type"),
+			Metadata:    getStringField(data, "metadata"),
+			Timestamp:   getStringField(data, "timestamp"),
+			Predicate:   getStringField(data, "predicate"),
+			SubjectUUID: getStringField(data, "subject_uuid"),
+			ObjectUUID:  getStringField(data, "object_uuid"),
 		},
 		EntityLinks:     getStringSliceField(data, "entity_links"),
 		JournalEntryIDs: getStringSliceField(data, "journal_entry_ids"),

@@ -386,11 +386,10 @@ func (s *Store) GraphExpandMulti(ctx context.Context, seedIDs []string, queryVec
 		}
 	}
 
-	// Resolve all nodes referenced in edges or relationship-node SPO fields but
-	// not yet fetched. Run two passes: the first pass may fetch relationship nodes
-	// whose SubjectUUID/ObjectUUID are only populated after the fetch, so a second
-	// pass resolves the entity nodes they reference.
-	resolveDangling := func() {
+	// Resolve all nodes referenced in edges or relationship-node SPO fields but not yet fetched.
+	// Loop until no new nodes are discovered — each pass may fetch relationship nodes whose
+	// SubjectUUID/ObjectUUID reveal further unresolved entity nodes.
+	resolveDangling := func() bool {
 		danglingIDs := make(map[string]bool)
 		for _, e := range sg.Edges {
 			if _, ok := sg.Nodes[e.SourceUUID]; !ok {
@@ -416,7 +415,7 @@ func (s *Store) GraphExpandMulti(ctx context.Context, seedIDs []string, queryVec
 			}
 		}
 		if len(danglingIDs) == 0 {
-			return
+			return false
 		}
 		ids := make([]string, 0, len(danglingIDs))
 		for id := range danglingIDs {
@@ -425,14 +424,19 @@ func (s *Store) GraphExpandMulti(ctx context.Context, seedIDs []string, queryVec
 		resolved, err := s.GetKnowledgeNodesByIDs(ctx, ids)
 		if err != nil {
 			s.log.Debug("graph expand: failed to resolve dangling nodes", "error", err)
-			return
+			return false
 		}
 		for _, n := range resolved {
 			sg.Nodes[n.UUID] = n
 		}
+		return true
 	}
-	resolveDangling() // pass 1: fetch nodes referenced by edges and known relationship nodes
-	resolveDangling() // pass 2: fetch entity nodes referenced by relationship nodes fetched in pass 1
+	const maxResolvePasses = 4
+	for range maxResolvePasses {
+		if !resolveDangling() {
+			break
+		}
+	}
 
 	// Deduplicate edges accumulated across all seed BFS paths.
 	sg.Edges = deduplicateEdges(sg.Edges)
