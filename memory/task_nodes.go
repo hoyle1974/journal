@@ -14,6 +14,10 @@ import (
 // Prevents duplicate tasks when both process-entry (agency) and the LLM create_task run concurrently for the same entry.
 const TaskCreateIdempotencyWindow = 30 * time.Second
 
+// TaskSemanticDedupThreshold is the cosine distance below which a new task is considered a semantic duplicate
+// of an existing open (pending/active) task. Cosine distance = 1 - cosine_similarity; 0.15 ≈ 85% similarity.
+const TaskSemanticDedupThreshold = 0.15
+
 const reflectionSystemPrompt = `You are a summarizer. Given context about why a task was completed or abandoned, output exactly 1-2 short sentences of plain prose suitable for a journal reflection. Output plain text only—no JSON, no arrays, no code, no numbers or brackets. No preamble or quotes.`
 
 // Task represents a todo/task with optional hierarchy and backlinks to journal and memory.
@@ -108,6 +112,34 @@ func findRecentDuplicateTask(ctx context.Context, client *firestore.Client, entr
 	return "", nil
 }
 
+// findSimilarOpenTask returns the UUID of an existing pending or active task whose embedding is within
+// TaskSemanticDedupThreshold cosine distance of the provided vector, or empty string if none found.
+func findSimilarOpenTask(ctx context.Context, client *firestore.Client, embedding []float32) (string, error) {
+	threshold := TaskSemanticDedupThreshold
+	opts := &firestore.FindNearestOptions{DistanceThreshold: &threshold}
+	vectorQuery := client.Collection(KnowledgeCollection).
+		Where("node_type", "==", NodeTypeTask).
+		FindNearest("embedding", firestore.Vector32(embedding), 5, firestore.DistanceMeasureCosine, opts)
+	iter := vectorQuery.Documents(ctx)
+	defer iter.Stop()
+	for {
+		doc, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return "", fmt.Errorf("find similar open tasks: %w", err)
+		}
+		data := doc.Data()
+		status, _ := data["status"].(string)
+		if status != TaskStatusPending && status != TaskStatusActive {
+			continue
+		}
+		return doc.Ref.ID, nil
+	}
+	return "", nil
+}
+
 // CreateTask creates a task in the journal collection (node_type=task), generates an embedding for
 // Content+SystemPrompt, and returns the task UUID.
 func (s *Store) CreateTask(ctx context.Context, t *Task) (string, error) {
@@ -135,6 +167,16 @@ func (s *Store) CreateTask(ctx context.Context, t *Task) (string, error) {
 	embedding, err := s.embedder.GenerateEmbedding(ctx, textToEmbed, EmbedTaskRetrievalDocument)
 	if err != nil {
 		return "", fmt.Errorf("generate embedding: %w", err)
+	}
+
+	// Semantic dedup: skip creation if a semantically equivalent open task already exists.
+	// This catches wording variations that slip past the exact-text idempotency check above.
+	if similarUUID, err := findSimilarOpenTask(ctx, s.db, embedding); err != nil {
+		s.log.Debug("task semantic dedup check failed", "error", err)
+		// Non-fatal: proceed with create so we never silently drop a genuine new task.
+	} else if similarUUID != "" {
+		s.log.Info("task create skipped: semantically similar open task exists", "existing_uuid", similarUUID, "content", t.Content)
+		return similarUUID, nil
 	}
 
 	uuid := generateUUID()

@@ -18,7 +18,16 @@ Subject | Predicate | Object | SubjectType | ObjectType
 
 # Rules
 1. USE NAMES: Use entity names as Subject or Object values.
-2. ASSIGN TYPES: For every triple, provide the Type for both Subject and Object (person, place, project, goal, preference, event, asset, tool, object, generic).
+2. ASSIGN TYPES: For every triple, provide the Type for both Subject and Object using exactly one of these values:
+   - person: a human being (e.g. Alex, Sarah, the doctor)
+   - place: a physical location, building, venue, hotel, city, room (e.g. Napa, the hotel, the office)
+   - event: a time-bound occurrence, trip, celebration, meeting, occasion (e.g. Sarah's birthday, the Napa trip)
+   - project: an ongoing body of work or initiative
+   - goal: a desired outcome or objective
+   - preference: a like, dislike, or style preference
+   - asset: a physical object, structure, or owned thing (e.g. the deck, the car, outdoor lights)
+   - tool: software or hardware tool
+   - generic: anything that does not clearly fit the above
 3. ONTOLOGY: Prefer predicates from this list: {{.AllowedPredicates}}
 4. NEW PREDICATES: If you identify a high-value relationship that clearly does not fit any existing predicate, output it with the prefix NEW: (e.g. NEW:mentors). Only do this for genuinely novel, reusable predicates.
 5. LIMIT: Maximum 5 high-confidence triples. If none, set status: none.

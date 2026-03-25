@@ -427,8 +427,8 @@ func parseRefineryTriples(lines []string, ownerName string) []refineryTriple {
 		}
 		sub = resolvedSub
 		obj = resolvedObj
-		subType := memory.NodeTypePerson
-		objType := memory.NodeTypePerson
+		subType := memory.NodeTypeGeneric
+		objType := memory.NodeTypeGeneric
 		if len(parts) == 5 {
 			subType = memory.CanonicalEntityNodeType(parts[3])
 			objType = memory.CanonicalEntityNodeType(parts[4])

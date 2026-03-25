@@ -198,8 +198,11 @@ func TestCanonicalEntityNodeType(t *testing.T) {
 		{in: "location", want: NodeTypePlace},
 		{in: "Project", want: NodeTypeProject},
 		{in: "tool", want: NodeTypeTool},
-		{in: "unknown", want: NodeTypePerson},
-		{in: "", want: NodeTypePerson},
+		{in: "unknown", want: NodeTypeGeneric},
+		{in: "", want: NodeTypeGeneric},
+		{in: "object", want: NodeTypeAsset},
+		{in: "hotel", want: NodeTypePlace},
+		{in: "trip", want: NodeTypeEvent},
 	}
 	for _, tc := range tests {
 		got := CanonicalEntityNodeType(tc.in)

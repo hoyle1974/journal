@@ -114,7 +114,7 @@ func CanonicalEntityNodeType(raw string) string {
 	switch t {
 	case NodeTypePerson, "people", "human":
 		return NodeTypePerson
-	case NodeTypePlace, "location", "city", "country":
+	case NodeTypePlace, "location", "city", "country", "building", "venue", "hotel", "restaurant", "room":
 		return NodeTypePlace
 	case NodeTypeProject, "work":
 		return NodeTypeProject
@@ -122,18 +122,18 @@ func CanonicalEntityNodeType(raw string) string {
 		return NodeTypeGoal
 	case NodeTypePreference:
 		return NodeTypePreference
-	case NodeTypeEvent:
+	case NodeTypeEvent, "meeting", "occasion", "celebration", "trip":
 		return NodeTypeEvent
 	case NodeTypeMilestone:
 		return NodeTypeMilestone
-	case NodeTypeAsset:
+	case NodeTypeAsset, "object", "item", "thing", "structure", "deck", "furniture":
 		return NodeTypeAsset
 	case NodeTypeTool:
 		return NodeTypeTool
 	case NodeTypeGeneric:
 		return NodeTypeGeneric
 	default:
-		return NodeTypePerson
+		return NodeTypeGeneric
 	}
 }
 
