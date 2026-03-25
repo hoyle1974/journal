@@ -21,7 +21,7 @@ func TestParseRefineryTriples(t *testing.T) {
 		"Gloria | works_at | Anthropic | person | project",
 		"bad line",
 		"Ada | moved_to | Paris",
-	})
+	}, "")
 	if len(triples) != 3 {
 		t.Fatalf("expected 3 triples (including reject entry), got %d", len(triples))
 	}

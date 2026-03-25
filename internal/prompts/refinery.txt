@@ -10,6 +10,9 @@ Identify clear, factual relationships in the entry and express them as triples.
 # Output Format
 Return key/value lines only.
 status: ok | none
+{{- if not .OwnerName}}
+owner: <FirstName LastName or empty>
+{{- end}}
 triples:
 Subject | Predicate | Object | SubjectType | ObjectType
 
@@ -19,6 +22,12 @@ Subject | Predicate | Object | SubjectType | ObjectType
 3. ONTOLOGY: Prefer predicates from this list: {{.AllowedPredicates}}
 4. NEW PREDICATES: If you identify a high-value relationship that clearly does not fit any existing predicate, output it with the prefix NEW: (e.g. NEW:mentors). Only do this for genuinely novel, reusable predicates.
 5. LIMIT: Maximum 5 high-confidence triples. If none, set status: none.
+6. NO PRONOUNS: Never use first-person pronouns (I, me, my, myself, we, us, our) or second-person pronouns (you, your) as a Subject or Object.
+{{- if .OwnerName}}
+7. OWNER IDENTITY: The user's name is "{{.OwnerName}}". Replace any first-person pronoun (I, me, my, myself) with "{{.OwnerName}}" when it refers to the user in a triple.
+{{- else}}
+7. OWNER DETECTION: If the entry contains a clear self-introduction (e.g. "I'm Alex", "My name is Sarah", "I am Jordan Smith"), output the detected name on the `owner:` line. If no introduction is present, leave `owner:` empty.
+{{- end}}
 
 Allowed Predicates:
 {{.AllowedPredicates}}

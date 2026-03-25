@@ -257,7 +257,7 @@ func TestSubGraphToMarkdown_GraphTool(t *testing.T) {
 	checks := []string{
 		"seed-001",
 		"Alice is a software engineer",
-		"out-001",
+		"Alice works_at Google",
 		"works_at",
 	}
 	for _, check := range checks {

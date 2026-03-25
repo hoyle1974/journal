@@ -121,13 +121,43 @@ func runRefineryPipeline(ctx context.Context, app *infra.App, entryUUID, content
 		infra.LoggerFrom(ctx).Warn("refinery: canonical map fetch failed, using fallback", "error", err)
 	}
 
+	// Fetch the owner identity so pronouns can be resolved rather than dropped.
+	ownerName, err := app.Memory.FetchOwnerName(ctx)
+	if err != nil {
+		infra.LoggerFrom(ctx).Warn("refinery: could not fetch owner name, pronoun triples will be dropped", "error", err)
+	}
+
 	// NOTE: Pre-refinery Discovery (12-node vector search for prior context) is removed
 	// per Project Loom spec. Context retrieval is now Stage 4 (Response Worker) only.
 
-	triples, err := refineryExtract(ctx, app, entryUUID, content, canonMap)
+	triples, detectedOwner, err := refineryExtract(ctx, app, entryUUID, content, canonMap, ownerName)
 	if err != nil {
 		return nil, fmt.Errorf("refinery extract: %w", err)
 	}
+
+	// If the LLM detected a self-introduction and we don't yet have an identity anchor, persist it.
+	if detectedOwner != "" && ownerName == "" {
+		if uErr := app.Memory.UpsertOwnerName(ctx, detectedOwner); uErr != nil {
+			infra.LoggerFrom(ctx).Warn("refinery: failed to persist detected owner name", "detected", detectedOwner, "error", uErr)
+		} else {
+			ownerName = detectedOwner
+			infra.LoggerFrom(ctx).Info("refinery: owner identity established", "owner_name", ownerName)
+		}
+	}
+
+	// If owner is still unknown and any triples were dropped due to pronouns, ask the user their name.
+	if ownerName == "" && hasPronounDrops(triples) {
+		q := memory.PendingQuestion{
+			Question:       "I noticed you're writing about yourself in first person, but I don't know your name yet. What should I call you?",
+			Kind:           "onboarding",
+			Context:        "First-person pronouns were detected in a journal entry but no identity anchor exists.",
+			SourceEntryIDs: []string{entryUUID},
+		}
+		if qErr := app.Memory.InsertPendingQuestions(ctx, []memory.PendingQuestion{q}); qErr != nil {
+			infra.LoggerFrom(ctx).Warn("refinery: failed to enqueue owner name question", "error", qErr)
+		}
+	}
+
 	if len(triples) == 0 {
 		infra.LoggerFrom(ctx).Debug("refinery: no triples", "entry_uuid", entryUUID)
 		return nil, nil
@@ -135,7 +165,7 @@ func runRefineryPipeline(ctx context.Context, app *infra.App, entryUUID, content
 	return refineryResolveCommit(ctx, app, entryUUID, triples, canonMap)
 }
 
-func refineryExtract(ctx context.Context, app *infra.App, entryUUID, content string, canonMap memory.CanonicalMapConfig) ([]refineryTriple, error) {
+func refineryExtract(ctx context.Context, app *infra.App, entryUUID, content string, canonMap memory.CanonicalMapConfig, ownerName string) ([]refineryTriple, string, error) {
 	ctx, span := infra.StartSpan(ctx, "agent.refinery_extract")
 	defer span.End()
 
@@ -143,21 +173,23 @@ func refineryExtract(ctx context.Context, app *infra.App, entryUUID, content str
 	prompt, err := prompts.BuildRefinery(prompts.RefineryData{
 		Entry:             utils.WrapAsUserData(utils.SanitizePrompt(content)),
 		AllowedPredicates: utils.WrapAsUserData(predicateList),
+		OwnerName:         ownerName,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("build refinery prompt: %w", err)
+		return nil, "", fmt.Errorf("build refinery prompt: %w", err)
 	}
 	raw, err := infra.GenerateContentSimple(ctx, app, "", prompt+prompts.DataSafety(), app.Config(), &infra.GenConfig{MaxOutputTokens: 300})
 	if err != nil {
-		return nil, fmt.Errorf("refinery llm call: %w", err)
+		return nil, "", fmt.Errorf("refinery llm call: %w", err)
 	}
 	infra.LoggerFrom(ctx).Debug("refinery raw output", "entry_uuid", entryUUID, "output", raw)
 	simple, sections := utils.ParseKeyValueMap(raw)
 	if strings.EqualFold(simple["status"], "none") {
-		return nil, nil
+		return nil, "", nil
 	}
+	detectedOwner := strings.TrimSpace(simple["owner"])
 	lines := sections["triples"]
-	return parseRefineryTriples(lines), nil
+	return parseRefineryTriples(lines, ownerName), detectedOwner, nil
 }
 
 func refineryResolveCommit(ctx context.Context, app *infra.App, entryUUID string, triples []refineryTriple, canonMap memory.CanonicalMapConfig) ([]string, error) {
@@ -319,7 +351,37 @@ func updateHotEdges(ctx context.Context, app *infra.App, objectNodeID, newRelati
 	return err
 }
 
-func parseRefineryTriples(lines []string) []refineryTriple {
+// hasPronounDrops reports whether any triple was rejected due to an unknown pronoun subject/object.
+func hasPronounDrops(triples []refineryTriple) bool {
+	for _, t := range triples {
+		if t.ParseErr == "pronoun subject or object rejected (owner identity unknown)" {
+			return true
+		}
+	}
+	return false
+}
+
+// pronounSet contains first- and second-person pronouns that should never
+// become knowledge graph nodes. Entries are lowercase for case-insensitive matching.
+var pronounSet = map[string]bool{
+	"i": true, "me": true, "my": true, "myself": true, "mine": true,
+	"we": true, "us": true, "our": true, "ours": true, "ourselves": true,
+	"you": true, "your": true, "yours": true, "yourself": true, "yourselves": true,
+}
+
+// resolvePronoun replaces a bare first/second-person pronoun with ownerName when
+// the identity is known, or returns ("", true) to signal the triple should be dropped.
+func resolvePronoun(term, ownerName string) (resolved string, drop bool) {
+	if !pronounSet[strings.ToLower(term)] {
+		return term, false
+	}
+	if ownerName != "" {
+		return ownerName, false
+	}
+	return "", true
+}
+
+func parseRefineryTriples(lines []string, ownerName string) []refineryTriple {
 	out := make([]refineryTriple, 0, len(lines))
 	for _, line := range lines {
 		rawLine := strings.TrimSpace(line)
@@ -350,6 +412,21 @@ func parseRefineryTriples(lines []string) []refineryTriple {
 			})
 			continue
 		}
+		// Resolve or drop pronoun subjects/objects.
+		resolvedSub, dropSub := resolvePronoun(sub, ownerName)
+		resolvedObj, dropObj := resolvePronoun(obj, ownerName)
+		if dropSub || dropObj {
+			out = append(out, refineryTriple{
+				Subject:   sub,
+				Predicate: pred,
+				Object:    obj,
+				RawLine:   rawLine,
+				ParseErr:  "pronoun subject or object rejected (owner identity unknown)",
+			})
+			continue
+		}
+		sub = resolvedSub
+		obj = resolvedObj
 		subType := memory.NodeTypePerson
 		objType := memory.NodeTypePerson
 		if len(parts) == 5 {

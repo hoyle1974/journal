@@ -123,6 +123,9 @@ func BuildDebugReport(data DebugReportData) (string, error) {
 type RefineryData struct {
 	Entry             string
 	AllowedPredicates string
+	// OwnerName is the primary name of the user (from the identity_anchor node).
+	// Empty when identity has not yet been established.
+	OwnerName string
 }
 
 // BuildRefinery executes the refinery template.

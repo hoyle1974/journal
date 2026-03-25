@@ -24,8 +24,9 @@ type Edge struct {
 // SubGraph is the result of a graph traversal. Nodes is keyed by UUID.
 // KnowledgeNodeWithLinks is used so EntityLinks are available at every BFS hop.
 type SubGraph struct {
-	Nodes map[string]KnowledgeNodeWithLinks
-	Edges []Edge
+	Nodes    map[string]KnowledgeNodeWithLinks
+	Edges    []Edge
+	SeedUUIDs map[string]bool // UUIDs of the initial keyword-matched seed nodes
 }
 
 // ToMarkdown serializes the SubGraph as Markdown optimized for LLM context injection.
@@ -58,42 +59,58 @@ var noisyNodeTypes = map[string]bool{
 	"log":      true,
 }
 
+// titleCase returns s with the first byte uppercased (ASCII node type names only).
+func titleCase(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+// nodeLabel returns a short display label for a node: Type[Content].
+func nodeLabel(n KnowledgeNodeWithLinks) string {
+	content := n.Content
+	if len(content) > 60 {
+		content = content[:57] + "..."
+	}
+	return titleCase(n.NodeType) + "[" + content + "]"
+}
+
 func (sg *SubGraph) writeEntitiesAndRelationships(sb *strings.Builder) {
 	sb.WriteString("## Entities\n")
 	for uuid, n := range sg.Nodes {
-		if noisyNodeTypes[n.NodeType] {
+		if noisyNodeTypes[n.NodeType] || n.NodeType == NodeTypeRelationship {
 			continue
 		}
-		content := n.Content
-		if len(content) > 120 {
-			content = content[:117] + "..."
+		label := nodeLabel(n)
+		if sg.SeedUUIDs[uuid] {
+			label += " ★"
 		}
-		fmt.Fprintf(sb, "* [%s] %s: %q\n", uuid, n.NodeType, content)
+		fmt.Fprintf(sb, "* %s\n", label)
 	}
 
-	if len(sg.Edges) > 0 {
-		sb.WriteString("\n## Relationships\n")
-		for _, e := range sg.Edges {
-			if e.Predicate == "incoming_link" {
-				continue
-			}
-			src, srcOK := sg.Nodes[e.SourceUUID]
-			tgt, tgtOK := sg.Nodes[e.TargetUUID]
-			if (srcOK && noisyNodeTypes[src.NodeType]) || (tgtOK && noisyNodeTypes[tgt.NodeType]) {
-				continue
-			}
-			srcContent := e.SourceUUID
-			if srcOK {
-				srcContent = truncateString(src.Content, 40)
-			}
-			tgtContent := e.TargetUUID
-			if tgtOK {
-				tgtContent = truncateString(tgt.Content, 40)
-			}
-			fmt.Fprintf(sb, "* [%s] %s -> %s -> [%s] %s\n",
-				e.SourceUUID, srcContent, e.Predicate, e.TargetUUID, tgtContent)
+	sb.WriteString("\n## Relationships\n")
+	for uuid, n := range sg.Nodes {
+		if n.NodeType != NodeTypeRelationship {
+			continue
 		}
+		subj, subjOK := sg.Nodes[n.SubjectUUID]
+		obj, objOK := sg.Nodes[n.ObjectUUID]
+		subjLabel := n.SubjectUUID
+		if subjOK {
+			subjLabel = nodeLabel(subj)
+		}
+		objLabel := n.ObjectUUID
+		if objOK {
+			objLabel = nodeLabel(obj)
+		}
+		line := fmt.Sprintf("* %s -> %s -> %s", subjLabel, n.Predicate, objLabel)
+		if sg.SeedUUIDs[uuid] {
+			line += " ★"
+		}
+		fmt.Fprintln(sb, line)
 	}
+
 }
 
 // pruneCandidates returns the top-maxK candidates sorted by cosine similarity to
@@ -164,9 +181,15 @@ func (s *Store) GraphExpandMulti(ctx context.Context, seedIDs []string, queryVec
 		hops = 1
 	}
 
+	seedSet := make(map[string]bool, len(seedIDs))
+	for _, id := range seedIDs {
+		seedSet[id] = true
+	}
+
 	sg := &SubGraph{
-		Nodes: make(map[string]KnowledgeNodeWithLinks),
-		Edges: make([]Edge, 0),
+		Nodes:     make(map[string]KnowledgeNodeWithLinks),
+		Edges:     make([]Edge, 0),
+		SeedUUIDs: seedSet,
 	}
 
 	// Batch-fetch all seed nodes (GetKnowledgeNodesByIDs returns EntityLinks).
@@ -236,6 +259,11 @@ func (s *Store) GraphExpandMulti(ctx context.Context, seedIDs []string, queryVec
 				if node.ObjectUUID != "" {
 					localEdges = append(localEdges, Edge{SourceUUID: nodeUUID, TargetUUID: node.ObjectUUID, Predicate: node.Predicate})
 					newUUIDs = append(newUUIDs, node.ObjectUUID)
+				}
+				// For relationship nodes, also traverse the subject so that the full
+				// SPO triple is reachable even when the seed is the relationship itself.
+				if node.SubjectUUID != "" {
+					newUUIDs = append(newUUIDs, node.SubjectUUID)
 				}
 				for _, n := range incomingSPO {
 					localEdges = append(localEdges, Edge{SourceUUID: n.UUID, TargetUUID: nodeUUID, Predicate: n.Predicate})

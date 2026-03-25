@@ -255,6 +255,9 @@ func (s *Store) ResolvePendingQuestion(ctx context.Context, uuid, answer string)
 			if _, upErr := sCopy.UpsertSemanticMemory(bgCtx, answer, "user_identity", "selfmodel", 1.0, nil, nil); upErr != nil {
 				sCopy.log.Warn("onboarding answer upsert failed", "error", upErr)
 			}
+			if upErr := sCopy.UpsertOwnerName(bgCtx, answer); upErr != nil {
+				sCopy.log.Warn("onboarding owner name upsert failed", "error", upErr)
+			}
 		}()
 	}
 	return nil
