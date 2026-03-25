@@ -53,51 +53,19 @@ func BuildLoomRAGContext(ctx context.Context, app *infra.App, logUUID, logConten
 	}
 
 	if len(seedNodeIDs) > 0 {
-		// Batch fetch all seed nodes (1 RPC for up to 100 seeds).
-		seedNodes, err := app.Memory.GetKnowledgeNodesByIDs(ctx, seedNodeIDs)
+		sg, err := app.MemoryGraph().ExpandMulti(ctx, seedNodeIDs, nil, 2, 8)
 		if err != nil {
-			infra.LoggerFrom(ctx).Warn("loom rag: batch fetch seeds failed", "error", err)
-		}
-
-		// Record seed summaries and collect second-hop IDs.
-		seenIDs := make(map[string]bool, len(seedNodeIDs)+20)
-		for _, id := range seedNodeIDs {
-			seenIDs[id] = true
-		}
-		var hopIDs []string
-
-		for _, node := range seedNodes {
-			if node.NodeType == memory.NodeTypeRelationship {
-				result.RelationshipSummaries = append(result.RelationshipSummaries,
-					fmt.Sprintf("[rel] %s | %s | subj=%s obj=%s",
-						node.UUID, node.Content, node.SubjectUUID, node.ObjectUUID))
-				for _, hopID := range []string{node.SubjectUUID, node.ObjectUUID} {
-					if hopID != "" && !seenIDs[hopID] {
-						seenIDs[hopID] = true
-						hopIDs = append(hopIDs, hopID)
-					}
+			infra.LoggerFrom(ctx).Warn("loom rag: graph expand failed", "error", err)
+		} else {
+			for uuid, n := range sg.Nodes {
+				if n.NodeType == memory.NodeTypeRelationship {
+					result.RelationshipSummaries = append(result.RelationshipSummaries,
+						formatRelNode(n, sg.Nodes))
+				} else if n.NodeType != "log" && n.NodeType != "response" {
+					seed := sg.SeedUUIDs[uuid]
+					result.HopNodeSummaries = append(result.HopNodeSummaries,
+						formatEntityNode(n, seed))
 				}
-			} else {
-				result.HopNodeSummaries = append(result.HopNodeSummaries,
-					fmt.Sprintf("[node] %s | %s", node.UUID, node.Content))
-				for _, hopID := range node.EntityLinks {
-					if hopID != "" && !seenIDs[hopID] {
-						seenIDs[hopID] = true
-						hopIDs = append(hopIDs, hopID)
-					}
-				}
-			}
-		}
-
-		// Batch fetch second-hop nodes (1 RPC for all hot-edges and subject/objects).
-		if len(hopIDs) > 0 {
-			hopNodes, err := app.Memory.GetKnowledgeNodesByIDs(ctx, hopIDs)
-			if err != nil {
-				infra.LoggerFrom(ctx).Warn("loom rag: batch fetch hop nodes failed", "error", err)
-			}
-			for _, node := range hopNodes {
-				result.HopNodeSummaries = append(result.HopNodeSummaries,
-					fmt.Sprintf("[hop] %s | %s", node.UUID, node.Content))
 			}
 		}
 	}
@@ -156,6 +124,62 @@ var stopWords = map[string]bool{
 // firstPersonPronouns are replaced with the owner's name when known.
 var firstPersonPronouns = map[string]bool{
 	"i": true, "me": true, "my": true, "mine": true, "myself": true,
+}
+
+// formatRelNode formats a relationship node with full SPO data and resolved subject/object labels.
+func formatRelNode(n memory.KnowledgeNodeWithLinks, nodes map[string]memory.KnowledgeNodeWithLinks) string {
+	subjectLabel := n.SubjectUUID
+	if s, ok := nodes[n.SubjectUUID]; ok && s.Content != "" {
+		subjectLabel = s.Content
+	}
+	objectLabel := n.ObjectUUID
+	if o, ok := nodes[n.ObjectUUID]; ok && o.Content != "" {
+		objectLabel = o.Content
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "[rel:%s] %s --%s--> %s", n.UUID, subjectLabel, n.Predicate, objectLabel)
+	if n.Metadata != "" && n.Metadata != "{}" {
+		fmt.Fprintf(&b, " | meta=%s", n.Metadata)
+	}
+	if n.RelevanceScore > 0 {
+		fmt.Fprintf(&b, " | score=%.2f", n.RelevanceScore)
+	}
+	if n.LogicTrace != "" {
+		fmt.Fprintf(&b, " | trace=%s", n.LogicTrace)
+	}
+	if n.Timestamp != "" {
+		fmt.Fprintf(&b, " | ts=%s", n.Timestamp)
+	}
+	return b.String()
+}
+
+// formatEntityNode formats an entity/concept node with all available fields.
+func formatEntityNode(n memory.KnowledgeNodeWithLinks, isSeed bool) string {
+	var b strings.Builder
+	seedMark := ""
+	if isSeed {
+		seedMark = "*"
+	}
+	fmt.Fprintf(&b, "[%s%s:%s] %s", seedMark, n.NodeType, n.UUID, n.Content)
+	if n.Metadata != "" && n.Metadata != "{}" {
+		fmt.Fprintf(&b, " | meta=%s", n.Metadata)
+	}
+	if n.RelevanceScore > 0 {
+		fmt.Fprintf(&b, " | score=%.2f", n.RelevanceScore)
+	}
+	if len(n.HotEdges) > 0 {
+		fmt.Fprintf(&b, " | hot_edges=%s", strings.Join(n.HotEdges, ","))
+	}
+	if len(n.EntityLinks) > 0 {
+		fmt.Fprintf(&b, " | links=%d", len(n.EntityLinks))
+	}
+	if n.LogicTrace != "" {
+		fmt.Fprintf(&b, " | trace=%s", n.LogicTrace)
+	}
+	if n.Timestamp != "" {
+		fmt.Fprintf(&b, " | ts=%s", n.Timestamp)
+	}
+	return b.String()
 }
 
 // keywordTerms strips stop words from s and returns the remaining words joined by spaces.
