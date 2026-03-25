@@ -37,7 +37,7 @@ func TestParseRefineryTriples(t *testing.T) {
 	if triples[1].RawLine != "bad line" {
 		t.Fatalf("expected raw line to be preserved, got %q", triples[1].RawLine)
 	}
-	if triples[2].SubType != "person" || triples[2].ObjType != "person" {
-		t.Fatalf("expected default person types for 3-field triples, got sub=%q obj=%q", triples[2].SubType, triples[2].ObjType)
+	if triples[2].SubType != "generic" || triples[2].ObjType != "generic" {
+		t.Fatalf("expected default generic types for 3-field triples, got sub=%q obj=%q", triples[2].SubType, triples[2].ObjType)
 	}
 }
