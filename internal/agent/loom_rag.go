@@ -22,7 +22,10 @@ type LoomRAGContext struct {
 //  2. Collect second-hop IDs (subject/object for rels, EntityLinks for entities).
 //  3. Batch-fetch second-hop nodes.
 //  4. Always include open root tasks for task-aware reasoning.
-func BuildLoomRAGContext(ctx context.Context, app *infra.App, logUUID string, seedNodeIDs []string) (*LoomRAGContext, error) {
+//
+// logContent is used as a keyword-search fallback when seedNodeIDs is empty (e.g. for questions
+// that yield no extractable triples from the refinery).
+func BuildLoomRAGContext(ctx context.Context, app *infra.App, logUUID, logContent string, seedNodeIDs []string) (*LoomRAGContext, error) {
 	if app == nil {
 		return nil, fmt.Errorf("BuildLoomRAGContext: app required")
 	}
@@ -30,6 +33,24 @@ func BuildLoomRAGContext(ctx context.Context, app *infra.App, logUUID string, se
 	defer span.End()
 
 	result := &LoomRAGContext{}
+
+	// When the refinery found no seeds (e.g. input is a question), fall back to a keyword
+	// search on the content terms so graph context is always populated.
+	// Strip stop/question words first — SearchKnowledgeNodes requires ALL words to match,
+	// so "Who is Alex" would require nodes to contain "who", "is", and "alex".
+	// Replace first-person pronouns with the owner's name so "my goals" → "Alex goals".
+	if len(seedNodeIDs) == 0 && logContent != "" {
+		ownerName, _ := app.Memory.FetchOwnerName(ctx)
+		if terms := keywordTerms(logContent, ownerName); terms != "" {
+			hits, err := app.MemoryGraph().SearchKeywords(ctx, terms, 10)
+			if err != nil {
+				infra.LoggerFrom(ctx).Warn("loom rag: keyword fallback search failed", "error", err)
+			}
+			for _, n := range hits {
+				seedNodeIDs = append(seedNodeIDs, n.UUID)
+			}
+		}
+	}
 
 	if len(seedNodeIDs) > 0 {
 		// Batch fetch all seed nodes (1 RPC for up to 100 seeds).
@@ -115,4 +136,48 @@ func (r *LoomRAGContext) FormatForPrompt() string {
 		}
 	}
 	return strings.TrimSpace(b.String())
+}
+
+// stopWords are common English words and question words that add no search signal.
+var stopWords = map[string]bool{
+	"a": true, "an": true, "the": true, "and": true, "or": true, "but": true,
+	"in": true, "on": true, "at": true, "to": true, "for": true, "of": true,
+	"with": true, "by": true, "from": true, "is": true, "are": true, "was": true,
+	"were": true, "be": true, "been": true, "being": true, "have": true, "has": true,
+	"had": true, "do": true, "does": true, "did": true, "will": true, "would": true,
+	"could": true, "should": true, "may": true, "might": true, "can": true,
+	"who": true, "what": true, "when": true, "where": true, "why": true, "how": true,
+	"which": true, "that": true, "this": true, "these": true, "those": true,
+	"i": true, "me": true, "my": true, "we": true, "our": true, "you": true,
+	"your": true, "he": true, "she": true, "it": true, "they": true, "their": true,
+	"tell": true, "about": true, "know": true, "get": true,
+}
+
+// firstPersonPronouns are replaced with the owner's name when known.
+var firstPersonPronouns = map[string]bool{
+	"i": true, "me": true, "my": true, "mine": true, "myself": true,
+}
+
+// keywordTerms strips stop words from s and returns the remaining words joined by spaces.
+// First-person pronouns are replaced with ownerName when non-empty.
+// Returns "" if no meaningful terms remain.
+func keywordTerms(s, ownerName string) string {
+	words := strings.Fields(strings.ToLower(s))
+	out := make([]string, 0, len(words))
+	for _, w := range words {
+		w = strings.TrimRight(w, "?.,!;:")
+		if w == "" {
+			continue
+		}
+		if firstPersonPronouns[w] {
+			if ownerName != "" {
+				out = append(out, strings.ToLower(ownerName))
+			}
+			continue
+		}
+		if !stopWords[w] {
+			out = append(out, w)
+		}
+	}
+	return strings.Join(out, " ")
 }

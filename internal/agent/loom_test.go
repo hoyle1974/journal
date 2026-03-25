@@ -30,7 +30,7 @@ func TestProcessEntryReportHasExtractedNodeIDs(t *testing.T) {
 
 func TestBuildLoomRAGContextNilApp(t *testing.T) {
 	ctx := context.Background()
-	result, err := BuildLoomRAGContext(ctx, nil, "log-uuid", []string{"node-1"})
+	result, err := BuildLoomRAGContext(ctx, nil, "log-uuid", "", []string{"node-1"})
 	if err == nil {
 		t.Fatal("expected error for nil app")
 	}
@@ -39,7 +39,7 @@ func TestBuildLoomRAGContextNilApp(t *testing.T) {
 
 func TestBuildLoomRAGContextEmptySeeds(t *testing.T) {
 	ctx := context.Background()
-	result, err := BuildLoomRAGContext(ctx, nil, "log-uuid", nil)
+	result, err := BuildLoomRAGContext(ctx, nil, "log-uuid", "", nil)
 	_ = result
 	_ = err
 	// nil app still errors, but we verify no panic on empty seeds

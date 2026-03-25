@@ -201,6 +201,19 @@ func jsonStringSlice(m map[string]interface{}, key string) []string {
 	return out
 }
 
+// printGraphContextIfAny prints graph context (Loom RAG + graph_expand results) before CoT.
+func printGraphContextIfAny(result map[string]interface{}) {
+	gc := jsonStringSlice(result, "graph_context")
+	if len(gc) == 0 {
+		return
+	}
+	fmt.Println("Graph Context:")
+	for _, block := range gc {
+		fmt.Println(strings.TrimSpace(block))
+		fmt.Println()
+	}
+}
+
 // printReasoningTraceIfAny prints CoT reasoning blocks from /query JSON before the answer.
 func printReasoningTraceIfAny(result map[string]interface{}) {
 	rt := jsonStringSlice(result, "reasoning_trace")
@@ -387,6 +400,7 @@ func cmdIngest(input string) {
 	if traceFlag && headers != nil {
 		printTraceInfo(headers)
 	}
+	printGraphContextIfAny(result)
 	printReasoningTraceIfAny(result)
 	if answer := jsonStr(result, "answer"); answer != "" {
 		fmt.Println(answer)

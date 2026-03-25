@@ -22,6 +22,7 @@ func queryResultToAPI(r *agent.QueryResult) *api.QueryResult {
 		Error:            r.Error,
 		DebugLogs:        r.DebugLogs,
 		ReasoningTrace:   r.ReasoningTrace,
+		GraphContext:     r.GraphContext,
 	}
 }
 
@@ -84,7 +85,7 @@ func (a *AgentService) ProcessAndRespond(ctx context.Context, input, source stri
 	}
 
 	// 3. Build 2-hop Loom RAG context from just-extracted nodes.
-	ragCtx, err := agent.BuildLoomRAGContext(ctx, a.app, entryUUID, nodeIDs)
+	ragCtx, err := agent.BuildLoomRAGContext(ctx, a.app, entryUUID, input, nodeIDs)
 	if err != nil {
 		infra.LoggerFrom(ctx).Warn("ProcessAndRespond: loom RAG failed (continuing without context)", "error", err)
 	}
@@ -92,7 +93,6 @@ func (a *AgentService) ProcessAndRespond(ctx context.Context, input, source stri
 	if ragCtx != nil {
 		ragContext = ragCtx.FormatForPrompt()
 	}
-
 	// 4. FOH with native thinking + RAG context.
 	// WithEntryAlreadyAdded signals to FOH that the entry was already persisted in step 1.
 	fohCtx := agent.WithEntryAlreadyAdded(ctx, entryUUID)

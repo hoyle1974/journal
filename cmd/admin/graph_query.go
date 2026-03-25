@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"os"
 	"strings"
 
 	"github.com/jackstrohm/jot/internal/infra"
@@ -17,6 +18,7 @@ func runGraphQuery(ctx context.Context, app *infra.App, args []string) {
 	depth := fs.Int("depth", 1, "Graph traversal depth (hops); 1 = immediate neighbours, 2-3 for multi-hop")
 	limit := fs.Int("limit", 10, "Max seed nodes returned by the initial keyword/semantic search")
 	limitPerEdge := fs.Int("limit-per-edge", 5, "Max neighbours per edge type per node during expansion")
+	dotFile := fs.String("dot-file", "", "If set, write a Graphviz DOT file to this path")
 	_ = fs.Parse(args)
 
 	query := strings.Join(fs.Args(), " ")
@@ -63,4 +65,10 @@ func runGraphQuery(ctx context.Context, app *infra.App, args []string) {
 		log.Fatalf("graph_expand: %v", err)
 	}
 	fmt.Println(sg.ToMarkdownFull())
+
+	if *dotFile != "" {
+		if err := os.WriteFile(*dotFile, []byte(sg.ToDOT()), 0o644); err != nil {
+			log.Fatalf("write dot file: %v", err)
+		}
+	}
 }

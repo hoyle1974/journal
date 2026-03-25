@@ -52,6 +52,69 @@ func (sg *SubGraph) ToMarkdownFull() string {
 	return strings.TrimRight(sb.String(), "\n")
 }
 
+// ToDOT serializes the SubGraph as a Graphviz DOT string, rendering only the
+// SPO relationships (matching the ## Relationships section of ToMarkdownFull).
+// Each relationship node becomes a labeled edge between its subject and object.
+// Seed subject/object nodes are highlighted.
+func (sg *SubGraph) ToDOT() string {
+	var sb strings.Builder
+	sb.WriteString("digraph knowledge {\n")
+	sb.WriteString("  graph [bgcolor=\"#1a1a2e\" fontname=\"Helvetica\" rankdir=LR];\n")
+	sb.WriteString("  node  [shape=box style=\"filled,rounded\" fontname=\"Helvetica\" fontsize=11 fontcolor=\"white\" color=\"#4a90d9\" fillcolor=\"#2d2d44\"];\n")
+	sb.WriteString("  edge  [fontname=\"Helvetica\" fontsize=9 color=\"#888888\" fontcolor=\"#aaaaaa\"];\n")
+
+	// Collect entity nodes that appear as subject or object in a relationship.
+	referenced := make(map[string]bool)
+	for _, n := range sg.Nodes {
+		if n.NodeType != NodeTypeRelationship {
+			continue
+		}
+		if n.SubjectUUID != "" {
+			referenced[n.SubjectUUID] = true
+		}
+		if n.ObjectUUID != "" {
+			referenced[n.ObjectUUID] = true
+		}
+	}
+
+	// Emit only the entity nodes that participate in at least one relationship.
+	for uuid := range referenced {
+		n, ok := sg.Nodes[uuid]
+		if !ok {
+			continue
+		}
+		label := nodeLabel(n)
+		label = strings.ReplaceAll(label, `"`, `\"`)
+		attrs := fmt.Sprintf(`label="%s"`, label)
+		if sg.SeedUUIDs[uuid] {
+			attrs += ` fillcolor="#c0392b" color="#e74c3c"`
+		}
+		fmt.Fprintf(&sb, "  %q [%s];\n", uuid, attrs)
+	}
+
+	// Emit one edge per relationship node (subject → object, labeled with predicate).
+	seen := make(map[string]bool)
+	for _, n := range sg.Nodes {
+		if n.NodeType != NodeTypeRelationship || n.SubjectUUID == "" || n.ObjectUUID == "" {
+			continue
+		}
+		key := n.SubjectUUID + "|" + n.Predicate + "|" + n.ObjectUUID
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		pred := strings.ReplaceAll(n.Predicate, `"`, `\"`)
+		edgeAttrs := fmt.Sprintf("label=%q", pred)
+		if sg.SeedUUIDs[n.UUID] {
+			edgeAttrs += ` color="#e74c3c" fontcolor="#e74c3c"`
+		}
+		fmt.Fprintf(&sb, "  %q -> %q [%s];\n", n.SubjectUUID, n.ObjectUUID, edgeAttrs)
+	}
+
+	sb.WriteString("}\n")
+	return sb.String()
+}
+
 // noisyNodeTypes are node types excluded from rendered graph output because they
 // add structural noise without semantic value (audit responses, raw log entries).
 var noisyNodeTypes = map[string]bool{
@@ -323,10 +386,9 @@ func (s *Store) GraphExpandMulti(ctx context.Context, seedIDs []string, queryVec
 		}
 	}
 
-	// Resolve all nodes referenced in edges but not yet fetched (e.g. pruned
-	// candidates that appear as edge targets). This ensures every node in an
-	// edge has a name entry in sg.Nodes so display code never falls back to
-	// raw UUIDs.
+	// Resolve all nodes referenced in edges or relationship-node SPO fields but
+	// not yet fetched. This ensures every node used by display code has a name
+	// entry in sg.Nodes so we never fall back to raw UUIDs.
 	danglingIDs := make(map[string]bool)
 	for _, e := range sg.Edges {
 		if _, ok := sg.Nodes[e.SourceUUID]; !ok {
@@ -334,6 +396,23 @@ func (s *Store) GraphExpandMulti(ctx context.Context, seedIDs []string, queryVec
 		}
 		if _, ok := sg.Nodes[e.TargetUUID]; !ok {
 			danglingIDs[e.TargetUUID] = true
+		}
+	}
+	// Relationship nodes rendered via SubjectUUID/ObjectUUID also need their
+	// referents resolved — these UUIDs never go through the edge path.
+	for _, n := range sg.Nodes {
+		if n.NodeType != NodeTypeRelationship {
+			continue
+		}
+		if n.SubjectUUID != "" {
+			if _, ok := sg.Nodes[n.SubjectUUID]; !ok {
+				danglingIDs[n.SubjectUUID] = true
+			}
+		}
+		if n.ObjectUUID != "" {
+			if _, ok := sg.Nodes[n.ObjectUUID]; !ok {
+				danglingIDs[n.ObjectUUID] = true
+			}
 		}
 	}
 	if len(danglingIDs) > 0 {
