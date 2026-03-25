@@ -134,17 +134,17 @@ for i in "${!ENTRIES[@]}"; do
   # Trigger Dreamer at specific milestones
   if [ $COUNT -eq 30 ]; then
     echo ">>> Milestone 1: Triggering Mid-Test Dream (Initial Persona Synthesis)..."
-    pjot dream
+    #pjot dream
   elif [ $COUNT -eq 70 ]; then
     echo ">>> Milestone 2: Triggering Mid-Test Dream (Task/Project Linking)..."
-    pjot dream
+    #pjot dream
   fi
 
-  sleep 15
+  sleep 1
 done
 
 echo "-----------------------------------"
 echo ">>> Final Milestone: Triggering Final Dream..."
-pjot dream
+#pjot dream
 
 echo "Test Sequence Finished."

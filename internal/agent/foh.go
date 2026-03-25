@@ -73,6 +73,9 @@ type QueryResult struct {
 	DebugLogs        []string                 `json:"debug_logs,omitempty"`
 	// ReasoningTrace holds per-iteration text from optional <thought>...</thought> blocks (FOH CoT).
 	ReasoningTrace []string `json:"reasoning_trace,omitempty"`
+	// GraphContext holds graph node context injected into the model: Loom RAG pre-load and
+	// any graph_expand tool results retrieved during CoT.
+	GraphContext []string `json:"graph_context,omitempty"`
 }
 
 // ErrQueryResult returns a failed QueryResult.
@@ -140,6 +143,10 @@ func RunQueryFull(ctx context.Context, app FOHEnv, question, source string, debu
 
 	logDebug("[start] Question: %s", question)
 	var reasoningTrace []string
+	var graphContext []string
+	if ragContext != "" {
+		graphContext = append(graphContext, "## Loom RAG (pre-loaded)\n"+ragContext)
+	}
 
 	systemPrompt, err := BuildSystemPrompt(ctx, app, ragContext)
 	if err != nil {
@@ -242,6 +249,9 @@ func RunQueryFull(ctx context.Context, app FOHEnv, question, source string, debu
 						knowledgeGapDetected = true
 					}
 				}
+				if discoveredToolName == "graph_expand" && toolResult.Success {
+					graphContext = append(graphContext, "## graph_expand (iter "+fmt.Sprintf("%d", iteration)+")\n"+toolResult.Result)
+				}
 				resultMsg := "Tool result (" + discoveredToolName + "): " + toolResult.Result
 				resp, err = session.SendMessage(ctx, &genai.Part{Text: utils.SanitizePrompt(resultMsg)})
 				if err != nil {
@@ -254,6 +264,7 @@ func RunQueryFull(ctx context.Context, app FOHEnv, question, source string, debu
 						Error:          true,
 						DebugLogs:      debugLogs,
 						ReasoningTrace: reasoningTrace,
+						GraphContext:   graphContext,
 					}
 				}
 				iteration++
@@ -315,6 +326,7 @@ func RunQueryFull(ctx context.Context, app FOHEnv, question, source string, debu
 					Error:          false,
 					DebugLogs:      debugLogs,
 					ReasoningTrace: reasoningTrace,
+					GraphContext:   graphContext,
 				}
 			}
 		}
@@ -336,6 +348,7 @@ func RunQueryFull(ctx context.Context, app FOHEnv, question, source string, debu
 						Error:          true,
 						DebugLogs:      debugLogs,
 						ReasoningTrace: reasoningTrace,
+						GraphContext:   graphContext,
 					}
 				}
 			
@@ -355,6 +368,7 @@ func RunQueryFull(ctx context.Context, app FOHEnv, question, source string, debu
 					Error:          false,
 					DebugLogs:      debugLogs,
 					ReasoningTrace: reasoningTrace,
+					GraphContext:   graphContext,
 				}
 			}
 
@@ -371,6 +385,7 @@ func RunQueryFull(ctx context.Context, app FOHEnv, question, source string, debu
 				Error:          true,
 				DebugLogs:      debugLogs,
 				ReasoningTrace: reasoningTrace,
+				GraphContext:   graphContext,
 			}
 		}
 
@@ -485,6 +500,9 @@ func RunQueryFull(ctx context.Context, app FOHEnv, question, source string, debu
 				retrievedContent.WriteString(r.result.Result)
 				retrievedContent.WriteString("\n\n")
 			}
+			if r.fcName == "graph_expand" && r.result.Success {
+				graphContext = append(graphContext, "## graph_expand (iter "+fmt.Sprintf("%d", iteration)+")\n"+r.result.Result)
+			}
 		}
 
 		if searchToolCalled {
@@ -527,6 +545,7 @@ func RunQueryFull(ctx context.Context, app FOHEnv, question, source string, debu
 				Error:          true,
 				DebugLogs:      debugLogs,
 				ReasoningTrace: reasoningTrace,
+				GraphContext:   graphContext,
 			}
 		}
 		iteration++
@@ -550,6 +569,7 @@ func RunQueryFull(ctx context.Context, app FOHEnv, question, source string, debu
 			Error:          true,
 			DebugLogs:      debugLogs,
 			ReasoningTrace: reasoningTrace,
+			GraphContext:   graphContext,
 		}
 	}
 
@@ -594,6 +614,7 @@ func RunQueryFull(ctx context.Context, app FOHEnv, question, source string, debu
 			Error:            false,
 			DebugLogs:        debugLogs,
 			ReasoningTrace:   reasoningTrace,
+			GraphContext:     graphContext,
 		}
 	}
 
@@ -606,6 +627,7 @@ func RunQueryFull(ctx context.Context, app FOHEnv, question, source string, debu
 		Error:          true,
 		DebugLogs:      debugLogs,
 		ReasoningTrace: reasoningTrace,
+		GraphContext:   graphContext,
 	}
 }
 

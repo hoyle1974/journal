@@ -35,6 +35,7 @@ type QueryResult struct {
 	Error            bool                     `json:"error"`
 	DebugLogs        []string                 `json:"debug_logs,omitempty"`
 	ReasoningTrace   []string                 `json:"reasoning_trace,omitempty"`
+	GraphContext     []string                 `json:"graph_context,omitempty"`
 }
 
 // Entry is the API shape for a journal entry (avoids api importing pkg/journal).
