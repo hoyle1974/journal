@@ -37,22 +37,3 @@ func TruncateString(s string, maxRunes int) string {
 	return string(runes[:maxRunes])
 }
 
-// FirstSentence returns the first sentence of s, or up to maxChars runes if no period found.
-// Newlines are flattened to spaces for log readability.
-func FirstSentence(s string, maxChars int) string {
-	s = strings.ReplaceAll(s, "\n", " ")
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return ""
-	}
-	runes := []rune(s)
-	for i, r := range runes {
-		if r == '.' || r == '!' || r == '?' {
-			return strings.TrimSpace(string(runes[:i+1]))
-		}
-	}
-	if len(runes) <= maxChars {
-		return string(runes)
-	}
-	return string(runes[:maxChars]) + "..."
-}

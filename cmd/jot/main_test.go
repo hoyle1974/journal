@@ -32,30 +32,6 @@ func TestJsonStr(t *testing.T) {
 	}
 }
 
-func TestJsonFloat(t *testing.T) {
-	tests := []struct {
-		name     string
-		m        map[string]interface{}
-		key      string
-		expected float64
-	}{
-		{"nil map", nil, "x", 0},
-		{"missing key", map[string]interface{}{"a": 1.0}, "x", 0},
-		{"float value", map[string]interface{}{"n": 42.5}, "n", 42.5},
-		{"int from JSON", map[string]interface{}{"n": float64(10)}, "n", 10},
-		{"zero", map[string]interface{}{"n": 0.0}, "n", 0},
-		{"non-number value", map[string]interface{}{"n": "bad"}, "n", 0},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := jsonFloat(tt.m, tt.key)
-			if got != tt.expected {
-				t.Errorf("jsonFloat() = %v, want %v", got, tt.expected)
-			}
-		})
-	}
-}
-
 func TestApiRequest_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

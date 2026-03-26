@@ -162,16 +162,6 @@ func printTraceInfo(headers http.Header) {
 	}
 }
 
-// jsonFloat extracts a float64 from a map, handling JSON number types.
-func jsonFloat(m map[string]interface{}, key string) float64 {
-	if v, ok := m[key]; ok {
-		if f, ok := v.(float64); ok {
-			return f
-		}
-	}
-	return 0
-}
-
 // jsonStr extracts a string from a map safely.
 func jsonStr(m map[string]interface{}, key string) string {
 	if v, ok := m[key]; ok {
@@ -339,22 +329,6 @@ func apiPostLog(ctx context.Context, content, source, attachPath string, timeout
 		return nil, nil, fmt.Errorf("API error %d: %s", resp.StatusCode, errMsg)
 	}
 	return result, resp.Header.Clone(), nil
-}
-
-// printRateLimitHelp prints a clear explanation when the error is 429 or rate-limit related.
-func printRateLimitHelp(err error) {
-	if err == nil {
-		return
-	}
-	s := strings.ToLower(err.Error())
-	if !strings.Contains(s, "429") && !strings.Contains(s, "rate limit") && !strings.Contains(s, "quota") && !strings.Contains(s, "resource_exhausted") {
-		return
-	}
-	fmt.Println()
-	fmt.Println("Reason: The request was rate-limited (HTTP 429). This usually means either:")
-	fmt.Println("  • Too many requests to the Jot server in a short time — wait a minute and try again.")
-	fmt.Println("  • Google's Gemini API quota or rate limit was exceeded — check aistudio.google.com for quota and try again later.")
-	fmt.Println("If it keeps happening, verify billing and quotas at aistudio.google.com or Cloud Console.")
 }
 
 // =============================================================================

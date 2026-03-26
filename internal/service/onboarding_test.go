@@ -49,8 +49,8 @@ func TestRunFirstRunOnboarding_Integration(t *testing.T) {
 		t.Fatal("_system/onboarding doc should exist after first run")
 	}
 	data := doc.Data()
-	if infra.GetStringField(data, "status") != "complete" {
-		t.Errorf("status = %q, want complete", infra.GetStringField(data, "status"))
+	if s, _ := data["status"].(string); s != "complete" {
+		t.Errorf("status = %q, want complete", s)
 	}
 	snap, err := client.Collection("pending_questions").Documents(ctx).GetAll()
 	if err != nil {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"sort"
 	"strings"
 	"time"
 
@@ -389,75 +388,3 @@ func LogVectorSearchFailed(ctx context.Context, index string, err error, retries
 	LoggerFrom(ctx).Error(msg, attrs...)
 }
 
-// LogFoundNode logs a single found node with id, similarity score, and text preview.
-// Message includes key=value so it's visible in Cloud Logging when only the message column is shown.
-func LogFoundNode(ctx context.Context, id string, score float64, textPreview string) {
-	msg := fmt.Sprintf("found node | id=%s | score=%.2f | text=%q", id, score, textPreview)
-	LoggerFrom(ctx).Debug(msg,
-		slog.String("id", id),
-		slog.Float64("score", score),
-		slog.String("text", textPreview),
-	)
-}
-
-// LogFoundEntry logs a single found journal entry with id, similarity score, and text preview.
-func LogFoundEntry(ctx context.Context, id string, score float64, textPreview string) {
-	msg := fmt.Sprintf("found entry | id=%s | score=%.2f | text=%q", id, score, textPreview)
-	LoggerFrom(ctx).Debug(msg,
-		slog.String("id", id),
-		slog.Float64("score", score),
-		slog.String("text", textPreview),
-	)
-}
-
-// RAG confidence status for aggregate retrieval quality.
-const (
-	RAGStatusHighConfidence   = "HIGH_CONFIDENCE_MATCH"
-	RAGStatusMediumConfidence = "MEDIUM_CONFIDENCE_MATCH"
-	RAGStatusLowConfidence    = "LOW_CONFIDENCE_MATCH"
-	RAGStatusNoResults        = "NO_RESULTS"
-)
-
-// LogRAGQuality logs one aggregate RAG_QUALITY line: top_k, median and p90 similarity score, and status.
-// Use this to quantify retrieval "vibe": e.g. if the system says "Logged." but status is LOW_CONFIDENCE_MATCH
-// and max score was 0.30, the system is effectively flying blind.
-func LogRAGQuality(ctx context.Context, topK int, scores []float64) {
-	if len(scores) == 0 {
-		msg := fmt.Sprintf("RAG_QUALITY | top_k=%d | median_score=N/A | p90_score=N/A | status=%s", topK, RAGStatusNoResults)
-		LoggerFrom(ctx).Debug(msg,
-			slog.String("event", "RAG_QUALITY"),
-			slog.Int("top_k", topK),
-			slog.String("status", RAGStatusNoResults),
-		)
-		return
-	}
-	sorted := make([]float64, len(scores))
-	copy(sorted, scores)
-	sort.Float64s(sorted)
-	median := sorted[len(sorted)/2]
-	if len(sorted)%2 == 0 && len(sorted) >= 2 {
-		median = (sorted[len(sorted)/2-1] + sorted[len(sorted)/2]) / 2
-	}
-	p90Idx := int(0.9 * float64(len(sorted)))
-	if p90Idx >= len(sorted) {
-		p90Idx = len(sorted) - 1
-	}
-	p90 := sorted[p90Idx]
-	maxScore := sorted[len(sorted)-1]
-	status := RAGStatusLowConfidence
-	if maxScore < 0.35 {
-		status = RAGStatusLowConfidence
-	} else if p90 >= 0.6 {
-		status = RAGStatusHighConfidence
-	} else if median >= 0.5 || maxScore >= 0.6 {
-		status = RAGStatusMediumConfidence
-	}
-	msg := fmt.Sprintf("RAG_QUALITY | top_k=%d | median_score=%.2f | p90_score=%.2f | status=%s", topK, median, p90, status)
-	LoggerFrom(ctx).Debug(msg,
-		slog.String("event", "RAG_QUALITY"),
-		slog.Int("top_k", topK),
-		slog.Float64("median_score", median),
-		slog.Float64("p90_score", p90),
-		slog.String("status", status),
-	)
-}

@@ -409,15 +409,4 @@ func LogRequest(ctx context.Context, method, path string, statusCode int, durati
 	}
 }
 
-// LogOperation logs an operation with timing.
-func LogOperation(ctx context.Context, operation string, duration time.Duration, err error, attrs ...any) {
-	args := []any{slog.String("operation", operation), slog.Duration("duration", duration)}
-	args = append(args, attrs...)
-	if err != nil {
-		args = append(args, slog.String("error", err.Error()))
-		Logger.ErrorContext(ctx, "operation failed", args...)
-	} else {
-		Logger.InfoContext(ctx, "operation completed", args...)
-	}
-}
 
