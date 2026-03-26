@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/hoyle1974/memory"
 	"github.com/jackstrohm/jot/internal/agent"
 	"github.com/jackstrohm/jot/internal/api"
 	"github.com/jackstrohm/jot/internal/infra"
@@ -120,6 +121,17 @@ func (a *AgentService) RunDreamer(ctx context.Context, force bool) (*api.DreamRe
 		Skipped:     result.Skipped,
 		SkipReason:  result.SkipReason,
 	}, nil
+}
+
+// IngestGapAnswer creates a journal entry for a resolved gap question and runs the refinery.
+// Runs synchronously — the caller in the HTTP handler wraps it in a goroutine if async is desired.
+func (a *AgentService) IngestGapAnswer(ctx context.Context, question, answer string) {
+	q := memory.PendingQuestion{
+		Kind:     "gap",
+		Question: question,
+		Answer:   answer,
+	}
+	agent.IngestQuestionAnswer(ctx, a.app, q)
 }
 
 // ProcessLogSequential processes a single log entry through the Project Loom waterfall pipeline.

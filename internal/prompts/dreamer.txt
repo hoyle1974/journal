@@ -9,21 +9,35 @@ Recent log entries (since last dream cycle):
 Current open tasks:
 {{.OpenTasksText}}
 
+{{- if .LoomContextBlock}}
+---
+## GRAPH CONTEXT
+# Relevant entities and relationships from your knowledge graph related to recent activity
+{{.LoomContextBlock}}
+{{- end}}
+
+{{- if .RecentQuestionsText}}
+---
+## RECENT QUESTIONS
+# Questions recently asked or already answered — do not re-ask these
+{{.RecentQuestionsText}}
+{{- end}}
+
 Instructions:
 1. Write a concise narrative summary (2-4 sentences) of what the user has been doing. Focus on themes, progress, and notable events. Be concrete — name the actual topics, people, and projects mentioned.
-2. Identify up to 3 follow-up questions. These may be:
-   - Unknown people or entities that appear without context (e.g. a name mentioned once with no person node).
-   - Tasks that appear stalled (started but no recent activity).
-   - Factual gaps that would be useful to resolve (e.g. a project mentioned without a clear owner or goal).
+2. Identify up to 3 follow-up questions. Only ask a question if:
+   - It fills a specific gap that would meaningfully improve future responses (e.g. an unknown person who appears repeatedly, a stalled task that needs a decision).
+   - You can state a concrete reason why knowing this makes the system more useful.
+   - The answer is NOT already inferable from the graph context above.
+   If no question meets this bar, omit the questions section entirely. Do not ask questions just to fill in blanks or satisfy curiosity.
 
-Output format — use these exact keys. Output exactly one summary line. If there are follow-up questions, add a questions section:
+Output format — use these exact keys. Output exactly one summary line. For each question, output it on its own line with a pipe-separated reason:
 summary: <narrative summary under 100 words>
 questions:
-<first follow-up question, if any>
-<second follow-up question, if any>
-<third follow-up question, if any>
+<question text> | reason: <one sentence explaining why this information is needed>
+<question text> | reason: <one sentence explaining why this information is needed>
 
 Rules:
 - Output ONLY the key/value lines above. No preamble, no explanation, no markdown.
-- If there are no useful questions, omit the questions section entirely.
-- Keep each question under 60 words, phrased as a direct question the user can answer briefly.
+- If there are no questions that meet the bar above, omit the questions section entirely.
+- Keep each question under 60 words. Keep each reason under 30 words.

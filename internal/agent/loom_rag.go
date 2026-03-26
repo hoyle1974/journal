@@ -73,6 +73,19 @@ func BuildLoomRAGContext(ctx context.Context, app *infra.App, logUUID, logConten
 			seenEdge := make(map[string]bool)
 			seenEntryID := make(map[string]bool)
 			var entryIDs []string
+
+			// Collect entity nodes and relationships separately so we can sort before formatting.
+			type entityItem struct {
+				node   memory.KnowledgeNodeWithLinks
+				uuid   string
+				isSeed bool
+			}
+			type relItem struct {
+				node memory.KnowledgeNodeWithLinks
+			}
+			var entityItems []entityItem
+			var relItems []relItem
+
 			for uuid, n := range sg.Nodes {
 				// Collect journal entry IDs from every node.
 				for _, eid := range n.JournalEntryIDs {
@@ -82,28 +95,45 @@ func BuildLoomRAGContext(ctx context.Context, app *infra.App, logUUID, logConten
 					}
 				}
 				if n.NodeType == memory.NodeTypeRelationship {
-					subjectLabel := n.SubjectUUID
-					if s, ok := sg.Nodes[n.SubjectUUID]; ok && s.Content != "" {
-						subjectLabel = s.Content
-					}
-					objectLabel := n.ObjectUUID
-					if o, ok := sg.Nodes[n.ObjectUUID]; ok && o.Content != "" {
-						objectLabel = o.Content
-					}
-					key := subjectLabel + "|" + n.Predicate + "|" + objectLabel
-					if seenEdge[key] {
-						continue
-					}
-					seenEdge[key] = true
-					result.RelationshipSummaries = append(result.RelationshipSummaries,
-						formatRelNode(subjectLabel, n.Predicate, objectLabel, n.Timestamp))
+					relItems = append(relItems, relItem{node: n})
 				} else if n.NodeType != memory.NodeTypeLog && n.NodeType != memory.NodeTypeResponse {
-					if sg.SeedUUIDs[uuid] {
-						result.SeedSummaries = append(result.SeedSummaries, formatEntityNode(n))
-					} else {
-						result.HopNodeSummaries = append(result.HopNodeSummaries, formatEntityNode(n))
-					}
+					entityItems = append(entityItems, entityItem{node: n, uuid: uuid, isSeed: sg.SeedUUIDs[uuid]})
 				}
+			}
+
+			// Sort entity nodes by significance descending so the most relevant appear first.
+			sort.Slice(entityItems, func(i, j int) bool {
+				return entityItems[i].node.SignificanceWeight > entityItems[j].node.SignificanceWeight
+			})
+			for _, item := range entityItems {
+				if item.isSeed {
+					result.SeedSummaries = append(result.SeedSummaries, formatEntityNode(item.node))
+				} else {
+					result.HopNodeSummaries = append(result.HopNodeSummaries, formatEntityNode(item.node))
+				}
+			}
+
+			// Sort relationships by relevance_score descending, then deduplicate.
+			sort.Slice(relItems, func(i, j int) bool {
+				return relItems[i].node.RelevanceScore > relItems[j].node.RelevanceScore
+			})
+			for _, item := range relItems {
+				n := item.node
+				subjectLabel := n.SubjectUUID
+				if s, ok := sg.Nodes[n.SubjectUUID]; ok && s.Content != "" {
+					subjectLabel = s.Content
+				}
+				objectLabel := n.ObjectUUID
+				if o, ok := sg.Nodes[n.ObjectUUID]; ok && o.Content != "" {
+					objectLabel = o.Content
+				}
+				key := subjectLabel + "|" + n.Predicate + "|" + objectLabel
+				if seenEdge[key] {
+					continue
+				}
+				seenEdge[key] = true
+				result.RelationshipSummaries = append(result.RelationshipSummaries,
+					formatRelNode(subjectLabel, n.Predicate, objectLabel, n.Timestamp))
 			}
 
 			// Fetch source journal entries in parallel and format them.

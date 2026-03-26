@@ -189,22 +189,22 @@ if [ -n "${DEPLOYED_BASE_URL:-}" ]; then
   if gcloud scheduler jobs describe $DREAM_JOB --location=$REGION 2>/dev/null; then
     gcloud scheduler jobs update http $DREAM_JOB \
       --location=$REGION \
-      --schedule="0 */4 * * *" \
+      --schedule="0 3 * * *" \
       --uri="$DREAM_URL" \
       --message-body='{"force":false}' \
-      --headers="$DREAM_HEADERS" \
-      --time-zone="America/Chicago" \
+      --update-headers="$DREAM_HEADERS" \
+      --time-zone="America/Los_Angeles" \
       --attempt-deadline=300s \
       --quiet
     echo -e "${GREEN}Dreamer job updated: $DREAM_URL${NC}"
   else
     gcloud scheduler jobs create http $DREAM_JOB \
       --location=$REGION \
-      --schedule="0 */4 * * *" \
+      --schedule="0 3 * * *" \
       --uri="$DREAM_URL" \
       --message-body='{"force":false}' \
       --headers="$DREAM_HEADERS" \
-      --time-zone="America/Chicago" \
+      --time-zone="America/Los_Angeles" \
       --attempt-deadline=300s \
       --quiet
     echo -e "${GREEN}Dreamer job created: $DREAM_URL${NC}"

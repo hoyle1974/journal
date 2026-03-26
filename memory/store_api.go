@@ -1,6 +1,9 @@
 package memory
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // Compile-time checks that *Store satisfies all domain interfaces.
 var (
@@ -75,10 +78,16 @@ func (s *Store) GetUnresolvedQuestions(ctx context.Context, limit int) ([]Pendin
 	return s.GetUnresolvedPendingQuestions(ctx, limit)
 }
 
+// GetRecentlyResolvedQuestions returns pending questions resolved after since.
+func (s *Store) GetRecentlyResolvedQuestions(ctx context.Context, since time.Time) ([]PendingQuestion, error) {
+	return s.GetRecentlyResolvedPendingQuestions(ctx, since)
+}
+
 // ResolveQuestion marks a pending question as answered.
 func (s *Store) ResolveQuestion(ctx context.Context, uuid, answer string) error {
 	return s.ResolvePendingQuestion(ctx, uuid, answer)
 }
+
 
 // BackfillEmbeddings generates missing embeddings for up to limit knowledge nodes.
 func (s *Store) BackfillEmbeddings(ctx context.Context, limit int) (int, error) {

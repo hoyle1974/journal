@@ -37,12 +37,16 @@ var refineryTxt string
 //go:embed dreamer.txt
 var dreamerTxt string
 
+//go:embed dreamer_selfcheck.txt
+var dreamerSelfCheckTxt string
+
 var (
 	systemPromptTmpl    = template.Must(template.New("system").Parse(systemPromptTxt))
 	activityHistoryTmpl = template.Must(template.New("activityHistory").Parse(activityHistoryTxt))
 	debugReportTmpl     = template.Must(template.New("debugReport").Parse(debugReportPromptTxt))
 	refineryTmpl        = template.Must(template.New("refinery").Parse(refineryTxt))
-	dreamerTmpl         = template.Must(template.New("dreamer").Parse(dreamerTxt))
+	dreamerTmpl          = template.Must(template.New("dreamer").Parse(dreamerTxt))
+	dreamerSelfCheckTmpl = template.Must(template.New("dreamerSelfCheck").Parse(dreamerSelfCheckTxt))
 )
 
 // SystemPromptData holds all inputs for the main FOH system prompt.
@@ -143,10 +147,12 @@ func BuildRefinery(data RefineryData) (string, error) {
 
 // DreamerData holds inputs for the Dreamer background synthesis prompt.
 type DreamerData struct {
-	Today         string
-	CurrentTime   string
-	EntriesText   string
-	OpenTasksText string
+	Today                string
+	CurrentTime          string
+	EntriesText          string
+	OpenTasksText        string
+	LoomContextBlock     string // injected RAG context
+	RecentQuestionsText  string // recently asked (open) and answered questions
 }
 
 // BuildDreamer executes the dreamer prompt template.
@@ -154,6 +160,21 @@ func BuildDreamer(data DreamerData) (string, error) {
 	var buf bytes.Buffer
 	if err := dreamerTmpl.Execute(&buf, data); err != nil {
 		return "", fmt.Errorf("execute dreamer: %w", err)
+	}
+	return buf.String(), nil
+}
+
+// DreamerSelfCheckData holds inputs for the self-check prompt.
+type DreamerSelfCheckData struct {
+	Question     string
+	GraphContext string
+}
+
+// BuildDreamerSelfCheck executes the self-check prompt template.
+func BuildDreamerSelfCheck(data DreamerSelfCheckData) (string, error) {
+	var buf bytes.Buffer
+	if err := dreamerSelfCheckTmpl.Execute(&buf, data); err != nil {
+		return "", fmt.Errorf("execute dreamer self-check: %w", err)
 	}
 	return buf.String(), nil
 }

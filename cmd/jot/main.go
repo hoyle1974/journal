@@ -660,7 +660,7 @@ func maybePromptPendingQuestions() {
 // cmdDream triggers the Dreamer background cycle via the API (force=true) and prints the result.
 func cmdDream() {
 	result, err := apiRequest(context.Background(), "POST", "/internal/dream",
-		map[string]interface{}{"force": true}, RequestTimeout)
+		map[string]interface{}{"force": true}, 2*time.Minute)
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
 		return

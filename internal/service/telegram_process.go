@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
-	"github.com/jackstrohm/jot/internal/infra"
 	"github.com/hoyle1974/memory"
+	"github.com/jackstrohm/jot/internal/agent"
+	"github.com/jackstrohm/jot/internal/infra"
 	"github.com/jackstrohm/jot/pkg/telegram"
 )
 
@@ -59,6 +61,13 @@ func handlePendingQuestion(ctx context.Context, app *infra.App, chatID int64, te
 				infra.LoggerFrom(ctx).Error("telegram: resolve pending question failed", "chat_id", chatID, "uuid", active.UUID, "error", resolveErr)
 			} else {
 				infra.LoggerFrom(ctx).Info("telegram: pending question resolved", "chat_id", chatID, "uuid", active.UUID)
+				// Ingest answered gap questions into the knowledge graph.
+				if active.Kind == "gap" {
+					bgCtx := context.WithoutCancel(ctx)
+					answered := *active
+					answered.Answer = text
+					go agent.IngestQuestionAnswer(bgCtx, app, answered)
+				}
 			}
 		} else {
 			infra.LoggerFrom(ctx).Info("telegram: pending question skipped", "chat_id", chatID, "uuid", active.UUID)
@@ -72,40 +81,83 @@ func handlePendingQuestion(ctx context.Context, app *infra.App, chatID int64, te
 	}
 
 	// No active question — check if there are any unresolved questions at all.
-	questions, err := app.Memory.GetUnresolvedPendingQuestions(ctx, 1)
+	questions, err := app.Memory.GetUnresolvedPendingQuestions(ctx, 20)
 	if err != nil {
 		infra.LoggerFrom(ctx).Warn("telegram: could not check pending questions, proceeding to FOH", "chat_id", chatID, "error", err)
 		return "", false
 	}
-	if len(questions) == 0 {
-		return "", false // nothing to ask, run FOH
+	q := selectQuestionToAsk(questions)
+	if q == nil {
+		return "", false // all questions in backoff window, run FOH
 	}
 
-	// Ask the first pending question and store it as active.
-	q := questions[0]
+	// Ask the selected pending question and store it as active.
 	if setErr := app.Memory.SetActiveQuestion(ctx, clientID, q.UUID); setErr != nil {
 		infra.LoggerFrom(ctx).Warn("telegram: set active question failed, proceeding to FOH", "chat_id", chatID, "error", setErr)
 		return "", false
 	}
+	if recordErr := app.Memory.RecordQuestionAsked(ctx, q.UUID); recordErr != nil {
+		infra.LoggerFrom(ctx).Warn("telegram: failed to record question asked", "chat_id", chatID, "uuid", q.UUID, "error", recordErr)
+	}
 	infra.LoggerFrom(ctx).Info("telegram: asking pending question", "chat_id", chatID, "uuid", q.UUID, "kind", q.Kind)
-	return formatQuestion(q, len(questions)), true
+	return formatQuestion(*q, len(questions)), true
 }
 
 // askNextOrDone checks for the next unresolved question. If one exists, asks it and
 // returns the formatted prompt. If none remain, returns a "all done" confirmation.
 func askNextOrDone(ctx context.Context, app *infra.App, chatID int64) (string, bool) {
-	questions, err := app.Memory.GetUnresolvedPendingQuestions(ctx, 1)
+	questions, err := app.Memory.GetUnresolvedPendingQuestions(ctx, 20)
 	if err != nil || len(questions) == 0 {
 		return "Got it! You're all set.", true
 	}
-	q := questions[0]
+	q := selectQuestionToAsk(questions)
+	if q == nil {
+		return "Got it! You're all set.", true
+	}
 	clientID := fmt.Sprintf("%d", chatID)
 	if setErr := app.Memory.SetActiveQuestion(ctx, clientID, q.UUID); setErr != nil {
 		infra.LoggerFrom(ctx).Warn("telegram: set next active question failed", "chat_id", chatID, "error", setErr)
 		return "Got it! You're all set.", true
 	}
+	if recordErr := app.Memory.RecordQuestionAsked(ctx, q.UUID); recordErr != nil {
+		infra.LoggerFrom(ctx).Warn("telegram: failed to record question asked", "chat_id", chatID, "uuid", q.UUID, "error", recordErr)
+	}
 	infra.LoggerFrom(ctx).Info("telegram: asking next pending question", "chat_id", chatID, "uuid", q.UUID)
-	return formatQuestion(q, len(questions)), true
+	return formatQuestion(*q, len(questions)), true
+}
+
+// questionBackoffDays returns the minimum number of days to wait before re-asking
+// a question with the given ask count. Uses exponential backoff capped at 30 days.
+func questionBackoffDays(askCount int) int {
+	if askCount <= 0 {
+		return 0
+	}
+	days := 1 << (askCount - 1) // 1, 2, 4, 8, 16, ...
+	if days > 30 {
+		days = 30
+	}
+	return days
+}
+
+// selectQuestionToAsk returns the first question from the list whose backoff window
+// has elapsed, or nil if all questions are still in their backoff window.
+func selectQuestionToAsk(questions []memory.PendingQuestion) *memory.PendingQuestion {
+	now := time.Now()
+	for i := range questions {
+		q := &questions[i]
+		if q.AskCount == 0 || q.LastAskedAt == "" {
+			return q
+		}
+		last, err := time.Parse(time.RFC3339, q.LastAskedAt)
+		if err != nil {
+			return q // if parse fails, ask it
+		}
+		backoff := time.Duration(questionBackoffDays(q.AskCount)) * 24 * time.Hour
+		if now.Sub(last) >= backoff {
+			return q
+		}
+	}
+	return nil
 }
 
 // formatQuestion returns a human-readable prompt for the pending question.

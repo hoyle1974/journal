@@ -27,6 +27,8 @@ type PendingQuestion struct {
 	CreatedAt      string    `firestore:"created_at" json:"created_at"`
 	ResolvedAt     string    `firestore:"resolved_at" json:"resolved_at,omitempty"`
 	Answer         string    `firestore:"answer" json:"answer,omitempty"`
+	AskCount       int       `firestore:"ask_count" json:"ask_count,omitempty"`
+	LastAskedAt    string    `firestore:"last_asked_at" json:"last_asked_at,omitempty"`
 	Embedding      []float32 `firestore:"embedding,omitempty" json:"-"`
 }
 
@@ -70,6 +72,8 @@ func (s *Store) InsertPendingQuestions(ctx context.Context, questions []PendingQ
 				"created_at":          q.CreatedAt,
 				"resolved_at":         q.ResolvedAt,
 				"answer":              q.Answer,
+				"ask_count":           0,
+				"last_asked_at":       "",
 				"embedding":           q.Embedding,
 				"node_type":           NodeTypePendingQuestion,
 				"significance_weight": 0.1,
@@ -110,15 +114,21 @@ func (s *Store) GetUnresolvedPendingQuestions(ctx context.Context, limit int) ([
 		if getStringField(data, "resolved_at") != "" {
 			return PendingQuestion{}, errSkipEntry
 		}
+		var askCount int
+		if v, ok := data["ask_count"].(int64); ok {
+			askCount = int(v)
+		}
 		q := PendingQuestion{
-			UUID:       doc.Ref.ID,
-			Question:   getStringField(data, "question"),
-			Kind:       getStringField(data, "kind"),
-			Context:    getStringField(data, "context"),
-			CreatedAt:  getStringField(data, "created_at"),
-			ResolvedAt: getStringField(data, "resolved_at"),
-			Answer:     getStringField(data, "answer"),
-			Embedding:  getFloat32SliceField(data, "embedding"),
+			UUID:        doc.Ref.ID,
+			Question:    getStringField(data, "question"),
+			Kind:        getStringField(data, "kind"),
+			Context:     getStringField(data, "context"),
+			CreatedAt:   getStringField(data, "created_at"),
+			ResolvedAt:  getStringField(data, "resolved_at"),
+			Answer:      getStringField(data, "answer"),
+			AskCount:    askCount,
+			LastAskedAt: getStringField(data, "last_asked_at"),
+			Embedding:   getFloat32SliceField(data, "embedding"),
 		}
 		q.SourceEntryIDs = getStringSliceField(data, "source_entry_uuids")
 		return q, nil
@@ -145,15 +155,21 @@ func (s *Store) GetRecentlyResolvedPendingQuestions(ctx context.Context, since t
 		if getStringField(data, "resolved_at") == "" {
 			return PendingQuestion{}, errSkipEntry
 		}
+		var askCount int
+		if v, ok := data["ask_count"].(int64); ok {
+			askCount = int(v)
+		}
 		q := PendingQuestion{
-			UUID:       doc.Ref.ID,
-			Question:   getStringField(data, "question"),
-			Kind:       getStringField(data, "kind"),
-			Context:    getStringField(data, "context"),
-			CreatedAt:  getStringField(data, "created_at"),
-			ResolvedAt: getStringField(data, "resolved_at"),
-			Answer:     getStringField(data, "answer"),
-			Embedding:  getFloat32SliceField(data, "embedding"),
+			UUID:        doc.Ref.ID,
+			Question:    getStringField(data, "question"),
+			Kind:        getStringField(data, "kind"),
+			Context:     getStringField(data, "context"),
+			CreatedAt:   getStringField(data, "created_at"),
+			ResolvedAt:  getStringField(data, "resolved_at"),
+			Answer:      getStringField(data, "answer"),
+			AskCount:    askCount,
+			LastAskedAt: getStringField(data, "last_asked_at"),
+			Embedding:   getFloat32SliceField(data, "embedding"),
 		}
 		q.SourceEntryIDs = getStringSliceField(data, "source_entry_uuids")
 		return q, nil
@@ -163,6 +179,7 @@ func (s *Store) GetRecentlyResolvedPendingQuestions(ctx context.Context, since t
 	}
 	return out, nil
 }
+
 
 const dedupSimilarityThreshold = 0.85
 
@@ -230,6 +247,20 @@ func (s *Store) filterDuplicatePendingQuestions(ctx context.Context, candidates 
 		}
 	}
 	return kept, nil
+}
+
+// RecordQuestionAsked increments ask_count and sets last_asked_at to now.
+func (s *Store) RecordQuestionAsked(ctx context.Context, uuid string) error {
+	now := time.Now().Format(time.RFC3339)
+	ref := s.db.Collection(PendingQuestionsCollection).Doc(uuid)
+	_, err := ref.Update(ctx, []firestore.Update{
+		{Path: "ask_count", Value: firestore.Increment(1)},
+		{Path: "last_asked_at", Value: now},
+	})
+	if err != nil {
+		return fmt.Errorf("record question asked %s: %w", uuid, err)
+	}
+	return nil
 }
 
 // ResolvePendingQuestion sets resolved_at and answer for a pending question.

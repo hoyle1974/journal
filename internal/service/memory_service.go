@@ -40,6 +40,22 @@ func (m *MemoryService) GetUnresolvedPendingQuestions(ctx context.Context, limit
 	return out, nil
 }
 
+// GetPendingQuestion fetches a single pending question by UUID.
+func (m *MemoryService) GetPendingQuestion(ctx context.Context, uuid string) (*api.PendingQuestion, error) {
+	q, err := m.env.MemoryStore().GetPendingQuestion(ctx, uuid)
+	if err != nil {
+		return nil, err
+	}
+	return &api.PendingQuestion{
+		UUID:           q.UUID,
+		Question:       q.Question,
+		Kind:           q.Kind,
+		Context:        q.Context,
+		SourceEntryIDs: q.SourceEntryIDs,
+		CreatedAt:      q.CreatedAt,
+	}, nil
+}
+
 // ResolvePendingQuestion marks a question resolved.
 func (m *MemoryService) ResolvePendingQuestion(ctx context.Context, id, answer string) error {
 	infra.LoggerFrom(ctx).Info("function call", "fn", "ResolvePendingQuestion", "id", id, "answer_length", len(answer))

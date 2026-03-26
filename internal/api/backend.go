@@ -69,6 +69,7 @@ type JournalService interface {
 // MemoryService provides memory and knowledge operations for HTTP handlers.
 type MemoryService interface {
 	GetUnresolvedPendingQuestions(ctx context.Context, limit int) ([]PendingQuestion, error)
+	GetPendingQuestion(ctx context.Context, uuid string) (*PendingQuestion, error)
 	ResolvePendingQuestion(ctx context.Context, id, answer string) error
 }
 
@@ -87,6 +88,7 @@ type AgentService interface {
 	ProcessLogSequential(ctx context.Context, logUUID, logContent, timestamp, source string) (*agent.ProcessEntryReport, error)
 	ProcessAndRespond(ctx context.Context, input, source string) *QueryResult
 	RunDreamer(ctx context.Context, force bool) (*DreamResult, error)
+	IngestGapAnswer(ctx context.Context, question, answer string)
 }
 
 // TelegramService provides Telegram Bot API operations for HTTP handlers.

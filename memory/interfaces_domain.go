@@ -1,6 +1,9 @@
 package memory
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // UpsertOptions consolidates optional parameters for knowledge ingestion.
 // If Embedding is nil the library generates it automatically.
@@ -62,7 +65,9 @@ type AgentOps interface {
 	SaveQuery(ctx context.Context, question, answer, source string, isGap bool) (string, error)
 	InsertPendingQuestions(ctx context.Context, questions []PendingQuestion) error
 	GetUnresolvedQuestions(ctx context.Context, limit int) ([]PendingQuestion, error)
+	GetRecentlyResolvedQuestions(ctx context.Context, since time.Time) ([]PendingQuestion, error)
 	ResolveQuestion(ctx context.Context, uuid, answer string) error
+	RecordQuestionAsked(ctx context.Context, uuid string) error
 }
 
 // AdminOps covers maintenance, GC, and migrations.
