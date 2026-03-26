@@ -76,7 +76,7 @@ func mapGoTypeToGenai(t reflect.Type) genai.Type {
 	case reflect.Map, reflect.Struct:
 		return genai.TypeObject
 	default:
-		return genai.TypeString
+		panic(fmt.Sprintf("unsupported type %v for schema generation", t.Kind()))
 	}
 }
 

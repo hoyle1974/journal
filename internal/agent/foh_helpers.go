@@ -42,15 +42,10 @@ func AddEntryAndEnqueue(ctx context.Context, app *infra.App, content, source str
 		"task_id": taskID, "parent_trace_id": parentTraceID,
 	}
 	if err := app.EnqueueTask(ctx, "/internal/process-entry", payload); err != nil {
-		infra.LoggerFrom(ctx).Warn("failed to enqueue process-entry task, running inline", "entry_uuid", entryUUID, "task_id", taskID, "parent_trace_id", parentTraceID, "error", err)
-		app.SubmitAsync(func() {
-			bgCtx := infra.WithCorrelation(context.Background(), taskID, parentTraceID)
-			// Fire-and-forget: errors are already logged inside ProcessLogSequential.
-			_, _ = ProcessLogSequential(bgCtx, app, entryUUID, content, ts, source)
-		})
-	} else {
-		infra.LoggerFrom(ctx).Debug("triggering async task", "event", "async_task_enqueued", "task", "process-entry", "task_id", taskID, "parent_trace_id", parentTraceID, "entry_uuid", entryUUID, "reason", "async processing for evaluator, analysis, embedding")
+		infra.LoggerFrom(ctx).Error("failed to enqueue process-entry task", "entry_uuid", entryUUID, "task_id", taskID, "parent_trace_id", parentTraceID, "error", err)
+		return entryUUID, fmt.Errorf("enqueue process-entry: %w", err)
 	}
+	infra.LoggerFrom(ctx).Debug("triggering async task", "event", "async_task_enqueued", "task", "process-entry", "task_id", taskID, "parent_trace_id", parentTraceID, "entry_uuid", entryUUID, "reason", "async processing for evaluator, analysis, embedding")
 	return entryUUID, nil
 }
 

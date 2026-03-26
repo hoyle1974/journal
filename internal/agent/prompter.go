@@ -151,7 +151,7 @@ func formatKnowledgeGapSection(gapQueries []memory.QueryLog) string {
 // formats a PROJECT STATUS block for injection into the system prompt.
 // Checks up to the first 3 root tasks to bound the number of Firestore calls.
 func buildActiveProjectBlock(ctx context.Context, env infra.ToolEnv, roots []memory.Task) string {
-	limit := 3
+	limit := 15
 	if len(roots) < limit {
 		limit = len(roots)
 	}
