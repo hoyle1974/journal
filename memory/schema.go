@@ -21,8 +21,7 @@ const (
 	NodeTypeAsset          = "asset"
 	NodeTypeTool           = "tool"
 	NodeTypeGeneric        = "generic"
-	NodeTypeWeeklySummary  = "weekly_summary"
-	NodeTypeMonthlySummary = "monthly_summary"
+	NodeTypeWeeklySummary = "weekly_summary"
 	// NodeTypeIdentity is the reserved identity-anchor node type. Janitor must not delete or archive these.
 	NodeTypeIdentity = "identity_anchor"
 	// NodeTypeUserIdentity is for self-referential statements about the user's core identity (name, role, values, traits). Janitor must not delete these.

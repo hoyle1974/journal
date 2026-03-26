@@ -33,15 +33,12 @@ type EntryStore interface {
 // KnowledgeStore manages the semantic knowledge graph.
 type KnowledgeStore interface {
 	Upsert(ctx context.Context, content, nodeType, domain string, weight float64, opts UpsertOptions) (string, error)
-	GetByID(ctx context.Context, id string) (*KnowledgeNodeWithLinks, error)
-	GetByIDs(ctx context.Context, ids []string) ([]KnowledgeNodeWithLinks, error)
 	AddEntityLink(ctx context.Context, sourceUUID, targetUUID string) error
 	UpdateProjectStatus(ctx context.Context, nodeID, status string) error
 }
 
 // GraphStore provides graph traversal and semantic search.
 type GraphStore interface {
-	Expand(ctx context.Context, seedID string, queryVector []float32, hops, limitPerEdge int) (*SubGraph, error)
 	ExpandMulti(ctx context.Context, seedIDs []string, queryVector []float32, hops, limitPerEdge int) (*SubGraph, error)
 	QuerySimilar(ctx context.Context, queryVector []float32, opts SearchOptions) ([]KnowledgeNode, error)
 	SearchKeywords(ctx context.Context, keywords string, limit int) ([]KnowledgeNode, error)
@@ -71,6 +68,5 @@ type AgentOps interface {
 // AdminOps covers maintenance, GC, and migrations.
 // Do not call these on hot paths.
 type AdminOps interface {
-	MigrateMetadata(ctx context.Context, dryRun bool) (int, error)
 	BackfillEmbeddings(ctx context.Context, limit int) (int, error)
 }
