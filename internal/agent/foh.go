@@ -359,7 +359,20 @@ func RunQueryFull(ctx context.Context, app FOHEnv, question, source string, debu
 
 			execFunc := func() {
 				defer wg.Done()
-			
+				defer func() {
+					if r := recover(); r != nil {
+						infra.LoggerFrom(ctx).Error("tool panicked", "tool", fcName, "panic", r)
+						mu.Lock()
+						results[idx] = toolExecResult{
+							index:  idx,
+							fcName: fcName,
+							args:   args,
+							result: tools.Fail("Tool encountered a fatal error: %v", r),
+						}
+						mu.Unlock()
+					}
+				}()
+
 				toolResult := tools.Execute(ctx, app, fcName, args)
 				mu.Lock()
 				results[idx] = toolExecResult{index: idx, fcName: fcName, args: args, result: toolResult}
