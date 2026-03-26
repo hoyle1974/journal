@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Knetic/govaluate"
+	"github.com/araddon/dateparse"
 )
 
 // EvaluateMathExpression evaluates a mathematical expression string.
@@ -182,6 +183,11 @@ func parseFlexibleDate(dateStr string) (time.Time, error) {
 		if t, err := time.Parse(format, dateStr); err == nil {
 			return t, nil
 		}
+	}
+
+	// Fallback: try dateparse for the long tail of formats (e.g. "March 15 2026", "15-03-2026", "2026.03.15")
+	if t, err := dateparse.ParseAny(dateStr); err == nil {
+		return t, nil
 	}
 
 	return time.Time{}, fmt.Errorf("could not parse date: %s", dateStr)
