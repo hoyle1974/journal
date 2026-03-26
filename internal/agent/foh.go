@@ -71,17 +71,15 @@ type QueryResult struct {
 	ForcedConclusion bool                     `json:"forced_conclusion,omitempty"`
 	Error            bool                     `json:"error"`
 	DebugLogs        []string                 `json:"debug_logs,omitempty"`
-	// ReasoningTrace holds per-iteration text from optional <thought>...</thought> blocks (FOH CoT).
-	ReasoningTrace []string `json:"reasoning_trace,omitempty"`
-	// GraphContext holds graph node context injected into the model: Loom RAG pre-load and
-	// any graph_expand tool results retrieved during CoT.
-	GraphContext []string `json:"graph_context,omitempty"`
+	// DebugTrace holds the full chronological trace: system prompt, reasoning blocks,
+	// tool calls, and tool results. Each entry is prefixed with its type (e.g. "Prompt: ", "Reasoning: ", "Tool[N]: ", "Result[N]: ").
+	DebugTrace []string `json:"debug_trace,omitempty"`
 }
 
 // ErrQueryResult returns a failed QueryResult.
 // span.RecordError must still be called at the site when a span is active.
-func ErrQueryResult(answer string, iteration int, debugLogs []string, reasoningTrace []string) *QueryResult {
-	return &QueryResult{Answer: answer, Iterations: iteration, Error: true, DebugLogs: debugLogs, ReasoningTrace: reasoningTrace}
+func ErrQueryResult(answer string, iteration int, debugLogs []string, debugTrace []string) *QueryResult {
+	return &QueryResult{Answer: answer, Iterations: iteration, Error: true, DebugLogs: debugLogs, DebugTrace: debugTrace}
 }
 
 // RunQuery runs a query against the journal using the agentic loop.
@@ -142,34 +140,25 @@ func RunQueryFull(ctx context.Context, app FOHEnv, question, source string, debu
 	}
 
 	logDebug("[start] Question: %s", question)
-	var reasoningTrace []string
-	var graphContext []string
-	if ragContext != "" {
-		graphContext = append(graphContext, "## Loom RAG (pre-loaded)\n"+ragContext)
-	}
+	var debugTrace []string
 
 	systemPrompt, err := BuildSystemPrompt(ctx, app, ragContext)
 	if err != nil {
 		span.RecordError(err)
 		return ErrQueryResult(fmt.Sprintf("Error building system prompt: %v", err), 0, debugLogs, nil)
 	}
+	debugTrace = append(debugTrace, "Prompt: "+systemPrompt)
 	infra.LoggerFrom(ctx).Debug("FOH: system prompt built", "query_run_id", queryRunID, "phase", "start", "prompt_len", len(systemPrompt), "reason", "inject date, recent history, tasks, project")
 	logDebug("[prompt] %s", systemPrompt)
 
-	useCompactTools := app.Config() != nil && app.Config().UseCompactTools
-	var toolDefs []*genai.FunctionDeclaration
-	if useCompactTools {
-		toolDefs = tools.GetDefinitionsForCore() // Map vs Manual: only semantic_search, upsert_knowledge, discovery_search (~300 tokens)
-	} else {
-		toolDefs = tools.GetDefinitions()
-	}
+	toolDefs := tools.GetDefinitions()
 	session, err := infra.NewChatSession(ctx, app.App(), systemPrompt, toolDefs, true)
 	if err != nil {
 		span.RecordError(err)
 		return ErrQueryResult(fmt.Sprintf("Error creating chat session: %v", infra.WrapLLMError(err)), 0, debugLogs, nil)
 	}
-	logDebug("[init] Chat session created with %d tools (compact=%v)", len(toolDefs), useCompactTools)
-	infra.LoggerFrom(ctx).Debug("FOH: sending question to LLM", "query_run_id", queryRunID, "phase", "first_turn", "tool_count", len(toolDefs), "compact_tools", useCompactTools, "reason", "first turn")
+	logDebug("[init] Chat session created with %d tools", len(toolDefs))
+	infra.LoggerFrom(ctx).Debug("FOH: sending question to LLM", "query_run_id", queryRunID, "phase", "first_turn", "tool_count", len(toolDefs), "reason", "first turn")
 
 	iteration := 0
 	emptyContentRetries := 0
@@ -197,7 +186,7 @@ func RunQueryFull(ctx context.Context, app FOHEnv, question, source string, debu
 			if thoughtSuggestsKnowledgeGap(thinking) {
 				knowledgeGapDetected = true
 			}
-			reasoningTrace = append(reasoningTrace, truncateThoughtForTrace(thinking))
+			debugTrace = append(debugTrace, fmt.Sprintf("Reasoning[%d]: %s", iteration, strings.TrimSpace(thinking)))
 			infra.LoggerFrom(ctx).Debug("FOH: thinking block", "query_run_id", queryRunID, "iter", iteration, "thinking_len", len(thinking))
 			if debug {
 				logDebug("[iter %d] thinking: %s", iteration, thinking)
@@ -208,75 +197,7 @@ func RunQueryFull(ctx context.Context, app FOHEnv, question, source string, debu
 			"foh_last_thought_len": fmt.Sprintf("%d", len(thinking)),
 		})
 
-		var hasCalls bool
-		if useCompactTools {
-			// Map vs Manual: core tools (semantic_search, upsert_knowledge, discovery_search) come as native function calls; rest via JSON.
-			var discoveredToolName string
-			var discoveredToolArgs map[string]interface{}
-			if infra.HasFunctionCalls(resp) {
-				hasCalls = true
-			} else {
-				infra.LoggerFrom(ctx).Debug("FOH: parsing structured tool call (K/V)", "query_run_id", queryRunID, "raw_text", answerText)
-				discoveredToolName, discoveredToolArgs, hasCalls = ParseStructuredToolCall(answerText)
-			}
-			if hasCalls && !infra.HasFunctionCalls(resp) {
-				// Discovered tool invoked via JSON block
-				logDebug("[iter %d] LLM response: discovered tool_call=%s", iteration, discoveredToolName)
-				infra.LoggerFrom(ctx).Debug("FOH: discovered tool call (K/V)", "query_run_id", queryRunID, "phase", "tool_execution", "iter", iteration, "tool", discoveredToolName)
-			
-				toolResult := tools.Execute(ctx, app, discoveredToolName, discoveredToolArgs)
-				toolCalls = append(toolCalls, map[string]interface{}{
-					"tool":           discoveredToolName,
-					"arguments":      discoveredToolArgs,
-					"success":        toolResult.Success,
-					"result_preview": utils.TruncateString(toolResult.Result, 200),
-				})
-				searchTools := map[string]bool{
-					"semantic_search": true, "get_entity_network": true, "search_entries": true,
-					"get_entries_by_date_range": true, "query_entities": true, "wikipedia": true,
-					"web_search": true, "list_knowledge": true,
-					"graph_expand": true,
-				}
-				if searchTools[discoveredToolName] {
-					searchToolCallCount++
-					retrievedContent.WriteString(toolResult.Result)
-					retrievedContent.WriteString("\n\n")
-					res := strings.ToLower(strings.TrimSpace(toolResult.Result))
-					if strings.Contains(res, "no results found") || strings.Contains(res, "no information found") ||
-						strings.Contains(res, "no semantic matches found") || strings.Contains(res, "no entries found") ||
-						strings.Contains(res, "no queries found") || strings.Contains(res, "no entity found") ||
-						strings.Contains(res, "no wikipedia") || strings.Contains(res, "no definition found for") {
-						knowledgeGapDetected = true
-					}
-				}
-				if discoveredToolName == "graph_expand" && toolResult.Success {
-					graphContext = append(graphContext, "## graph_expand (iter "+fmt.Sprintf("%d", iteration)+")\n"+toolResult.Result)
-				}
-				resultMsg := "Tool result (" + discoveredToolName + "): " + toolResult.Result
-				resp, err = session.SendMessage(ctx, &genai.Part{Text: utils.SanitizePrompt(resultMsg)})
-				if err != nil {
-				
-					span.RecordError(err)
-					return &QueryResult{
-						Answer:         fmt.Sprintf("Error calling Gemini API: %v", infra.WrapLLMError(err)),
-						Iterations:     iteration,
-						ToolCalls:      toolCalls,
-						Error:          true,
-						DebugLogs:      debugLogs,
-						ReasoningTrace: reasoningTrace,
-						GraphContext:   graphContext,
-					}
-				}
-				iteration++
-			
-				session.TrimHistory(MaxMessagePairs)
-				logDebug("[iter %d] tool_result sent to LLM", iteration)
-				continue
-			}
-			// hasCalls true with native FunctionCalls: fall through to native execution below
-		} else {
-			hasCalls = infra.HasFunctionCalls(resp)
-		}
+		hasCalls := infra.HasFunctionCalls(resp)
 
 		logDebug("[iter %d] LLM response: has_function_calls=%v", iteration, hasCalls)
 		infra.LoggerFrom(ctx).Debug("FOH: iteration decision", "query_run_id", queryRunID, "phase", "decision", "iter", iteration, "has_function_calls", hasCalls, "llm_correlation_id", session.LastLLMCorrelationID(), "reason", "decompose: LLM either answers or calls tools")
@@ -325,8 +246,7 @@ func RunQueryFull(ctx context.Context, app FOHEnv, question, source string, debu
 					ToolCalls:      toolCalls,
 					Error:          false,
 					DebugLogs:      debugLogs,
-					ReasoningTrace: reasoningTrace,
-					GraphContext:   graphContext,
+					DebugTrace: debugTrace,
 				}
 			}
 		}
@@ -347,8 +267,6 @@ func RunQueryFull(ctx context.Context, app FOHEnv, question, source string, debu
 						Iterations:     iteration,
 						Error:          true,
 						DebugLogs:      debugLogs,
-						ReasoningTrace: reasoningTrace,
-						GraphContext:   graphContext,
 					}
 				}
 			
@@ -367,8 +285,7 @@ func RunQueryFull(ctx context.Context, app FOHEnv, question, source string, debu
 					ToolCalls:      toolCalls,
 					Error:          false,
 					DebugLogs:      debugLogs,
-					ReasoningTrace: reasoningTrace,
-					GraphContext:   graphContext,
+					DebugTrace: debugTrace,
 				}
 			}
 
@@ -384,8 +301,6 @@ func RunQueryFull(ctx context.Context, app FOHEnv, question, source string, debu
 				Iterations:     iteration,
 				Error:          true,
 				DebugLogs:      debugLogs,
-				ReasoningTrace: reasoningTrace,
-				GraphContext:   graphContext,
 			}
 		}
 
@@ -395,6 +310,7 @@ func RunQueryFull(ctx context.Context, app FOHEnv, question, source string, debu
 			toolNames = append(toolNames, fc.Name)
 			argsJSON, _ := json.Marshal(fc.Args)
 			sigParts = append(sigParts, fmt.Sprintf("%s:%s", fc.Name, string(argsJSON)))
+			debugTrace = append(debugTrace, fmt.Sprintf("Tool[%d]: %s(%s)", iteration, fc.Name, string(argsJSON)))
 			logDebug("[iter %d] tool_call: %s(%s)", iteration, fc.Name, string(argsJSON))
 			infra.LoggerFrom(ctx).Debug("FOH: tool call", "query_run_id", queryRunID, "phase", "tool_execution", "event", "tool_call", "iter", iteration, "tool", fc.Name, "args", string(argsJSON))
 		}
@@ -486,6 +402,7 @@ func RunQueryFull(ctx context.Context, app FOHEnv, question, source string, debu
 				"success":        r.result.Success,
 				"result_preview": utils.TruncateString(r.result.Result, 200),
 			})
+			debugTrace = append(debugTrace, fmt.Sprintf("Result[%d]: %s -> %s", iteration, r.fcName, r.result.Result))
 
 			functionResponses = append(functionResponses, &genai.Part{
 				FunctionResponse: &genai.FunctionResponse{
@@ -499,9 +416,6 @@ func RunQueryFull(ctx context.Context, app FOHEnv, question, source string, debu
 				searchToolCallCount++
 				retrievedContent.WriteString(r.result.Result)
 				retrievedContent.WriteString("\n\n")
-			}
-			if r.fcName == "graph_expand" && r.result.Success {
-				graphContext = append(graphContext, "## graph_expand (iter "+fmt.Sprintf("%d", iteration)+")\n"+r.result.Result)
 			}
 		}
 
@@ -544,8 +458,6 @@ func RunQueryFull(ctx context.Context, app FOHEnv, question, source string, debu
 				ToolCalls:      toolCalls,
 				Error:          true,
 				DebugLogs:      debugLogs,
-				ReasoningTrace: reasoningTrace,
-				GraphContext:   graphContext,
 			}
 		}
 		iteration++
@@ -568,8 +480,6 @@ func RunQueryFull(ctx context.Context, app FOHEnv, question, source string, debu
 			ToolCalls:      toolCalls,
 			Error:          true,
 			DebugLogs:      debugLogs,
-			ReasoningTrace: reasoningTrace,
-			GraphContext:   graphContext,
 		}
 	}
 
@@ -578,7 +488,7 @@ func RunQueryFull(ctx context.Context, app FOHEnv, question, source string, debu
 		if thoughtSuggestsKnowledgeGap(thinkingForced) {
 			knowledgeGapDetected = true
 		}
-		reasoningTrace = append(reasoningTrace, truncateThoughtForTrace(thinkingForced))
+		debugTrace = append(debugTrace, fmt.Sprintf("Reasoning[%d]: %s", iteration, strings.TrimSpace(thinkingForced)))
 		infra.LoggerFrom(ctx).Debug("FOH: thinking block (forced conclusion)", "query_run_id", queryRunID, "phase", "forced_conclusion", "thinking_len", len(thinkingForced))
 		if debug {
 			logDebug("[forced] thinking: %s", thinkingForced)
@@ -613,8 +523,6 @@ func RunQueryFull(ctx context.Context, app FOHEnv, question, source string, debu
 			ForcedConclusion: true,
 			Error:            false,
 			DebugLogs:        debugLogs,
-			ReasoningTrace:   reasoningTrace,
-			GraphContext:     graphContext,
 		}
 	}
 
@@ -626,8 +534,6 @@ func RunQueryFull(ctx context.Context, app FOHEnv, question, source string, debu
 		ToolCalls:      toolCalls,
 		Error:          true,
 		DebugLogs:      debugLogs,
-		ReasoningTrace: reasoningTrace,
-		GraphContext:   graphContext,
 	}
 }
 

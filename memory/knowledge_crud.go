@@ -48,9 +48,13 @@ type KnowledgeNode struct {
 	Embedding []float32 `firestore:"embedding" json:"embedding,omitempty"`
 	// Loom graph caching fields (top-level Firestore fields for queryability during
 	// hot-edge eviction and nightly decay). Present on relationship and object nodes.
-	RelevanceScore float64  `firestore:"relevance_score,omitempty" json:"relevance_score,omitempty"`
-	HotEdges       []string `firestore:"hot_edges,omitempty"       json:"hot_edges,omitempty"`
-	LogicTrace     string   `firestore:"logic_trace,omitempty"     json:"logic_trace,omitempty"`
+	RelevanceScore     float64  `firestore:"relevance_score,omitempty"     json:"relevance_score,omitempty"`
+	HotEdges           []string `firestore:"hot_edges,omitempty"           json:"hot_edges,omitempty"`
+	LogicTrace         string   `firestore:"logic_trace,omitempty"         json:"logic_trace,omitempty"`
+	SignificanceWeight float64  `firestore:"significance_weight,omitempty" json:"significance_weight,omitempty"`
+	// QueryScore is the cosine similarity [0,1] from the most recent vector search.
+	// Transient — never persisted to Firestore.
+	QueryScore float64 `firestore:"-" json:"query_score,omitempty"`
 }
 
 // KnowledgeNodeWithLinks extends KnowledgeNode with entity_links and journal_entry_ids for graph traversal.
@@ -150,14 +154,15 @@ func (s *Store) GetKnowledgeNodeByID(ctx context.Context, id string) (*Knowledge
 	data := doc.Data()
 	n := &KnowledgeNodeWithLinks{
 		KnowledgeNode: KnowledgeNode{
-			UUID:        doc.Ref.ID,
-			Content:     getStringField(data, "content"),
-			NodeType:    getStringField(data, "node_type"),
-			Metadata:    getStringField(data, "metadata"),
-			Timestamp:   getStringField(data, "timestamp"),
-			Predicate:   getStringField(data, "predicate"),
-			SubjectUUID: getStringField(data, "subject_uuid"),
-			ObjectUUID:  getStringField(data, "object_uuid"),
+			UUID:               doc.Ref.ID,
+			Content:            getStringField(data, "content"),
+			NodeType:           getStringField(data, "node_type"),
+			Metadata:           getStringField(data, "metadata"),
+			Timestamp:          getStringField(data, "timestamp"),
+			Predicate:          getStringField(data, "predicate"),
+			SubjectUUID:        getStringField(data, "subject_uuid"),
+			ObjectUUID:         getStringField(data, "object_uuid"),
+			SignificanceWeight: getFloat64Field(data, "significance_weight"),
 		},
 		EntityLinks:     getStringSliceField(data, "entity_links"),
 		JournalEntryIDs: getStringSliceField(data, "journal_entry_ids"),
@@ -212,14 +217,15 @@ func (s *Store) GetKnowledgeNodesByIDs(ctx context.Context, ids []string) ([]Kno
 			data := doc.Data()
 			n := KnowledgeNodeWithLinks{
 				KnowledgeNode: KnowledgeNode{
-					UUID:       doc.Ref.ID,
-					Content:    getStringField(data, "content"),
-					NodeType:   getStringField(data, "node_type"),
-					Metadata:   getStringField(data, "metadata"),
-					Timestamp:  getStringField(data, "timestamp"),
-					Predicate:   getStringField(data, "predicate"),
-					ObjectUUID:  getStringField(data, "object_uuid"),
-					SubjectUUID: getStringField(data, "subject_uuid"),
+					UUID:               doc.Ref.ID,
+					Content:            getStringField(data, "content"),
+					NodeType:           getStringField(data, "node_type"),
+					Metadata:           getStringField(data, "metadata"),
+					Timestamp:          getStringField(data, "timestamp"),
+					Predicate:          getStringField(data, "predicate"),
+					ObjectUUID:         getStringField(data, "object_uuid"),
+					SubjectUUID:        getStringField(data, "subject_uuid"),
+					SignificanceWeight: getFloat64Field(data, "significance_weight"),
 				},
 				EntityLinks:     getStringSliceField(data, "entity_links"),
 				JournalEntryIDs: getStringSliceField(data, "journal_entry_ids"),

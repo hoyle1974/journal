@@ -69,15 +69,8 @@ func BuildSystemPrompt(ctx context.Context, env infra.ToolEnv, ragContext string
 		knowledgeGapBlockWrapped = utils.WrapAsUserData(knowledgeGapBlock)
 	}
 
-	// 4. Open Tasks (root)
+	// 4. Active Project (most recently created root task that has subtasks)
 	roots, _ := env.MemoryTasks().GetOpenRootTasks(ctx, 15)
-	openTodoBlock := formatTodoSection(roots)
-	openTodoBlockWrapped := openTodoBlock
-	if openTodoBlock != "" {
-		openTodoBlockWrapped = utils.WrapAsUserData(openTodoBlock)
-	}
-
-	// 5. Active Project (most recently created root task that has subtasks)
 	activeProjectBlock := buildActiveProjectBlock(ctx, env, roots)
 	activeProjectBlockWrapped := activeProjectBlock
 	if activeProjectBlock != "" {
@@ -91,7 +84,7 @@ func BuildSystemPrompt(ctx context.Context, env infra.ToolEnv, ragContext string
 	}
 
 	// Log the actual injected context at Info so it appears in production (e.g. tail.sh / LLM_CONTEXT_SENT).
-	injectedSections := strings.TrimSpace(identityBlock + recentConversation + proactiveSignals + knowledgeGapBlock + openTodoBlock + activeProjectBlock)
+	injectedSections := strings.TrimSpace(identityBlock + recentConversation + proactiveSignals + knowledgeGapBlock + activeProjectBlock)
 	if injectedSections == "" {
 		injectedSections = "(no dynamic sections)"
 	}
@@ -112,19 +105,12 @@ func BuildSystemPrompt(ctx context.Context, env infra.ToolEnv, ragContext string
 		RecentConversation: recentConversationWrapped,
 		ProactiveSignals:   proactiveSignalsWrapped,
 		KnowledgeGapBlock:  knowledgeGapBlockWrapped,
-		OpenTodoBlock:      openTodoBlockWrapped,
 		ActiveProjectBlock: activeProjectBlockWrapped,
 		LoomContextBlock:   loomContextBlock,
 	}
 	prompt, err := prompts.BuildSystemPrompt(promptData)
 	if err != nil {
 		return "", fmt.Errorf("build system prompt: %w", err)
-	}
-
-	// Map vs Manual: compressed manifest + core tools (incl. graph_expand). Everything else via discovery_search(intent) → JIT schema injection.
-	if env != nil && env.Config() != nil && env.Config().UseCompactTools {
-		prompt += "\n\n---\n## TOOLS (Map)\nWhen you lack information to answer (e.g. current time, calculation, definition), you MUST call discovery_search first — never respond \"I do not have access\" without calling it. You have direct access to: semantic_search, graph_expand, upsert_knowledge, discovery_search, get_recent_entries, retrieve_image. For any other action or missing info, call discovery_search(intent=\"your_reasoning\") to get tool schemas; then invoke that tool with key/value lines only: TOOL: tool_name then ARGS: then one line per argument as param_name | value. No JSON, no markdown, no code fences. Do not output any other text when making a tool call."
-		infra.LoggerFrom(ctx).Debug("system prompt: Map vs Manual (core tools + discovery)", "reason", "JOT_USE_COMPACT_TOOLS=true")
 	}
 
 	infra.LoggerFrom(ctx).Debug("system prompt built", "prompt_len", len(prompt), "reason", "inject date, recent conversation, signals, gap block, open todo roots")
@@ -169,18 +155,6 @@ func formatKnowledgeGapSection(gapQueries []memory.QueryLog) string {
 }
 
 // formatTodoSection builds the OPEN TASKS (ROOT) block with --- and ## header; full task UUID + content.
-// Full UUIDs are required so update_task_status/update_task find the Firestore document (doc ID is the full UUID).
-func formatTodoSection(roots []memory.Task) string {
-	if len(roots) == 0 {
-		return ""
-	}
-	var lines []string
-	for _, t := range roots {
-		lines = append(lines, fmt.Sprintf("- [%s] %s", t.UUID, t.Content))
-	}
-	return fmt.Sprintf("\n---\n## ✅ OPEN TASKS (ROOT)\n# Primary pending actions from the operation queue.\n\n%s", strings.Join(lines, "\n"))
-}
-
 // buildActiveProjectBlock finds the most recently created open root task that has pending subtasks and
 // formats a PROJECT STATUS block for injection into the system prompt.
 // Checks up to the first 3 root tasks to bound the number of Firestore calls.

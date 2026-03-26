@@ -111,7 +111,6 @@ type ParamInfo struct {
 }
 
 // ParamInfosFromArgs returns param name, required, and description from a pointer-to-struct.
-// Used by FormatDiscoveryResultFull and SearchRegistry (param names only).
 func ParamInfosFromArgs(ptr any) []ParamInfo {
 	t := reflect.TypeOf(ptr)
 	if t.Kind() == reflect.Ptr {

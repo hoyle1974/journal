@@ -3,7 +3,9 @@ package agent
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
+	"sync"
 
 	"github.com/hoyle1974/memory"
 	"github.com/jackstrohm/jot/internal/infra"
@@ -11,9 +13,11 @@ import (
 
 // LoomRAGContext holds the assembled 2-hop context for the Loom response worker.
 type LoomRAGContext struct {
-	RelationshipSummaries []string // top-5 relationship nodes similar to the log entry
+	SeedSource            string   // "spo" or "vector_fallback"
+	SeedSummaries         []string // formatted lines for each seed node
+	RelationshipSummaries []string // relationship nodes from 2-hop graph expansion
 	HopNodeSummaries      []string // subject/object nodes and their hot_edges (1 more hop)
-	PendingTaskSummaries  []string // pending/active tasks for additional context
+	SourceEntries         []string // deduplicated source journal entries referenced by graph nodes
 }
 
 // BuildLoomRAGContext performs 2-hop context retrieval from seed node IDs produced by the refinery.
@@ -34,57 +38,148 @@ func BuildLoomRAGContext(ctx context.Context, app *infra.App, logUUID, logConten
 
 	result := &LoomRAGContext{}
 
-	// When the refinery found no seeds (e.g. input is a question), fall back to a keyword
-	// search on the content terms so graph context is always populated.
-	// Strip stop/question words first — SearchKnowledgeNodes requires ALL words to match,
-	// so "Who is Alex" would require nodes to contain "who", "is", and "alex".
-	// Replace first-person pronouns with the owner's name so "my goals" → "Alex goals".
-	if len(seedNodeIDs) == 0 && logContent != "" {
-		ownerName, _ := app.Memory.FetchOwnerName(ctx)
-		if terms := keywordTerms(logContent, ownerName); terms != "" {
-			hits, err := app.MemoryGraph().SearchKeywords(ctx, terms, 10)
-			if err != nil {
-				infra.LoggerFrom(ctx).Warn("loom rag: keyword fallback search failed", "error", err)
-			}
-			for _, n := range hits {
-				seedNodeIDs = append(seedNodeIDs, n.UUID)
-			}
+	// Embed the log content once — used both for seed discovery (when no refinery seeds)
+	// and for semantic pruning during graph expansion.
+	var queryVec []float32
+	if logContent != "" {
+		vec, err := infra.GenerateEmbedding(ctx, app.Config().GoogleCloudProject, logContent, infra.EmbedTaskRetrievalQuery)
+		if err != nil {
+			infra.LoggerFrom(ctx).Warn("loom rag: embed content failed", "error", err)
+		} else {
+			queryVec = vec
 		}
 	}
 
+	// When the refinery found no seeds (e.g. input is a question), fall back to a vector
+	// search so graph context is always populated with semantically relevant nodes.
+	if len(seedNodeIDs) == 0 && len(queryVec) > 0 {
+		result.SeedSource = "vector_fallback"
+		hits, err := app.MemoryGraph().QuerySimilar(ctx, queryVec, memory.SearchOptions{Limit: 10, MinSignificance: 0.5})
+		if err != nil {
+			infra.LoggerFrom(ctx).Warn("loom rag: vector fallback search failed", "error", err)
+		}
+		for _, n := range hits {
+			seedNodeIDs = append(seedNodeIDs, n.UUID)
+		}
+	} else {
+		result.SeedSource = "spo"
+	}
+
 	if len(seedNodeIDs) > 0 {
-		sg, err := app.MemoryGraph().ExpandMulti(ctx, seedNodeIDs, nil, 2, 8)
+		sg, err := app.MemoryGraph().ExpandMulti(ctx, seedNodeIDs, queryVec, 2, 8)
 		if err != nil {
 			infra.LoggerFrom(ctx).Warn("loom rag: graph expand failed", "error", err)
 		} else {
+			seenEdge := make(map[string]bool)
+			seenEntryID := make(map[string]bool)
+			var entryIDs []string
 			for uuid, n := range sg.Nodes {
+				// Collect journal entry IDs from every node.
+				for _, eid := range n.JournalEntryIDs {
+					if eid != "" && !seenEntryID[eid] {
+						seenEntryID[eid] = true
+						entryIDs = append(entryIDs, eid)
+					}
+				}
 				if n.NodeType == memory.NodeTypeRelationship {
+					subjectLabel := n.SubjectUUID
+					if s, ok := sg.Nodes[n.SubjectUUID]; ok && s.Content != "" {
+						subjectLabel = s.Content
+					}
+					objectLabel := n.ObjectUUID
+					if o, ok := sg.Nodes[n.ObjectUUID]; ok && o.Content != "" {
+						objectLabel = o.Content
+					}
+					key := subjectLabel + "|" + n.Predicate + "|" + objectLabel
+					if seenEdge[key] {
+						continue
+					}
+					seenEdge[key] = true
 					result.RelationshipSummaries = append(result.RelationshipSummaries,
-						formatRelNode(n, sg.Nodes))
+						formatRelNode(subjectLabel, n.Predicate, objectLabel, n.Timestamp))
 				} else if n.NodeType != memory.NodeTypeLog && n.NodeType != memory.NodeTypeResponse {
-					seed := sg.SeedUUIDs[uuid]
-					result.HopNodeSummaries = append(result.HopNodeSummaries,
-						formatEntityNode(n, seed))
+					if sg.SeedUUIDs[uuid] {
+						result.SeedSummaries = append(result.SeedSummaries, formatEntityNode(n))
+					} else {
+						result.HopNodeSummaries = append(result.HopNodeSummaries, formatEntityNode(n))
+					}
+				}
+			}
+
+			// Fetch source journal entries in parallel and format them.
+			if len(entryIDs) > 0 {
+				type entryResult struct {
+					id    string
+					entry *memory.Entry
+				}
+				ch := make(chan entryResult, len(entryIDs))
+				var wg sync.WaitGroup
+				for _, eid := range entryIDs {
+					wg.Add(1)
+					go func(id string) {
+						defer wg.Done()
+						e, err := app.Memory.GetEntry(ctx, id)
+						if err != nil || e == nil {
+							ch <- entryResult{id: id}
+							return
+						}
+						ch <- entryResult{id: id, entry: e}
+					}(eid)
+				}
+				wg.Wait()
+				close(ch)
+
+				// Collect and sort by timestamp for stable output.
+				type entrySummary struct {
+					ts   string
+					line string
+				}
+				var summaries []entrySummary
+				for r := range ch {
+					if r.entry == nil {
+						continue
+					}
+					date := ""
+					if len(r.entry.Timestamp) >= 10 {
+						date = r.entry.Timestamp[:10]
+					}
+					preview := r.entry.Content
+					if len(preview) > 120 {
+						preview = preview[:117] + "..."
+					}
+					summaries = append(summaries, entrySummary{
+						ts:   r.entry.Timestamp,
+						line: fmt.Sprintf("[%s] %s: %s", r.id, date, preview),
+					})
+				}
+				sort.Slice(summaries, func(i, j int) bool {
+					return summaries[i].ts < summaries[j].ts
+				})
+				for _, s := range summaries {
+					result.SourceEntries = append(result.SourceEntries, s.line)
 				}
 			}
 		}
 	}
 
-	// Always include open tasks for task-aware reasoning.
-	tasks, err := app.Memory.GetOpenRootTasks(ctx, 10)
-	if err != nil {
-		infra.LoggerFrom(ctx).Warn("loom rag: fetch open tasks failed", "error", err)
-	}
-	for _, t := range tasks {
-		result.PendingTaskSummaries = append(result.PendingTaskSummaries,
-			fmt.Sprintf("[task] %s | status=%s | %s", t.UUID, t.Status, t.Content))
-	}
 	return result, nil
 }
 
 // FormatForPrompt returns a prompt-ready string block from the RAG context.
+// Returns empty string if there is nothing to show.
 func (r *LoomRAGContext) FormatForPrompt() string {
+	if r.SeedSource == "" && len(r.SeedSummaries) == 0 && len(r.RelationshipSummaries) == 0 && len(r.HopNodeSummaries) == 0 && len(r.SourceEntries) == 0 {
+		return ""
+	}
 	var b strings.Builder
+	b.WriteString(fmt.Sprintf("## Seeds (source: %s)\n", r.SeedSource))
+	if len(r.SeedSummaries) > 0 {
+		for _, s := range r.SeedSummaries {
+			b.WriteString("- " + s + "\n")
+		}
+	} else {
+		b.WriteString("(none)\n")
+	}
 	if len(r.RelationshipSummaries) > 0 {
 		b.WriteString("## Related Graph Edges\n")
 		for _, s := range r.RelationshipSummaries {
@@ -92,116 +187,35 @@ func (r *LoomRAGContext) FormatForPrompt() string {
 		}
 	}
 	if len(r.HopNodeSummaries) > 0 {
-		b.WriteString("\n## Expanded Context Nodes\n")
+		b.WriteString("## Context Nodes\n")
 		for _, s := range r.HopNodeSummaries {
 			b.WriteString("- " + s + "\n")
 		}
 	}
-	if len(r.PendingTaskSummaries) > 0 {
-		b.WriteString("\n## Open Tasks\n")
-		for _, s := range r.PendingTaskSummaries {
+	if len(r.SourceEntries) > 0 {
+		b.WriteString("## Source Journal Entries\n")
+		for _, s := range r.SourceEntries {
 			b.WriteString("- " + s + "\n")
 		}
 	}
 	return strings.TrimSpace(b.String())
 }
 
-// stopWords are common English words and question words that add no search signal.
-var stopWords = map[string]bool{
-	"a": true, "an": true, "the": true, "and": true, "or": true, "but": true,
-	"in": true, "on": true, "at": true, "to": true, "for": true, "of": true,
-	"with": true, "by": true, "from": true, "is": true, "are": true, "was": true,
-	"were": true, "be": true, "been": true, "being": true, "have": true, "has": true,
-	"had": true, "do": true, "does": true, "did": true, "will": true, "would": true,
-	"could": true, "should": true, "may": true, "might": true, "can": true,
-	"who": true, "what": true, "when": true, "where": true, "why": true, "how": true,
-	"which": true, "that": true, "this": true, "these": true, "those": true,
-	"i": true, "me": true, "my": true, "we": true, "our": true, "you": true,
-	"your": true, "he": true, "she": true, "it": true, "they": true, "their": true,
-	"tell": true, "about": true, "know": true, "get": true,
+// formatRelNode formats a deduplicated edge as: subject -- predicate --> object [date].
+func formatRelNode(subject, predicate, object, timestamp string) string {
+	date := ""
+	if len(timestamp) >= 10 {
+		date = " [" + timestamp[:10] + "]"
+	}
+	return fmt.Sprintf("%s -- %s --> %s%s", subject, predicate, object, date)
 }
 
-// firstPersonPronouns are replaced with the owner's name when known.
-var firstPersonPronouns = map[string]bool{
-	"i": true, "me": true, "my": true, "mine": true, "myself": true,
-}
-
-// formatRelNode formats a relationship node with full SPO data and resolved subject/object labels.
-func formatRelNode(n memory.KnowledgeNodeWithLinks, nodes map[string]memory.KnowledgeNodeWithLinks) string {
-	subjectLabel := n.SubjectUUID
-	if s, ok := nodes[n.SubjectUUID]; ok && s.Content != "" {
-		subjectLabel = s.Content
-	}
-	objectLabel := n.ObjectUUID
-	if o, ok := nodes[n.ObjectUUID]; ok && o.Content != "" {
-		objectLabel = o.Content
-	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "[rel:%s] %s --%s--> %s", n.UUID, subjectLabel, n.Predicate, objectLabel)
-	if n.Metadata != "" && n.Metadata != "{}" {
-		fmt.Fprintf(&b, " | meta=%s", n.Metadata)
-	}
-	if n.RelevanceScore > 0 {
-		fmt.Fprintf(&b, " | score=%.2f", n.RelevanceScore)
-	}
-	if n.LogicTrace != "" {
-		fmt.Fprintf(&b, " | trace=%s", n.LogicTrace)
-	}
-	if n.Timestamp != "" {
-		fmt.Fprintf(&b, " | ts=%s", n.Timestamp)
-	}
-	return b.String()
-}
-
-// formatEntityNode formats an entity/concept node with all available fields.
-func formatEntityNode(n memory.KnowledgeNodeWithLinks, isSeed bool) string {
-	var b strings.Builder
-	seedMark := ""
-	if isSeed {
-		seedMark = "*"
-	}
-	fmt.Fprintf(&b, "[%s%s:%s] %s", seedMark, n.NodeType, n.UUID, n.Content)
-	if n.Metadata != "" && n.Metadata != "{}" {
-		fmt.Fprintf(&b, " | meta=%s", n.Metadata)
-	}
-	if n.RelevanceScore > 0 {
-		fmt.Fprintf(&b, " | score=%.2f", n.RelevanceScore)
-	}
-	if len(n.HotEdges) > 0 {
-		fmt.Fprintf(&b, " | hot_edges=%s", strings.Join(n.HotEdges, ","))
-	}
+// formatEntityNode formats an entity/concept node as: [type:uuid] content (links=N).
+func formatEntityNode(n memory.KnowledgeNodeWithLinks) string {
+	s := fmt.Sprintf("[%s:%s] %s", n.NodeType, n.UUID, n.Content)
 	if len(n.EntityLinks) > 0 {
-		fmt.Fprintf(&b, " | links=%d", len(n.EntityLinks))
+		s += fmt.Sprintf(" (links=%d)", len(n.EntityLinks))
 	}
-	if n.LogicTrace != "" {
-		fmt.Fprintf(&b, " | trace=%s", n.LogicTrace)
-	}
-	if n.Timestamp != "" {
-		fmt.Fprintf(&b, " | ts=%s", n.Timestamp)
-	}
-	return b.String()
+	return s
 }
 
-// keywordTerms strips stop words from s and returns the remaining words joined by spaces.
-// First-person pronouns are replaced with ownerName when non-empty.
-// Returns "" if no meaningful terms remain.
-func keywordTerms(s, ownerName string) string {
-	words := strings.Fields(strings.ToLower(s))
-	out := make([]string, 0, len(words))
-	for _, w := range words {
-		w = strings.TrimRight(w, "?.,!;:")
-		if w == "" {
-			continue
-		}
-		if firstPersonPronouns[w] {
-			if ownerName != "" {
-				out = append(out, strings.ToLower(ownerName))
-			}
-			continue
-		}
-		if !stopWords[w] {
-			out = append(out, w)
-		}
-	}
-	return strings.Join(out, " ")
-}

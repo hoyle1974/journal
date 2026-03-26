@@ -36,9 +36,6 @@ type Config struct {
 	// Env is the deployment environment (e.g. production, staging, development). Set via JOT_ENV or GO_ENV; defaults to "production" when K_SERVICE is set, else "development".
 	Env string
 
-	// UseCompactTools when true uses an MCP-style tool protocol: only a short tool directory is sent in the prompt (no full parameter schemas). The model outputs structured tool calls (JSON); we parse, validate, and execute server-side. Reduces tool context from ~7k tokens to a few hundred. Default true; set JOT_USE_COMPACT_TOOLS=false to disable.
-	UseCompactTools bool
-
 	// DebugReportEnabled controls whether a first-person narrative debug report is generated after each query
 	// and logged asynchronously at debug level. Default true; set JOT_DEBUG_REPORT_DISABLED=true to disable.
 	DebugReportEnabled bool
@@ -73,14 +70,6 @@ func Load() (*Config, error) {
 		} else {
 			cfg.Env = "development"
 		}
-	}
-
-	// Compact tools (MCP-style) default ON to reduce tool context from ~7k to a few hundred tokens. Set JOT_USE_COMPACT_TOOLS=false or 0 to disable.
-	switch v := strings.ToLower(strings.TrimSpace(os.Getenv("JOT_USE_COMPACT_TOOLS"))); v {
-	case "false", "0":
-		cfg.UseCompactTools = false
-	default:
-		cfg.UseCompactTools = true
 	}
 
 	// Debug report: default ON; set JOT_DEBUG_REPORT_DISABLED=true or 1 to disable.

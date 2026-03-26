@@ -38,15 +38,6 @@ func (s *Store) QuerySimilarNodes(ctx context.Context, queryVector []float32, li
 		if getStringField(data, "node_type") == "log" {
 			continue
 		}
-		n := KnowledgeNode{
-			UUID:            doc.Ref.ID,
-			Content:         getStringField(data, "content"),
-			NodeType:        getStringField(data, "node_type"),
-			Metadata:        getStringField(data, "metadata"),
-			Timestamp:       getStringField(data, "timestamp"),
-			JournalEntryIDs: getStringSliceField(data, "journal_entry_ids"),
-		}
-		nodes = append(nodes, n)
 		// Cosine distance: 0 = identical, 2 = opposite. Score = 1 - distance, capped to [0, 1].
 		score := 0.0
 		if v, ok := data[distanceResultField]; ok {
@@ -67,6 +58,17 @@ func (s *Store) QuerySimilarNodes(ctx context.Context, queryVector []float32, li
 				score = 1
 			}
 		}
+		n := KnowledgeNode{
+			UUID:               doc.Ref.ID,
+			Content:            getStringField(data, "content"),
+			NodeType:           getStringField(data, "node_type"),
+			Metadata:           getStringField(data, "metadata"),
+			Timestamp:          getStringField(data, "timestamp"),
+			JournalEntryIDs:    getStringSliceField(data, "journal_entry_ids"),
+			SignificanceWeight: getFloat64Field(data, "significance_weight"),
+			QueryScore:         score,
+		}
+		nodes = append(nodes, n)
 		scores = append(scores, score)
 		s.logFoundNode(n.UUID, score, n.Content)
 	}
@@ -102,15 +104,6 @@ func (s *Store) QuerySimilarSemanticNodes(ctx context.Context, queryVector []flo
 		if getStringField(data, "node_type") == "log" {
 			continue
 		}
-		n := KnowledgeNode{
-			UUID:            doc.Ref.ID,
-			Content:         getStringField(data, "content"),
-			NodeType:        getStringField(data, "node_type"),
-			Metadata:        getStringField(data, "metadata"),
-			Timestamp:       getStringField(data, "timestamp"),
-			JournalEntryIDs: getStringSliceField(data, "journal_entry_ids"),
-		}
-		nodes = append(nodes, n)
 		score := 0.0
 		if v, ok := data[distanceResultField]; ok {
 			var d float64
@@ -130,6 +123,17 @@ func (s *Store) QuerySimilarSemanticNodes(ctx context.Context, queryVector []flo
 				score = 1
 			}
 		}
+		n := KnowledgeNode{
+			UUID:               doc.Ref.ID,
+			Content:            getStringField(data, "content"),
+			NodeType:           getStringField(data, "node_type"),
+			Metadata:           getStringField(data, "metadata"),
+			Timestamp:          getStringField(data, "timestamp"),
+			JournalEntryIDs:    getStringSliceField(data, "journal_entry_ids"),
+			SignificanceWeight: getFloat64Field(data, "significance_weight"),
+			QueryScore:         score,
+		}
+		nodes = append(nodes, n)
 		scores = append(scores, score)
 		s.logFoundNode(n.UUID, score, n.Content)
 	}
@@ -163,12 +167,13 @@ func (s *Store) SearchKnowledgeNodes(ctx context.Context, keywords string, limit
 			}
 		}
 		return KnowledgeNode{
-			UUID:            doc.Ref.ID,
-			Content:         content,
-			NodeType:        getStringField(data, "node_type"),
-			Metadata:        metadata,
-			Timestamp:       getStringField(data, "timestamp"),
-			JournalEntryIDs: getStringSliceField(data, "journal_entry_ids"),
+			UUID:               doc.Ref.ID,
+			Content:            content,
+			NodeType:           getStringField(data, "node_type"),
+			Metadata:           metadata,
+			Timestamp:          getStringField(data, "timestamp"),
+			JournalEntryIDs:    getStringSliceField(data, "journal_entry_ids"),
+			SignificanceWeight: getFloat64Field(data, "significance_weight"),
 		}, nil
 	})
 	if err != nil {

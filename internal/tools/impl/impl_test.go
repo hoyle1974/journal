@@ -50,7 +50,6 @@ func TestToolDefinitionsComplete(t *testing.T) {
 		"update_task_status",
 		"search_tasks",
 		"decompose_task",
-		"discovery_search",
 		"retrieve_image",
 		"get_weather",
 		"graph_expand",

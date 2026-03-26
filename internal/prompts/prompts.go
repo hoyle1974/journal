@@ -55,7 +55,6 @@ type SystemPromptData struct {
 	RecentConversation string
 	ProactiveSignals   string
 	KnowledgeGapBlock  string
-	OpenTodoBlock      string
 	ActiveProjectBlock string
 	LoomContextBlock   string // 2-hop RAG context from refinery; empty string = omit section
 }

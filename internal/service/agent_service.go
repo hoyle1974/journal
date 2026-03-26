@@ -20,9 +20,8 @@ func queryResultToAPI(r *agent.QueryResult) *api.QueryResult {
 		ToolCalls:        r.ToolCalls,
 		ForcedConclusion: r.ForcedConclusion,
 		Error:            r.Error,
-		DebugLogs:        r.DebugLogs,
-		ReasoningTrace:   r.ReasoningTrace,
-		GraphContext:     r.GraphContext,
+		DebugLogs:  r.DebugLogs,
+		DebugTrace: r.DebugTrace,
 	}
 }
 
@@ -99,7 +98,7 @@ func (a *AgentService) ProcessAndRespond(ctx context.Context, input, source stri
 	result := agent.RunQueryFull(fohCtx, a.app, input, source, false, ragContext)
 	infra.LoggerFrom(ctx).Info("function result", "fn", "ProcessAndRespond",
 		"error", result.Error, "iterations", result.Iterations,
-		"has_thinking", len(result.ReasoningTrace) > 0)
+		"has_debug_trace", len(result.DebugTrace) > 0)
 	return queryResultToAPI(result)
 }
 

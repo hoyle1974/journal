@@ -146,6 +146,9 @@ func (sg *SubGraph) writeEntitiesAndRelationships(sb *strings.Builder) {
 			continue
 		}
 		label := nodeLabel(n)
+		if n.SignificanceWeight > 0 {
+			label += fmt.Sprintf(" (sig:%.1f)", n.SignificanceWeight)
+		}
 		if sg.SeedUUIDs[uuid] {
 			label += " ★"
 		}
@@ -153,10 +156,16 @@ func (sg *SubGraph) writeEntitiesAndRelationships(sb *strings.Builder) {
 	}
 
 	sb.WriteString("\n## Relationships\n")
+	seenRel := make(map[string]bool)
 	for uuid, n := range sg.Nodes {
 		if n.NodeType != NodeTypeRelationship {
 			continue
 		}
+		key := n.SubjectUUID + "|" + n.Predicate + "|" + n.ObjectUUID
+		if seenRel[key] {
+			continue
+		}
+		seenRel[key] = true
 		subj, subjOK := sg.Nodes[n.SubjectUUID]
 		obj, objOK := sg.Nodes[n.ObjectUUID]
 		subjLabel := n.SubjectUUID
