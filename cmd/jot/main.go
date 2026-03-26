@@ -8,12 +8,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"maps"
 	"mime/multipart"
 	"net/http"
 	"os"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -21,6 +19,7 @@ import (
 	"github.com/hoyle1974/memory"
 	"github.com/jackstrohm/jot/internal/timeout"
 	"github.com/joho/godotenv"
+	"github.com/spf13/cobra"
 )
 
 // Configuration
@@ -222,37 +221,6 @@ func printResponseSeparatorIfDebug(hadDebug bool) {
 	if hadDebug {
 		fmt.Println("---------------------")
 	}
-}
-
-// parseTraceFlag removes --trace and -t from args and returns the filtered args and whether trace was set.
-func parseTraceFlag(args []string) ([]string, bool) {
-	var out []string
-	var trace bool
-	for _, a := range args {
-		if a == "--trace" || a == "-t" {
-			trace = true
-			continue
-		}
-		out = append(out, a)
-	}
-	return out, trace
-}
-
-// parseAttachFlag removes --attach and its value from args and returns filtered args and the attach path (or "").
-func parseAttachFlag(args []string) ([]string, string) {
-	var out []string
-	var attach string
-	for i := 0; i < len(args); i++ {
-		if args[i] == "--attach" {
-			if i+1 < len(args) {
-				attach = args[i+1]
-				i++
-			}
-			continue
-		}
-		out = append(out, args[i])
-	}
-	return out, attach
 }
 
 // traceFlag is set when the user passes --trace or -t (parsed in main).
@@ -570,109 +538,97 @@ func cmdEdit(limit int) {
 	}
 }
 
-func cmdHelp(topic string) {
-	topics := map[string]string{
-		"edit": `
-jot edit [limit]
-
-  Interactive mode to view and delete entries.
-
-  Commands in edit mode:
-    d <#>  - Delete entry
-    v <#>  - View full entry
-    r      - Refresh list
-    q      - Quit
-`,
-	}
-
-	if topic != "" {
-		if help, ok := topics[topic]; ok {
-			fmt.Println(help)
-		} else {
-			fmt.Printf("Unknown topic: %s\n", topic)
-			fmt.Printf("Available: %s\n", strings.Join(slices.Collect(maps.Keys(topics)), ", "))
-		}
-	} else {
-		fmt.Print(`
-jot <anything>
-
-Just type to your assistant:
-  jot Had coffee with Sarah
-  jot What did I do last week?
-  jot I want to learn Japanese
-
-Commands (optional):
-  log, l <message>     Fast logging (bypasses AI, with optional --attach)
-  edit [limit]         Interactive entry editor
-  entries [limit]      List recent entries
-  help [topic]         Show help
-`)
-	}
-}
-
 // =============================================================================
 // MAIN
 // =============================================================================
 
-func main() {
-	args, trace := parseTraceFlag(os.Args[1:])
-	traceFlag = trace
+func buildRootCmd() *cobra.Command {
+	var trace bool
+	var attach string
 
-	if len(args) == 0 {
-		cmdHelp("")
-		os.Exit(1)
+	root := &cobra.Command{
+		Use:   "jot [message]",
+		Short: "Your personal AI assistant",
+		Long: `Just type to your assistant:
+  jot Had coffee with Sarah
+  jot What did I do last week?
+  jot I want to learn Japanese`,
+		Args: cobra.ArbitraryArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return cmd.Help()
+			}
+			traceFlag = trace
+			maybePromptPendingQuestions()
+			cmdIngest(strings.Join(args, " "))
+			return nil
+		},
+	}
+	root.PersistentFlags().BoolVarP(&trace, "trace", "t", false, "emit trace ID and Cloud Trace link")
+
+	logCmd := &cobra.Command{
+		Use:     "log [message]",
+		Aliases: []string{"l"},
+		Short:   "Fast log (bypasses AI)",
+		Args:    cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			traceFlag = trace
+			content := strings.Join(args, " ")
+			if len(content) > 10000 {
+				fmt.Printf("Warning: Entry is very long (%d chars)\n", len(content))
+			}
+			cmdLog(content, attach)
+			return nil
+		},
+	}
+	logCmd.Flags().StringVar(&attach, "attach", "", "path to image file to attach")
+
+	editCmd := &cobra.Command{
+		Use:   "edit [limit]",
+		Short: "Interactive entry editor",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			traceFlag = trace
+			limit := 10
+			if len(args) == 1 {
+				n, err := strconv.Atoi(args[0])
+				if err != nil {
+					return fmt.Errorf("invalid limit: %s", args[0])
+				}
+				limit = n
+			}
+			cmdEdit(limit)
+			return nil
+		},
 	}
 
-	cmd := strings.ToLower(args[0])
-
-	switch cmd {
-	case "log", "l":
-		args, attachPath := parseAttachFlag(args)
-		if len(args) < 2 {
-			fmt.Println("Error: content is required")
-			os.Exit(1)
-		}
-		content := strings.Join(args[1:], " ")
-		if len(content) > 10000 {
-			fmt.Printf("Warning: Entry is very long (%d chars)\n", len(content))
-		}
-		cmdLog(content, attachPath)
-
-	case "edit":
-		limit := 10
-		if len(args) > 1 {
-			if parsed, err := strconv.Atoi(args[1]); err == nil {
-				limit = parsed
-			} else {
-				fmt.Printf("Invalid number: %s\n", args[1])
-				os.Exit(1)
+	entriesCmd := &cobra.Command{
+		Use:   "entries [limit]",
+		Short: "List recent entries",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			traceFlag = trace
+			limit := 10
+			if len(args) == 1 {
+				n, err := strconv.Atoi(args[0])
+				if err != nil {
+					return fmt.Errorf("invalid limit: %s", args[0])
+				}
+				limit = n
 			}
-		}
-		cmdEdit(limit)
+			cmdEntries(limit)
+			return nil
+		},
+	}
 
-	case "entries":
-		limit := 10
-		if len(args) > 1 {
-			if parsed, err := strconv.Atoi(args[1]); err == nil {
-				limit = parsed
-			} else {
-				fmt.Printf("Invalid number: %s\n", args[1])
-				os.Exit(1)
-			}
-		}
-		cmdEntries(limit)
+	root.AddCommand(logCmd, editCmd, entriesCmd)
+	return root
+}
 
-	case "help", "-h", "--help":
-		topic := ""
-		if len(args) > 1 {
-			topic = args[1]
-		}
-		cmdHelp(topic)
-
-	default:
-		maybePromptPendingQuestions()
-		input := strings.Join(args, " ")
-		cmdIngest(input)
+func main() {
+	root := buildRootCmd()
+	if err := root.Execute(); err != nil {
+		os.Exit(1)
 	}
 }
 
