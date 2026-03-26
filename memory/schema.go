@@ -137,26 +137,12 @@ func CanonicalEntityNodeType(raw string) string {
 	}
 }
 
-// IdentityMeta is the metadata schema for identity-anchor nodes (primary user, core values, system directives).
-type IdentityMeta struct {
-	PrimaryName      string   `json:"primary_name"`
-	CoreValues       []string `json:"core_values"`
-	SystemDirectives []string `json:"system_directives"`
-}
-
-// UserIdentityMeta is the metadata schema for user_identity nodes (self-referential identity statements).
-// Category helps retrieval: "name", "role", "value", "trait", or leave empty for generic.
 const (
-	UserIdentityCategoryName  = "name"
-	UserIdentityCategoryRole  = "role"
-	UserIdentityCategoryValue = "value"
-	UserIdentityCategoryTrait = "trait"
+	userIdentityCategoryName  = "name"
+	userIdentityCategoryRole  = "role"
+	userIdentityCategoryValue = "value"
+	userIdentityCategoryTrait = "trait"
 )
-
-// UserIdentityMeta optional fields for user_identity nodes.
-type UserIdentityMeta struct {
-	Category string `json:"category"` // optional: name, role, value, trait
-}
 
 // Project/Goal status values (metadataStatus and existing code expect lowercase).
 const (
@@ -177,100 +163,26 @@ const (
 	TaskStatusAbandoned = "abandoned"
 )
 
-// Preference category and sentiment.
 const (
-	CategoryFood     = "food"
-	CategoryWorkflow = "workflow"
-	CategoryTech     = "tech"
-	SentimentLike    = "like"
-	SentimentDislike = "dislike"
-	SentimentRigid   = "rigid"
+	categoryFood     = "food"
+	categoryWorkflow = "workflow"
+	categoryTech     = "tech"
+	sentimentLike    = "like"
+	sentimentDislike = "dislike"
+	sentimentRigid   = "rigid"
+
+	eventTypeCelebration = "celebration"
+	eventTypeWork        = "work"
+	eventTypeHealth      = "health"
+
+	placeCategoryHome   = "home"
+	placeCategoryOffice = "office"
+	placeCategoryTravel = "travel"
+
+	assetTypeSoftware = "software"
+	assetTypeHardware = "hardware"
+	assetTypeAccount  = "account"
 )
-
-// Event/Milestone type.
-const (
-	EventTypeCelebration = "celebration"
-	EventTypeWork        = "work"
-	EventTypeHealth      = "health"
-)
-
-// Place category.
-const (
-	PlaceCategoryHome   = "home"
-	PlaceCategoryOffice = "office"
-	PlaceCategoryTravel = "travel"
-)
-
-// Asset/Tool type.
-const (
-	AssetTypeSoftware = "software"
-	AssetTypeHardware = "hardware"
-	AssetTypeAccount  = "account"
-)
-
-// PersonMeta is the metadata schema for person nodes.
-type PersonMeta struct {
-	RelationshipStrength string   `json:"relationship_strength"`
-	Occupation           string   `json:"occupation"`
-	Birthdate            string   `json:"birthdate"`
-	Interests            []string `json:"interests"`
-	LastInteraction      string   `json:"last_interaction"`
-}
-
-// ProjectGoalMeta is the metadata schema for project/goal nodes.
-type ProjectGoalMeta struct {
-	Status         string `json:"status"`
-	Deadline       string `json:"deadline"`
-	ParentGoalID   string `json:"parent_goal"`
-	ArchiveSummary string `json:"archive_summary"`
-}
-
-// PreferenceMeta is the metadata schema for preference nodes.
-type PreferenceMeta struct {
-	Subject   string `json:"subject"`
-	Category  string `json:"category"`
-	Sentiment string `json:"sentiment"`
-}
-
-// EventMilestoneMeta is the metadata schema for event/milestone nodes.
-type EventMilestoneMeta struct {
-	Date      string   `json:"date"`
-	Type      string   `json:"type"`
-	Attendees []string `json:"attendees"`
-}
-
-// PlaceMeta is the metadata schema for place nodes.
-type PlaceMeta struct {
-	Address  string `json:"address"`
-	Category string `json:"category"`
-	Notes    string `json:"notes"`
-}
-
-// AssetToolMeta is the metadata schema for asset/tool nodes.
-type AssetToolMeta struct {
-	Type          string         `json:"type"`
-	Configuration map[string]any `json:"configuration"`
-	Preferences   map[string]any `json:"preferences"`
-}
-
-// GenericNodeMeta is the fallback schema for uncategorized facts.
-type GenericNodeMeta struct {
-	SourceExcerpt   string   `json:"source_excerpt"`
-	ExtractedFacts  []string `json:"extracted_facts"`
-	ConfidenceScore float64  `json:"confidence_score"`
-	Tags            []string `json:"tags"`
-}
-
-// GraphNodeMeta holds Loom-specific graph caching fields present on relationship and object nodes.
-// These fields are stored as top-level Firestore fields (not inside the metadata JSON string) so
-// they are directly queryable for hot-edge eviction and decay calculations.
-type GraphNodeMeta struct {
-	RelevanceScore float64  `json:"relevance_score"` // 0.0 to 1.0; decays over time via nightly cron
-	HotEdges       []string `json:"hot_edges"`       // up to 20 high-relevance relationship node IDs
-	SubjectUUID    string   `json:"subject_uuid"`    // for relationship nodes: subject entity UUID
-	ObjectUUID     string   `json:"object_uuid"`     // for relationship nodes: object entity UUID
-	LogicTrace     string   `json:"logic_trace"`     // for response nodes: LLM reasoning paragraph
-}
 
 // CanonicalMapConfig is the singleton config document stored at Firestore path
 // `_config/canonical_map`. It holds the live predicate ontology and entity type list
@@ -285,8 +197,8 @@ type validatorFunc func(map[string]any) error
 type normalizerFunc func(map[string]any) (map[string]any, error)
 
 var userIdentityCategories = map[string]bool{
-	UserIdentityCategoryName: true, UserIdentityCategoryRole: true,
-	UserIdentityCategoryValue: true, UserIdentityCategoryTrait: true,
+	userIdentityCategoryName: true, userIdentityCategoryRole: true,
+	userIdentityCategoryValue: true, userIdentityCategoryTrait: true,
 }
 
 func validateUserIdentity(m map[string]any) error {
@@ -429,8 +341,8 @@ func normalizeProjectGoal(m map[string]any) (map[string]any, error) {
 	return out, nil
 }
 
-var preferenceCategories = map[string]bool{CategoryFood: true, CategoryWorkflow: true, CategoryTech: true}
-var preferenceSentiments = map[string]bool{SentimentLike: true, SentimentDislike: true, SentimentRigid: true}
+var preferenceCategories = map[string]bool{categoryFood: true, categoryWorkflow: true, categoryTech: true}
+var preferenceSentiments = map[string]bool{sentimentLike: true, sentimentDislike: true, sentimentRigid: true}
 
 func validatePreference(m map[string]any) error {
 	c := getString(m, "category")
@@ -458,7 +370,7 @@ func normalizePreference(m map[string]any) (map[string]any, error) {
 	return out, nil
 }
 
-var eventTypes = map[string]bool{EventTypeCelebration: true, EventTypeWork: true, EventTypeHealth: true}
+var eventTypes = map[string]bool{eventTypeCelebration: true, eventTypeWork: true, eventTypeHealth: true}
 
 func validateEventMilestone(m map[string]any) error {
 	t := getString(m, "type")
@@ -479,7 +391,7 @@ func normalizeEventMilestone(m map[string]any) (map[string]any, error) {
 	return out, nil
 }
 
-var placeCategories = map[string]bool{PlaceCategoryHome: true, PlaceCategoryOffice: true, PlaceCategoryTravel: true}
+var placeCategories = map[string]bool{placeCategoryHome: true, placeCategoryOffice: true, placeCategoryTravel: true}
 
 func validatePlace(m map[string]any) error {
 	c := getString(m, "category")
@@ -500,7 +412,7 @@ func normalizePlace(m map[string]any) (map[string]any, error) {
 	return out, nil
 }
 
-var assetTypes = map[string]bool{AssetTypeSoftware: true, AssetTypeHardware: true, AssetTypeAccount: true}
+var assetTypes = map[string]bool{assetTypeSoftware: true, assetTypeHardware: true, assetTypeAccount: true}
 
 func validateAssetTool(m map[string]any) error {
 	t := getString(m, "type")
