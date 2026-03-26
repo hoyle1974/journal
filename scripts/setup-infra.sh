@@ -102,7 +102,41 @@ fi
 echo ""
 
 # =============================================================================
-# 3. Output Configuration
+# 3. Cloud Scheduler — Dreamer background cycle (every 4 hours)
+# =============================================================================
+echo -e "${CYAN}Setting up Cloud Scheduler dreamer job...${NC}"
+
+DREAM_JOB="jot-dreamer"
+DREAM_URL="https://${REGION}-${PROJECT}.cloudfunctions.net/jot-api-go/internal/dream"
+JOT_API_KEY="${JOT_API_KEY:-}"
+
+if gcloud scheduler jobs describe $DREAM_JOB --location=$REGION 2>/dev/null; then
+    gcloud scheduler jobs update http $DREAM_JOB \
+        --location=$REGION \
+        --schedule="0 */4 * * *" \
+        --uri="$DREAM_URL" \
+        --message-body='{"force":false}' \
+        --headers="Content-Type=application/json,X-API-Key=${JOT_API_KEY}" \
+        --time-zone="America/Chicago" \
+        --attempt-deadline=300s \
+        --quiet
+    echo -e "${YELLOW}Dreamer job $DREAM_JOB updated${NC}"
+else
+    gcloud scheduler jobs create http $DREAM_JOB \
+        --location=$REGION \
+        --schedule="0 */4 * * *" \
+        --uri="$DREAM_URL" \
+        --message-body='{"force":false}' \
+        --headers="Content-Type=application/json,X-API-Key=${JOT_API_KEY}" \
+        --time-zone="America/Chicago" \
+        --attempt-deadline=300s \
+        --quiet
+    echo -e "${GREEN}Dreamer job $DREAM_JOB created${NC}"
+fi
+echo ""
+
+# =============================================================================
+# 4. Output Configuration
 # =============================================================================
 echo -e "${GREEN}Infrastructure setup complete!${NC}"
 echo ""

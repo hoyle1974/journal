@@ -20,8 +20,9 @@ const (
 	NodeTypePlace          = "place"
 	NodeTypeAsset          = "asset"
 	NodeTypeTool           = "tool"
-	NodeTypeGeneric        = "generic"
-	NodeTypeWeeklySummary = "weekly_summary"
+	NodeTypeGeneric = "generic"
+	// NodeTypeSummary is for narrative summary nodes produced by the Dreamer background cycle.
+	NodeTypeSummary = "summary"
 	// NodeTypeIdentity is the reserved identity-anchor node type. Janitor must not delete or archive these.
 	NodeTypeIdentity = "identity_anchor"
 	// NodeTypeUserIdentity is for self-referential statements about the user's core identity (name, role, values, traits). Janitor must not delete these.
@@ -234,6 +235,7 @@ var registry = map[string]struct {
 	NodeTypeObject:       {validate: validateObject,   normalize: normalizeObject},
 	NodeTypeResponse:     {validate: validateResponse, normalize: normalizeResponse},
 	NodeTypeUserIdentity: {validate: validateUserIdentity, normalize: normalizeUserIdentity},
+	NodeTypeSummary:      {validate: validateSummary, normalize: normalizeSummary},
 }
 
 // IsRegistered returns true if nodeType has a schema in the registry.
@@ -451,6 +453,21 @@ func normalizeResponse(m map[string]any) (map[string]any, error) {
 	out := make(map[string]any)
 	setString(out, "logic_trace", getString(m, "logic_trace"))
 	setString(out, "source_entry_uuid", getString(m, "source_entry_uuid"))
+	return out, nil
+}
+
+func validateSummary(m map[string]any) error { return nil }
+
+func normalizeSummary(m map[string]any) (map[string]any, error) {
+	out := make(map[string]any)
+	if v, ok := m["level"]; ok {
+		switch x := v.(type) {
+		case float64:
+			out["level"] = int(x)
+		case int:
+			out["level"] = x
+		}
+	}
 	return out, nil
 }
 

@@ -34,29 +34,34 @@ var debugReportPromptTxt string
 //go:embed refinery.txt
 var refineryTxt string
 
+//go:embed dreamer.txt
+var dreamerTxt string
+
 var (
 	systemPromptTmpl    = template.Must(template.New("system").Parse(systemPromptTxt))
 	activityHistoryTmpl = template.Must(template.New("activityHistory").Parse(activityHistoryTxt))
 	debugReportTmpl     = template.Must(template.New("debugReport").Parse(debugReportPromptTxt))
 	refineryTmpl        = template.Must(template.New("refinery").Parse(refineryTxt))
+	dreamerTmpl         = template.Must(template.New("dreamer").Parse(dreamerTxt))
 )
 
 // SystemPromptData holds all inputs for the main FOH system prompt.
 type SystemPromptData struct {
-	DelimOpen          string
-	DelimClose         string
-	SourceCodeBlock    string
-	Today              string
-	CurrentTime        string
-	CurrentWeek        string
-	LastWeek           string
-	CurrentMonth       string
-	IdentityBlock      string
-	RecentConversation string
-	ProactiveSignals   string
-	KnowledgeGapBlock  string
-	ActiveProjectBlock string
-	LoomContextBlock   string // 2-hop RAG context from refinery; empty string = omit section
+	DelimOpen               string
+	DelimClose              string
+	SourceCodeBlock         string
+	Today                   string
+	CurrentTime             string
+	CurrentWeek             string
+	LastWeek                string
+	CurrentMonth            string
+	IdentityBlock           string
+	RecentConversation      string
+	ProactiveSignals        string
+	KnowledgeGapBlock       string
+	ActiveProjectBlock      string
+	LoomContextBlock        string // 2-hop RAG context from refinery; empty string = omit section
+	RecentReflectionsBlock  string // Dreamer summary nodes; empty string = omit section
 }
 
 // BuildSystemPrompt executes the system prompt template with the given data.
@@ -132,6 +137,23 @@ func BuildRefinery(data RefineryData) (string, error) {
 	var buf bytes.Buffer
 	if err := refineryTmpl.Execute(&buf, data); err != nil {
 		return "", fmt.Errorf("execute refinery: %w", err)
+	}
+	return buf.String(), nil
+}
+
+// DreamerData holds inputs for the Dreamer background synthesis prompt.
+type DreamerData struct {
+	Today         string
+	CurrentTime   string
+	EntriesText   string
+	OpenTasksText string
+}
+
+// BuildDreamer executes the dreamer prompt template.
+func BuildDreamer(data DreamerData) (string, error) {
+	var buf bytes.Buffer
+	if err := dreamerTmpl.Execute(&buf, data); err != nil {
+		return "", fmt.Errorf("execute dreamer: %w", err)
 	}
 	return buf.String(), nil
 }

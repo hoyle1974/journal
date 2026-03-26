@@ -72,12 +72,21 @@ type MemoryService interface {
 	ResolvePendingQuestion(ctx context.Context, id, answer string) error
 }
 
+// DreamResult is the API response shape for a dream cycle.
+type DreamResult struct {
+	SummaryUUID string   `json:"summary_uuid,omitempty"`
+	Questions   []string `json:"questions,omitempty"`
+	Skipped     bool     `json:"skipped,omitempty"`
+	SkipReason  string   `json:"skip_reason,omitempty"`
+}
+
 // AgentService provides agent and cron operations for HTTP handlers.
 type AgentService interface {
 	AddEntry(ctx context.Context, content, source string, timestamp *string, imageBytes []byte) (string, error)
 	RunQuery(ctx context.Context, question, source string) *QueryResult
 	ProcessLogSequential(ctx context.Context, logUUID, logContent, timestamp, source string) (*agent.ProcessEntryReport, error)
 	ProcessAndRespond(ctx context.Context, input, source string) *QueryResult
+	RunDreamer(ctx context.Context, force bool) (*DreamResult, error)
 }
 
 // TelegramService provides Telegram Bot API operations for HTTP handlers.

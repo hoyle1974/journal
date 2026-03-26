@@ -595,7 +595,18 @@ func buildRootCmd() *cobra.Command {
 		},
 	}
 
-	root.AddCommand(logCmd, editCmd, entriesCmd)
+	dreamCmd := &cobra.Command{
+		Use:   "dream",
+		Short: "Run the dream cycle to synthesise recent activity into a summary",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			traceFlag = trace
+			cmdDream()
+			return nil
+		},
+	}
+
+	root.AddCommand(logCmd, editCmd, entriesCmd, dreamCmd)
 	return root
 }
 
@@ -644,4 +655,25 @@ func maybePromptPendingQuestions() {
 		}
 	}
 	fmt.Println("---")
+}
+
+// cmdDream triggers the Dreamer background cycle via the API (force=true) and prints the result.
+func cmdDream() {
+	result, err := apiRequest(context.Background(), "POST", "/internal/dream",
+		map[string]interface{}{"force": true}, RequestTimeout)
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		return
+	}
+	if skipped, _ := result["skipped"].(bool); skipped {
+		reason, _ := result["skip_reason"].(string)
+		fmt.Printf("Dream cycle skipped: %s\n", reason)
+		return
+	}
+	summaryUUID, _ := result["summary_uuid"].(string)
+	var questionCount int
+	if qs, ok := result["questions"].([]interface{}); ok {
+		questionCount = len(qs)
+	}
+	fmt.Printf("Dream cycle complete.\nSummary: %s\nQuestions enqueued: %d\n", summaryUUID, questionCount)
 }

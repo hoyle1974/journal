@@ -8,3 +8,6 @@ const DeployMetaDoc = "deploy_meta"
 
 // OnboardingDoc is the _system document ID for first-run onboarding (seeded_at, status, version).
 const OnboardingDoc = "onboarding"
+
+// DreamMetaDoc is the _system document ID for the Dreamer background cycle watermark.
+const DreamMetaDoc = "dream_meta"

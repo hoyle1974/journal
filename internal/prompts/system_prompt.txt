@@ -38,6 +38,9 @@ Current time context:
 - Last week: {{.LastWeek}}
 - Current month: {{.CurrentMonth}}
 {{.SourceCodeBlock}}{{.IdentityBlock}}{{.RecentConversation}}{{.ProactiveSignals}}{{.KnowledgeGapBlock}}{{.ActiveProjectBlock}}
+{{- if .RecentReflectionsBlock}}
+{{.RecentReflectionsBlock}}
+{{- end}}
 {{- if .LoomContextBlock}}
 ---
 ## GRAPH CONTEXT (from this entry)

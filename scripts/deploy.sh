@@ -177,6 +177,41 @@ esac
 echo -e "${GREEN}Deployment to $ENV_TARGET successful!${NC}"
 echo ""
 
+# Upsert Cloud Scheduler dreamer job (idempotent on every deploy)
+if [ -n "${DEPLOYED_BASE_URL:-}" ]; then
+  DREAM_JOB="jot-dreamer"
+  DREAM_URL="${DEPLOYED_BASE_URL%/}/internal/dream"
+  DREAM_HEADERS="Content-Type=application/json"
+  if [ -n "${JOT_API_KEY:-}" ]; then
+    DREAM_HEADERS="$DREAM_HEADERS,X-API-Key=${JOT_API_KEY}"
+  fi
+  echo -e "${YELLOW}Upserting Cloud Scheduler dreamer job...${NC}"
+  if gcloud scheduler jobs describe $DREAM_JOB --location=$REGION 2>/dev/null; then
+    gcloud scheduler jobs update http $DREAM_JOB \
+      --location=$REGION \
+      --schedule="0 */4 * * *" \
+      --uri="$DREAM_URL" \
+      --message-body='{"force":false}' \
+      --headers="$DREAM_HEADERS" \
+      --time-zone="America/Chicago" \
+      --attempt-deadline=300s \
+      --quiet
+    echo -e "${GREEN}Dreamer job updated: $DREAM_URL${NC}"
+  else
+    gcloud scheduler jobs create http $DREAM_JOB \
+      --location=$REGION \
+      --schedule="0 */4 * * *" \
+      --uri="$DREAM_URL" \
+      --message-body='{"force":false}' \
+      --headers="$DREAM_HEADERS" \
+      --time-zone="America/Chicago" \
+      --attempt-deadline=300s \
+      --quiet
+    echo -e "${GREEN}Dreamer job created: $DREAM_URL${NC}"
+  fi
+  echo ""
+fi
+
 # Set Telegram webhook if bot token is available (from env file)
 if [ -n "${TELEGRAM_BOT_TOKEN:-}" ] && [ -n "${DEPLOYED_BASE_URL:-}" ]; then
   TELEGRAM_WEBHOOK_URL="${DEPLOYED_BASE_URL%/}/telegram"

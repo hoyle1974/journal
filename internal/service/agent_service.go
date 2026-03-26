@@ -102,6 +102,26 @@ func (a *AgentService) ProcessAndRespond(ctx context.Context, input, source stri
 	return queryResultToAPI(result)
 }
 
+// RunDreamer runs the Dreamer background cycle and returns a summary of what was synthesised.
+func (a *AgentService) RunDreamer(ctx context.Context, force bool) (*api.DreamResult, error) {
+	infra.LoggerFrom(ctx).Info("function call", "fn", "RunDreamer", "force", force)
+	result, err := agent.RunDreamCycle(ctx, a.app, force)
+	if err != nil {
+		infra.LoggerFrom(ctx).Error("function result", "fn", "RunDreamer", "error", err.Error())
+		return nil, err
+	}
+	infra.LoggerFrom(ctx).Info("function result", "fn", "RunDreamer",
+		"skipped", result.Skipped,
+		"summary_uuid", result.SummaryUUID,
+		"question_count", len(result.Questions))
+	return &api.DreamResult{
+		SummaryUUID: result.SummaryUUID,
+		Questions:   result.Questions,
+		Skipped:     result.Skipped,
+		SkipReason:  result.SkipReason,
+	}, nil
+}
+
 // ProcessLogSequential processes a single log entry through the Project Loom waterfall pipeline.
 func (a *AgentService) ProcessLogSequential(ctx context.Context, logUUID, logContent, timestamp, source string) (*agent.ProcessEntryReport, error) {
 	attrs := []any{"fn", "ProcessLogSequential", "uuid", logUUID, "source", source, "content_length", len(logContent)}
