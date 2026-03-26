@@ -44,21 +44,6 @@ func (s *Store) Upsert(ctx context.Context, content, nodeType, domain string, we
 	}
 }
 
-// GetByID returns a knowledge node and its entity links.
-func (s *Store) GetByID(ctx context.Context, id string) (*KnowledgeNodeWithLinks, error) {
-	return s.GetKnowledgeNodeByID(ctx, id)
-}
-
-// GetByIDs returns a batch of knowledge nodes with entity links.
-func (s *Store) GetByIDs(ctx context.Context, ids []string) ([]KnowledgeNodeWithLinks, error) {
-	return s.GetKnowledgeNodesByIDs(ctx, ids)
-}
-
-// Expand performs a multi-hop BFS traversal of the knowledge graph from seedID.
-func (s *Store) Expand(ctx context.Context, seedID string, queryVector []float32, hops, limitPerEdge int) (*SubGraph, error) {
-	return s.GraphExpand(ctx, seedID, queryVector, hops, limitPerEdge)
-}
-
 // ExpandMulti performs a multi-hop BFS traversal from multiple seed nodes and
 // returns a single normalized SubGraph with deduplicated nodes and edges.
 func (s *Store) ExpandMulti(ctx context.Context, seedIDs []string, queryVector []float32, hops, limitPerEdge int) (*SubGraph, error) {
@@ -93,11 +78,6 @@ func (s *Store) GetUnresolvedQuestions(ctx context.Context, limit int) ([]Pendin
 // ResolveQuestion marks a pending question as answered.
 func (s *Store) ResolveQuestion(ctx context.Context, uuid, answer string) error {
 	return s.ResolvePendingQuestion(ctx, uuid, answer)
-}
-
-// MigrateMetadata runs a schema migration over knowledge nodes.
-func (s *Store) MigrateMetadata(ctx context.Context, dryRun bool) (int, error) {
-	return s.MigrateKnowledgeMetadata(ctx, dryRun)
 }
 
 // BackfillEmbeddings generates missing embeddings for up to limit knowledge nodes.
