@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/hoyle1974/memory"
 	"github.com/jackstrohm/jot/internal/agent"
@@ -294,13 +295,20 @@ func registerKnowledgeTools() {
 					allParts = append(allParts, fmt.Sprintf("FACT: %s", n.Content))
 				}
 			}
-			for i, eid := range full.JournalEntryIDs {
-				if i >= 5 {
-					allParts = append(allParts, fmt.Sprintf("JOURNAL: ... and %d more entries", len(full.JournalEntryIDs)-5))
-					break
+			cutoff := time.Now().AddDate(0, 0, -90)
+			included := 0
+			skipped := 0
+			for _, eid := range full.JournalEntryIDs {
+				if included >= 50 {
+					skipped++
+					continue
 				}
 				e, err := env.MemoryStore().GetEntry(ctx, eid)
 				if err != nil || e == nil {
+					continue
+				}
+				if t, err2 := time.Parse(time.RFC3339, e.Timestamp); err2 == nil && t.Before(cutoff) {
+					skipped++
 					continue
 				}
 				entryContent := e.Content
@@ -312,6 +320,10 @@ func registerKnowledgeTools() {
 					entryTs = "(no date)"
 				}
 				allParts = append(allParts, fmt.Sprintf("JOURNAL: [%s] %s", entryTs, entryContent))
+				included++
+			}
+			if skipped > 0 {
+				allParts = append(allParts, fmt.Sprintf("JOURNAL: ... and %d entries omitted (older than 90 days or over limit)", skipped))
 			}
 			allInfo := strings.Join(allParts, "\n")
 			infra.LoggerFrom(ctx).Debug("get_entity_network all_info assembled", "parts", len(allParts), "all_info", allInfo)
