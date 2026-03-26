@@ -88,9 +88,13 @@ func handleReplay(s *Server, w http.ResponseWriter, r *http.Request) (any, error
 		"source", source, "timestamp", timestamp,
 		"has_image", imageURL != "", "has_audio", audioURL != "")
 
-	entryUUID, err := agent.AddEntryAndEnqueue(ctx, app, content, source, &timestamp, imageURL)
+	// Use synchronous pipeline so the response is only sent after the full
+	// processing (embedding, graph nodes, linking) completes. This ensures each
+	// entry is fully committed before the next one is replayed, so graph edges
+	// between consecutive entries resolve correctly.
+	entryUUID, err := agent.AddEntryOnly(ctx, app, content, source, &timestamp, imageURL)
 	if err != nil {
-		infra.LoggerFrom(ctx).Error("replay: AddEntryAndEnqueue failed", "error", err)
+		infra.LoggerFrom(ctx).Error("replay: AddEntryOnly failed", "error", err)
 		return nil, err
 	}
 
@@ -101,6 +105,11 @@ func handleReplay(s *Server, w http.ResponseWriter, r *http.Request) (any, error
 		}
 	}
 
-	infra.LoggerFrom(ctx).Info("replay: entry inserted", "entry_uuid", entryUUID)
+	if _, procErr := agent.ProcessLogSequential(ctx, app, entryUUID, content, timestamp, source); procErr != nil {
+		infra.LoggerFrom(ctx).Error("replay: ProcessLogSequential failed", "entry_uuid", entryUUID, "error", procErr)
+		return nil, procErr
+	}
+
+	infra.LoggerFrom(ctx).Info("replay: entry processed", "entry_uuid", entryUUID)
 	return map[string]any{"success": true, "uuid": entryUUID}, nil
 }

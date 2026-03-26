@@ -28,6 +28,7 @@ func NewRouter(s *Server) *chi.Mux {
 	r.Group(func(r chi.Router) {
 		r.Get("/", wrapAPI(handleHealth))
 		r.Get("/health", wrapAPI(handleHealth))
+		r.Get("/metrics", handleMetrics)
 		r.Get("/privacy-policy", wrap(handlePrivacyPolicy))
 		r.Get("/terms-and-conditions", wrap(handleTermsAndConditions))
 		r.Post("/telegram", wrap(handleTelegram))

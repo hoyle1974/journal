@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/jackstrohm/jot/internal/infra"
 	"github.com/jackstrohm/jot/pkg/utils"
@@ -82,78 +83,17 @@ func handleTelegram(s *Server, w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, map[string]string{"ok": "true"})
 	infra.LoggerFrom(ctx).Info("telegram responded 200, processing in background")
 
-	// When message includes a photo, add a journal entry with image before enqueueing the query task.
-	if incoming.ImageFileID != "" {
-		imageBytes, err := s.Telegram.DownloadFile(ctx, incoming.ImageFileID)
-		if err != nil {
-			infra.LoggerFrom(ctx).Warn("telegram photo download failed", "error", err)
-		} else {
-			content := incoming.Text
-			if content == "" {
-				content = "Photo"
-			}
-			if _, addErr := s.Agent.AddEntry(ctx, content, "telegram", nil, imageBytes); addErr != nil {
-				infra.LoggerFrom(ctx).Warn("telegram add entry with image failed", "error", addErr)
-			}
-		}
-	}
-
-	// When message is a voice note, download and store audio in GCS before enqueueing.
-	// The task handler will transcribe and run FOH; we store early so the audio is persisted.
-	if incoming.VoiceFileID != "" {
-		audioBytes, _, err := s.Telegram.DownloadFileWithMIME(ctx, incoming.VoiceFileID)
-		if err != nil {
-			infra.LoggerFrom(ctx).Warn("telegram voice note download failed", "error", err)
-		} else {
-			app := s.App.(*infra.App)
-			if _, uploadErr := app.UploadAudio(ctx, audioBytes); uploadErr != nil {
-				infra.LoggerFrom(ctx).Warn("telegram voice note GCS upload failed", "error", uploadErr)
-			}
-		}
-	}
-
 	taskID := "process-telegram-query-" + infra.GenShortRunID()
 	parentTraceID := infra.TraceIDFromContext(ctx)
-	payload := map[string]interface{}{
-		"chat_id":         incoming.ChatID,
-		"user_id":         incoming.UserID,
-		"body":            incoming.Text,
-		"update_id":       incoming.UpdateID,
-		"message_id":      incoming.MessageID,
-		"task_id":         taskID,
-		"parent_trace_id": parentTraceID,
-	}
-	if incoming.ImageFileID != "" {
-		payload["image_file_id"] = incoming.ImageFileID
-	}
-	if incoming.VoiceFileID != "" {
-		payload["voice_file_id"] = incoming.VoiceFileID
-	}
-	if incoming.HasLocation {
-		payload["has_location"] = true
-		payload["latitude"] = incoming.Latitude
-		payload["longitude"] = incoming.Longitude
-	}
-	infra.LoggerFrom(ctx).Debug("telegram webhook: enqueueing task", "task_id", taskID, "parent_trace_id", parentTraceID, "body_len", len(incoming.Text), "has_image", incoming.ImageFileID != "", "has_voice", incoming.VoiceFileID != "")
-	enqErr := s.App.EnqueueTask(ctx, "/internal/process-telegram-query", payload)
-	if enqErr == nil {
-		infra.LoggerFrom(ctx).Debug("telegram enqueued for process-telegram-query", "chat_id", incoming.ChatID, "task_id", taskID, "parent_trace_id", parentTraceID)
-		return
-	}
-	infra.LoggerFrom(ctx).Debug("telegram webhook: enqueue failed, falling back to goroutine", "chat_id", incoming.ChatID, "task_id", taskID, "error", enqErr)
-	infra.LoggerFrom(ctx).Warn("telegram task enqueue failed, processing in goroutine", "chat_id", incoming.ChatID, "error", enqErr)
-	go func() {
+	infra.LoggerFrom(ctx).Debug("telegram webhook: submitting for background processing", "chat_id", incoming.ChatID, "task_id", taskID)
+	msgCopy := *incoming
+	s.App.SubmitAsync(func() {
 		bgCtx := s.App.WithContext(context.Background())
 		bgCtx = infra.WithCorrelation(bgCtx, taskID, parentTraceID)
-		infra.LoggerFrom(bgCtx).Info("telegram processing (goroutine fallback)", "chat_id", incoming.ChatID)
-		response := s.Telegram.ProcessIncomingTelegram(bgCtx, s.App.(*infra.App), incoming)
-		if response == "" {
-			response = "I couldn't process that. Please try again."
+		bgCtx, cancel := context.WithTimeout(bgCtx, 120*time.Second)
+		defer cancel()
+		if err := runTelegramMessage(bgCtx, s, &msgCopy); err != nil {
+			infra.LoggerFrom(bgCtx).Error("telegram processing failed", "chat_id", msgCopy.ChatID, "error", err)
 		}
-		if err := s.Telegram.SendMessage(bgCtx, incoming.ChatID, response); err != nil {
-			infra.LoggerFrom(bgCtx).Error("telegram reply failed", "chat_id", incoming.ChatID, "error", err)
-		} else {
-			infra.LoggerFrom(bgCtx).Info("telegram reply sent", "chat_id", incoming.ChatID, "preview", utils.TruncateString(response, 60))
-		}
-	}()
+	})
 }

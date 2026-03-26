@@ -64,7 +64,7 @@ func runReplayJournal(ctx context.Context, _ *infra.App, args []string) {
 
 	fmt.Printf("Replaying %d entries to %s ...\n", len(entries), *apiURL)
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := &http.Client{Timeout: 5 * time.Minute}
 	endpoint := *apiURL + "/internal/replay"
 
 	for i, me := range entries {
@@ -73,9 +73,6 @@ func runReplayJournal(ctx context.Context, _ *infra.App, args []string) {
 		}
 		if (i+1)%50 == 0 || i+1 == len(entries) {
 			fmt.Printf("replayed %d/%d entries...\n", i+1, len(entries))
-		}
-		if i+1 < len(entries) {
-			time.Sleep(time.Second)
 		}
 	}
 

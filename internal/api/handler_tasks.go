@@ -53,7 +53,126 @@ func handleProcessEntry(s *Server, w http.ResponseWriter, r *http.Request) (any,
 	return map[string]string{"status": "ok"}, nil
 }
 
-// handleProcessTelegramQuery runs the query for an incoming Telegram message (FOH) and sends the reply via Telegram.
+// runTelegramMessage processes an incoming Telegram message end-to-end: handles
+// images/voice/location, runs the FOH query, and sends the reply. Called from
+// handleProcessTelegramQuery (Cloud Tasks path) and the inline goroutine in handleTelegram.
+func runTelegramMessage(ctx context.Context, s *Server, msg *telegram.IncomingMessage) error {
+	body := msg.Text
+	if body == "" && msg.ImageFileID != "" {
+		body = "Photo"
+	}
+	if msg.HasLocation {
+		locationStr := reverseGeocode(ctx, msg.Latitude, msg.Longitude)
+		body = strings.TrimSpace(body + " " + locationStr)
+		infra.LoggerFrom(ctx).Info("telegram: location appended", "chat_id", msg.ChatID, "location", locationStr)
+	}
+
+	// Handle image: download, caption, add entry, reply with caption (skip FOH).
+	if msg.ImageFileID != "" {
+		infra.LoggerFrom(ctx).Info("telegram: processing image", "chat_id", msg.ChatID, "image_file_id", msg.ImageFileID)
+		imageBytes, mime, err := s.Telegram.DownloadFileWithMIME(ctx, msg.ImageFileID)
+		if err != nil {
+			infra.LoggerFrom(ctx).Warn("telegram: image download failed, using placeholder", "chat_id", msg.ChatID, "error", err)
+		} else {
+			infra.LoggerFrom(ctx).Info("telegram: image downloaded", "chat_id", msg.ChatID, "image_bytes", len(imageBytes), "mime", mime)
+			userCaption := ""
+			if body != "" && body != "Photo" {
+				userCaption = body
+			}
+			caption, capErr := infra.GenerateImageCaption(ctx, s.App.(*infra.App), imageBytes, mime, userCaption, s.Config)
+			if capErr != nil {
+				infra.LoggerFrom(ctx).Warn("telegram: image caption failed, using body as-is", "chat_id", msg.ChatID, "error", capErr)
+			} else {
+				body = caption
+				infra.LoggerFrom(ctx).Info("telegram: image captioned", "chat_id", msg.ChatID, "caption_len", len(body), "caption_preview", utils.TruncateString(body, 120))
+				infra.LoggerFrom(ctx).Debug("telegram: image caption full", "chat_id", msg.ChatID, "caption", body)
+			}
+			entryUUID, addErr := s.Agent.AddEntry(ctx, body, "telegram", nil, imageBytes)
+			if addErr != nil {
+				infra.LoggerFrom(ctx).Error("telegram: add image entry failed", "chat_id", msg.ChatID, "error", addErr)
+			} else {
+				ctx = agent.WithEntryAlreadyAdded(ctx, entryUUID)
+			}
+		}
+		if body == "Photo" {
+			if err := s.Telegram.SendMessage(ctx, msg.ChatID, "Photo logged."); err != nil {
+				return fmt.Errorf("telegram send reply: %w", err)
+			}
+			infra.LoggerFrom(ctx).Info("telegram: photo logged reply sent", "chat_id", msg.ChatID)
+			return nil
+		}
+		if _, saveErr := s.App.(*infra.App).Memory.SaveQuery(ctx, "[Photo]", body, "telegram", false); saveErr != nil {
+			infra.LoggerFrom(ctx).Warn("telegram: save photo query log failed", "chat_id", msg.ChatID, "error", saveErr)
+		}
+		reply := body + "\n\nLogged."
+		infra.LoggerFrom(ctx).Info("telegram: caption reply sent", "chat_id", msg.ChatID, "preview", utils.TruncateString(reply, 60))
+		return sendTelegramResponse(ctx, s, msg.ChatID, reply)
+	}
+
+	// Handle voice: download, transcribe, persist, then treat transcript as the query body.
+	if msg.VoiceFileID != "" {
+		infra.LoggerFrom(ctx).Info("telegram: processing voice note", "chat_id", msg.ChatID, "voice_file_id", msg.VoiceFileID)
+		audioBytes, _, err := s.Telegram.DownloadFileWithMIME(ctx, msg.VoiceFileID)
+		if err != nil {
+			infra.LoggerFrom(ctx).Warn("telegram: voice download failed", "chat_id", msg.ChatID, "error", err)
+			_ = s.Telegram.SendMessage(ctx, msg.ChatID, "Could not download your voice note. Please try again.")
+			return nil
+		}
+		infra.LoggerFrom(ctx).Info("telegram: voice note downloaded", "chat_id", msg.ChatID, "bytes", len(audioBytes))
+		transcript, tErr := infra.TranscribeAudio(ctx, s.App.(*infra.App), audioBytes, s.Config)
+		if tErr != nil {
+			infra.LoggerFrom(ctx).Warn("telegram: transcription failed", "chat_id", msg.ChatID, "error", tErr)
+			_ = s.Telegram.SendMessage(ctx, msg.ChatID, "Could not transcribe your voice note. Please try again.")
+			return nil
+		}
+		infra.LoggerFrom(ctx).Info("telegram: voice transcribed", "chat_id", msg.ChatID, "transcript_len", len(transcript))
+		infra.LoggerFrom(ctx).Debug("telegram: voice transcript", "chat_id", msg.ChatID, "transcript", transcript)
+		if strings.TrimSpace(transcript) == "" || transcript == "[inaudible]" {
+			_ = s.Telegram.SendMessage(ctx, msg.ChatID, "Could not transcribe voice note — audio was silent or unclear.")
+			return nil
+		}
+		app := s.App.(*infra.App)
+		audioURL, uploadErr := app.UploadAudio(ctx, audioBytes)
+		if uploadErr != nil {
+			infra.LoggerFrom(ctx).Warn("telegram: audio GCS upload failed", "chat_id", msg.ChatID, "error", uploadErr)
+		}
+		entryUUID, addErr := s.Agent.AddEntry(ctx, transcript, "telegram", nil, nil)
+		if addErr != nil {
+			infra.LoggerFrom(ctx).Error("telegram: add voice entry failed", "chat_id", msg.ChatID, "error", addErr)
+		} else {
+			ctx = agent.WithEntryAlreadyAdded(ctx, entryUUID)
+			if audioURL != "" {
+				if updateErr := app.Memory.UpdateEntryAudio(ctx, entryUUID, audioURL, transcript); updateErr != nil {
+					infra.LoggerFrom(ctx).Warn("telegram: update audio fields failed", "chat_id", msg.ChatID, "error", updateErr)
+				}
+			}
+		}
+		body = transcript
+	}
+
+	// Handle slash commands before running FOH.
+	if strings.HasPrefix(body, "/") {
+		if handled, slashErr := handleTelegramSlashCommand(ctx, s, msg.ChatID, body); handled {
+			return slashErr
+		}
+	}
+
+	// Run FOH and send response.
+	fohMsg := &telegram.IncomingMessage{
+		UpdateID: msg.UpdateID, MessageID: msg.MessageID,
+		ChatID: msg.ChatID, UserID: msg.UserID,
+		Text: body, ImageFileID: msg.ImageFileID, VoiceFileID: msg.VoiceFileID,
+	}
+	response := s.Telegram.ProcessIncomingTelegram(ctx, s.App.(*infra.App), fohMsg)
+	if response == "" {
+		response = "I couldn't process that. Please try again."
+	}
+	return sendTelegramResponse(ctx, s, msg.ChatID, response)
+}
+
+// handleProcessTelegramQuery runs the full Telegram processing pipeline for a Cloud Tasks dispatch.
+// The core logic lives in runTelegramMessage, which is also called directly by the inline goroutine
+// in handleTelegram for resilience when Cloud Tasks dispatch is unreliable.
 func handleProcessTelegramQuery(s *Server, w http.ResponseWriter, r *http.Request) (any, error) {
 	ctx := r.Context()
 	path := pathForLog(r.URL.Path)
@@ -73,154 +192,17 @@ func handleProcessTelegramQuery(s *Server, w http.ResponseWriter, r *http.Reques
 	if err := DecodeAndValidate(r, &data, s.Validator); err != nil {
 		return nil, handlerError(http.StatusBadRequest, err.Error())
 	}
-	if data.Body == "" && data.ImageFileID == "" && data.VoiceFileID == "" && !data.HasLocation {
-		infra.LoggerFrom(ctx).Info("process-telegram-query: empty body, no image, no voice, and no location, sending hint", "chat_id", data.ChatID)
-		_ = s.Telegram.SendMessage(ctx, data.ChatID, "I didn't receive any text, image, or voice note. Send a message, photo, or voice note to log something.")
-		return map[string]string{"status": "ok"}, nil
-	}
-	if data.Body == "" && data.ImageFileID != "" {
-		data.Body = "Photo"
-	}
-	if data.HasLocation {
-		locationStr := reverseGeocode(ctx, data.Latitude, data.Longitude)
-		data.Body = strings.TrimSpace(data.Body + " " + locationStr)
-		infra.LoggerFrom(ctx).Info("process-telegram-query: location appended", "chat_id", data.ChatID, "location", locationStr)
-	}
 	ctx = data.correlationFields.applyToCtx(ctx)
-	// When message has an image, download it, optionally generate a caption, then create a journal entry (upload to GCS) and pass entry UUID so FOH skips adding a duplicate.
-	var imageBytes []byte
-	if data.ImageFileID != "" {
-		infra.LoggerFrom(ctx).Info("process-telegram-query: processing image, downloading", "chat_id", data.ChatID, "image_file_id", data.ImageFileID)
-		var mime string
-		var err error
-		imageBytes, mime, err = s.Telegram.DownloadFileWithMIME(ctx, data.ImageFileID)
-		if err != nil {
-			infra.LoggerFrom(ctx).Warn("process-telegram-query: download image failed, using placeholder", "chat_id", data.ChatID, "error", err)
-		} else {
-			infra.LoggerFrom(ctx).Info("process-telegram-query: image downloaded",
-				"chat_id", data.ChatID,
-				"image_bytes", len(imageBytes),
-				"mime", mime,
-				"telegram_file_id", data.ImageFileID,
-			)
-			userCaption := ""
-			if data.Body != "" && data.Body != "Photo" {
-				userCaption = data.Body
-			}
-			caption, err := infra.GenerateImageCaption(ctx, s.App.(*infra.App), imageBytes, mime, userCaption, s.Config)
-			if err != nil {
-				infra.LoggerFrom(ctx).Warn("process-telegram-query: image caption failed, using body as-is", "chat_id", data.ChatID, "error", err)
-			} else {
-				data.Body = caption
-				infra.LoggerFrom(ctx).Info("process-telegram-query: image caption generated",
-					"chat_id", data.ChatID,
-					"caption_len", len(data.Body),
-					"caption_preview", utils.TruncateString(data.Body, 120),
-				)
-				infra.LoggerFrom(ctx).Debug("process-telegram-query: image caption full", "chat_id", data.ChatID, "caption", data.Body)
-			}
-		}
-		entryUUID, err := s.Agent.AddEntry(ctx, data.Body, "telegram", nil, imageBytes)
-		if err != nil {
-			infra.LoggerFrom(ctx).Error("process-telegram-query: add entry for image failed", "chat_id", data.ChatID, "error", err)
-		} else {
-			ctx = agent.WithEntryAlreadyAdded(ctx, entryUUID)
-		}
-		// Image with no meaningful caption: confirm log only.
-		if data.Body == "Photo" {
-			response := "Photo logged."
-			if err := s.Telegram.SendMessage(ctx, data.ChatID, response); err != nil {
-				infra.LoggerFrom(ctx).Error("process-telegram-query: send reply failed", "chat_id", data.ChatID, "error", err)
-				return nil, fmt.Errorf("failed to send Telegram reply: %w", err)
-			}
-			infra.LoggerFrom(ctx).Info("process-telegram-query: reply sent", "chat_id", data.ChatID, "preview", response)
-			return map[string]string{"status": "ok"}, nil
-		}
-		// Image with generated caption: return the caption to the user and confirm log (skip FOH).
-		// Save a query log so the image event appears in the recent conversation context for future queries.
-		if _, saveErr := s.App.(*infra.App).Memory.SaveQuery(ctx, "[Photo]", data.Body, "telegram", false); saveErr != nil {
-			infra.LoggerFrom(ctx).Warn("process-telegram-query: save query log for image failed", "chat_id", data.ChatID, "error", saveErr)
-		}
-		response := data.Body + "\n\nLogged."
-		if err := s.Telegram.SendMessage(ctx, data.ChatID, response); err != nil {
-			infra.LoggerFrom(ctx).Error("process-telegram-query: send reply failed", "chat_id", data.ChatID, "error", err)
-			return nil, fmt.Errorf("failed to send Telegram reply: %w", err)
-		}
-		infra.LoggerFrom(ctx).Info("process-telegram-query: reply sent (caption)", "chat_id", data.ChatID, "preview", utils.TruncateString(response, 60))
-		return map[string]string{"status": "ok"}, nil
-	}
-	// Handle voice note: download, transcribe via Gemini, persist audio+transcription, then run FOH
-	// with the transcription as if the user had typed it.
-	if data.VoiceFileID != "" {
-		infra.LoggerFrom(ctx).Info("process-telegram-query: processing voice note", "chat_id", data.ChatID, "voice_file_id", data.VoiceFileID)
-		audioBytes, _, err := s.Telegram.DownloadFileWithMIME(ctx, data.VoiceFileID)
-		if err != nil {
-			infra.LoggerFrom(ctx).Warn("process-telegram-query: voice download failed", "chat_id", data.ChatID, "error", err)
-			_ = s.Telegram.SendMessage(ctx, data.ChatID, "Could not download your voice note. Please try again.")
-			return map[string]string{"status": "ok"}, nil
-		}
-		infra.LoggerFrom(ctx).Info("process-telegram-query: voice note downloaded", "chat_id", data.ChatID, "bytes", len(audioBytes))
-
-		transcript, err := infra.TranscribeAudio(ctx, s.App.(*infra.App), audioBytes, s.Config)
-		if err != nil {
-			infra.LoggerFrom(ctx).Warn("process-telegram-query: transcription failed", "chat_id", data.ChatID, "error", err)
-			_ = s.Telegram.SendMessage(ctx, data.ChatID, "Could not transcribe your voice note. Please try again.")
-			return map[string]string{"status": "ok"}, nil
-		}
-		infra.LoggerFrom(ctx).Info("process-telegram-query: transcribed", "chat_id", data.ChatID, "transcript_len", len(transcript))
-		infra.LoggerFrom(ctx).Debug("process-telegram-query: transcript", "chat_id", data.ChatID, "transcript", transcript)
-
-		if strings.TrimSpace(transcript) == "" || transcript == "[inaudible]" {
-			_ = s.Telegram.SendMessage(ctx, data.ChatID, "Could not transcribe voice note — audio was silent or unclear.")
-			return map[string]string{"status": "ok"}, nil
-		}
-
-		// Upload audio to GCS and create a journal entry with the transcription.
-		app := s.App.(*infra.App)
-		audioURL, uploadErr := app.UploadAudio(ctx, audioBytes)
-		if uploadErr != nil {
-			infra.LoggerFrom(ctx).Warn("process-telegram-query: audio GCS upload failed", "chat_id", data.ChatID, "error", uploadErr)
-		}
-		entryUUID, addErr := s.Agent.AddEntry(ctx, transcript, "telegram", nil, nil)
-		if addErr != nil {
-			infra.LoggerFrom(ctx).Error("process-telegram-query: add entry for voice failed", "chat_id", data.ChatID, "error", addErr)
-		} else {
-			ctx = agent.WithEntryAlreadyAdded(ctx, entryUUID)
-			if audioURL != "" {
-				if updateErr := app.Memory.UpdateEntryAudio(ctx, entryUUID, audioURL, transcript); updateErr != nil {
-					infra.LoggerFrom(ctx).Warn("process-telegram-query: update entry audio fields failed", "chat_id", data.ChatID, "error", updateErr)
-				}
-			}
-		}
-
-		// Use the transcription as the query body — treat it as if the user typed it.
-		data.Body = transcript
-	}
-
-	// Handle slash commands before running FOH.
-	if strings.HasPrefix(data.Body, "/") {
-		if handled, slashErr := handleTelegramSlashCommand(ctx, s, data.ChatID, data.Body); handled {
-			return map[string]string{"status": "ok"}, slashErr
-		}
-	}
-
 	msg := &telegram.IncomingMessage{
-		UpdateID:    data.UpdateID,
-		MessageID:   data.MessageID,
-		ChatID:      data.ChatID,
-		UserID:      data.UserID,
-		Text:        data.Body,
-		ImageFileID: data.ImageFileID,
-		VoiceFileID: data.VoiceFileID,
+		UpdateID: data.UpdateID, MessageID: data.MessageID,
+		ChatID: data.ChatID, UserID: data.UserID,
+		Text: data.Body, ImageFileID: data.ImageFileID, VoiceFileID: data.VoiceFileID,
+		HasLocation: data.HasLocation, Latitude: data.Latitude, Longitude: data.Longitude,
 	}
 	LogHandlerRequest(ctx, r.Method, path, "chat_id", data.ChatID, "update_id", data.UpdateID, "body_length", len(data.Body), "task_id", data.TaskID, "parent_trace_id", data.ParentTraceID)
 	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
-	response := s.Telegram.ProcessIncomingTelegram(ctx, s.App.(*infra.App), msg)
-	if response == "" {
-		response = "I couldn't process that. Please try again."
-	}
-	if err := sendTelegramResponse(ctx, s, data.ChatID, response); err != nil {
+	if err := runTelegramMessage(ctx, s, msg); err != nil {
 		return nil, err
 	}
 	return map[string]string{"status": "ok"}, nil
