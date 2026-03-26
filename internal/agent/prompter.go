@@ -27,15 +27,7 @@ func BuildSystemPrompt(ctx context.Context, env infra.ToolEnv, ragContext string
 	lastWeekStr := fmt.Sprintf("%d-W%02d", lastWeek.Year(), lastWeekNum)
 	currentMonth := now.Format("2006-01")
 
-	// 0. Root Identity (always inject user_profile so the model knows who it is serving)
-	identityBlock := ""
-	if node, _, err := env.MemoryStore().FindContextByName(ctx, "user_profile"); err == nil && node != nil && node.Content != "" {
-		identityBlock = "\n---\n## ROOT IDENTITY (who you are serving)\n# Primary user and context. Use this as the authority for preferences and priorities.\n\n" + strings.TrimSpace(node.Content)
-	}
-	identityWrapped := identityBlock
-	if identityBlock != "" {
-		identityWrapped = utils.WrapAsUserData(identityBlock)
-	}
+	identityWrapped := ""
 
 	// 1. Recent Conversation
 	var queries []memory.QueryLog
@@ -84,7 +76,7 @@ func BuildSystemPrompt(ctx context.Context, env infra.ToolEnv, ragContext string
 	}
 
 	// Log the actual injected context at Info so it appears in production (e.g. tail.sh / LLM_CONTEXT_SENT).
-	injectedSections := strings.TrimSpace(identityBlock + recentConversation + proactiveSignals + knowledgeGapBlock + activeProjectBlock)
+	injectedSections := strings.TrimSpace(recentConversation + proactiveSignals + knowledgeGapBlock + activeProjectBlock)
 	if injectedSections == "" {
 		injectedSections = "(no dynamic sections)"
 	}

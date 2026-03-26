@@ -31,14 +31,7 @@ func RunEvaluatorExtract(ctx context.Context, app *infra.App, content string) (*
 		return nil, fmt.Errorf("app required")
 	}
 	systemPrompt := prompts.Evaluator() + prompts.DataSafety()
-	prompt := ""
-	node, _, err := app.Memory.FindContextByName(ctx, "user_profile")
-	if err == nil && node != nil && node.Content != "" {
-		profile := node.Content
-		prompt = fmt.Sprintf("Relevant user preferences/facts (use when assigning domain and significance):\n%s\n\n",
-			utils.TruncateString(profile, 500))
-	}
-	prompt += fmt.Sprintf("Entry:\n%s", utils.WrapAsUserData(utils.SanitizePrompt(content)))
+	prompt := fmt.Sprintf("Entry:\n%s", utils.WrapAsUserData(utils.SanitizePrompt(content)))
 
 	bgCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()

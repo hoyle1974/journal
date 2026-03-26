@@ -27,7 +27,6 @@ func TestToolDefinitionsComplete(t *testing.T) {
 		"list_knowledge",
 		"get_entity_network",
 		"check_proactive_signals",
-		"get_system_health_audit",
 		"get_project_timeline",
 		"update_project_status",
 		"calculate",
