@@ -2,24 +2,7 @@ package agent
 
 import (
 	"strings"
-	"unicode/utf8"
 )
-
-// maxThoughtCharsPerTrace limits stored/API reasoning_trace size per iteration (UTF-8 safe).
-const maxThoughtCharsPerTrace = 12000
-
-// truncateThoughtForTrace caps one iteration's thought for ReasoningTrace / JSON responses.
-func truncateThoughtForTrace(th string) string {
-	th = strings.TrimSpace(th)
-	if th == "" {
-		return th
-	}
-	if utf8.RuneCountInString(th) <= maxThoughtCharsPerTrace {
-		return th
-	}
-	runes := []rune(th)
-	return strings.TrimSpace(string(runes[:maxThoughtCharsPerTrace])) + "\n… [truncated for trace size]"
-}
 
 // thoughtSuggestsKnowledgeGap returns true when the model's thinking block explicitly lists
 // non-empty "Identified gaps" (CoT-assisted gap detection, phase 5).

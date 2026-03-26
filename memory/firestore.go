@@ -54,6 +54,18 @@ func getStringSliceField(data map[string]any, field string) []string {
 	return out
 }
 
+func getFloat64Field(data map[string]any, field string) float64 {
+	switch v := data[field].(type) {
+	case float64:
+		return v
+	case float32:
+		return float64(v)
+	case int64:
+		return float64(v)
+	}
+	return 0
+}
+
 func getFloat32SliceField(data map[string]any, field string) []float32 {
 	v, ok := data[field].([]any)
 	if !ok {

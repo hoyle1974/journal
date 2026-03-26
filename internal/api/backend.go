@@ -33,9 +33,8 @@ type QueryResult struct {
 	ToolCalls        []map[string]interface{} `json:"tool_calls,omitempty"`
 	ForcedConclusion bool                     `json:"forced_conclusion,omitempty"`
 	Error            bool                     `json:"error"`
-	DebugLogs        []string                 `json:"debug_logs,omitempty"`
-	ReasoningTrace   []string                 `json:"reasoning_trace,omitempty"`
-	GraphContext     []string                 `json:"graph_context,omitempty"`
+	DebugLogs  []string `json:"debug_logs,omitempty"`
+	DebugTrace []string `json:"debug_trace,omitempty"`
 }
 
 // Entry is the API shape for a journal entry (avoids api importing pkg/journal).
