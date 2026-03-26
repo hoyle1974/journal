@@ -80,3 +80,4 @@ cmd/jot/jot-cli
 scripts/cloud-run-service.yaml
 scripts/.env-block.yaml
 scripts/.deploy-out.txt
+jot-export*
