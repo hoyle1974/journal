@@ -3,6 +3,7 @@ package utils
 import (
 	"fmt"
 	"math"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -157,9 +158,20 @@ func PerformDateCalculation(operation, date1Str, date2Str string, days int) (str
 	}
 }
 
+// localNow returns the current time in the timezone specified by the TZ environment variable,
+// falling back to UTC. This ensures date math is correct when running on Cloud Run (which uses UTC).
+func localNow() time.Time {
+	if tz := os.Getenv("TZ"); tz != "" {
+		if loc, err := time.LoadLocation(tz); err == nil {
+			return time.Now().In(loc)
+		}
+	}
+	return time.Now()
+}
+
 func parseFlexibleDate(dateStr string) (time.Time, error) {
 	dateStr = strings.ToLower(strings.TrimSpace(dateStr))
-	now := time.Now()
+	now := localNow()
 
 	switch dateStr {
 	case "today":
@@ -199,7 +211,7 @@ func ParseRelativeDate(input string) (time.Time, time.Time, error) {
 	if input == "" {
 		return time.Time{}, time.Time{}, fmt.Errorf("empty date expression")
 	}
-	now := time.Now()
+	now := localNow()
 	loc := now.Location()
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
 	yesterday := today.AddDate(0, 0, -1)
