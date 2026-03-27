@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"time"
 
@@ -14,8 +13,6 @@ func handleTelegram(s *Server, w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	path := pathForLog(r.URL.Path)
 	LogHandlerRequest(ctx, r.Method, path)
-	ctx, span := infra.StartSpan(ctx, "telegram.webhook")
-	defer span.End()
 	infra.LoggerFrom(ctx).Debug("telegram webhook received", "method", r.Method, "content_length", r.ContentLength)
 	if r.Method != http.MethodPost {
 		LogHandlerResponse(ctx, r.Method, path, http.StatusMethodNotAllowed, "error", "Method not allowed")
@@ -55,7 +52,6 @@ func handleTelegram(s *Server, w http.ResponseWriter, r *http.Request) {
 		"image_file_id", incoming.ImageFileID,
 		"voice_file_id", incoming.VoiceFileID,
 	)
-	span.SetAttributes(map[string]string{"telegram.chat_id": fmt.Sprintf("%d", incoming.ChatID), "telegram.update_id": fmt.Sprintf("%d", incoming.UpdateID)})
 	bodyPreview := incoming.Text
 	if bodyPreview == "" {
 		bodyPreview = "(empty)"

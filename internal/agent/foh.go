@@ -77,7 +77,6 @@ type QueryResult struct {
 }
 
 // ErrQueryResult returns a failed QueryResult.
-// span.RecordError must still be called at the site when a span is active.
 func ErrQueryResult(answer string, iteration int, debugLogs []string, debugTrace []string) *QueryResult {
 	return &QueryResult{Answer: answer, Iterations: iteration, Error: true, DebugLogs: debugLogs, DebugTrace: debugTrace}
 }
@@ -105,17 +104,9 @@ func RunQueryFull(ctx context.Context, app FOHEnv, question, source string, debu
 			infra.LoggerFrom(ctx).Debug(line)
 		}
 	}
-	ctx, span := infra.StartSpan(ctx, "query.run")
-	defer span.End()
-
 	queryRunID := infra.GenShortRunID()
 	startTime := time.Now()
 	infra.LoggerFrom(ctx).Debug("FOH: query started", "query_run_id", queryRunID, "phase", "start", "question", question, "source", source)
-
-	span.SetAttributes(map[string]string{
-		"question_len": fmt.Sprintf("%d", len(question)),
-		"source":       source,
-	})
 
 	if app == nil {
 		return ErrQueryResult("Error: no app in context (GEMINI_API_KEY not configured?)", 0, nil, nil)
@@ -132,7 +123,6 @@ func RunQueryFull(ctx context.Context, app FOHEnv, question, source string, debu
 		entryUUID, err = AddEntryAndEnqueue(ctx, app.App(), question, source, nil, "")
 		if err != nil {
 			infra.LoggerFrom(ctx).Error("failed to log user input", "error", err)
-			span.RecordError(err)
 			return ErrQueryResult(fmt.Sprintf("Error saving input: %v", err), 0, debugLogs, nil)
 		}
 		ctx = withCurrentEntryUUID(ctx, entryUUID)
@@ -144,7 +134,6 @@ func RunQueryFull(ctx context.Context, app FOHEnv, question, source string, debu
 
 	systemPrompt, err := BuildSystemPrompt(ctx, app, ragContext)
 	if err != nil {
-		span.RecordError(err)
 		return ErrQueryResult(fmt.Sprintf("Error building system prompt: %v", err), 0, debugLogs, nil)
 	}
 	debugTrace = append(debugTrace, "Prompt: "+systemPrompt)
@@ -154,7 +143,6 @@ func RunQueryFull(ctx context.Context, app FOHEnv, question, source string, debu
 	toolDefs := tools.GetDefinitions()
 	session, err := infra.NewChatSession(ctx, app.App(), systemPrompt, toolDefs, true)
 	if err != nil {
-		span.RecordError(err)
 		return ErrQueryResult(fmt.Sprintf("Error creating chat session: %v", infra.WrapLLMError(err)), 0, debugLogs, nil)
 	}
 	logDebug("[init] Chat session created with %d tools", len(toolDefs))
@@ -172,7 +160,6 @@ func RunQueryFull(ctx context.Context, app FOHEnv, question, source string, debu
 
 	resp, err := session.SendMessage(ctx, &genai.Part{Text: question})
 	if err != nil {
-		span.RecordError(err)
 		return ErrQueryResult(fmt.Sprintf("Error calling Gemini API: %v", infra.WrapLLMError(err)), 1, debugLogs, nil)
 	}
 	iteration++
@@ -192,11 +179,6 @@ func RunQueryFull(ctx context.Context, app FOHEnv, question, source string, debu
 				logDebug("[iter %d] thinking: %s", iteration, thinking)
 			}
 		}
-		span.SetAttributes(map[string]string{
-			"foh_iteration":        fmt.Sprintf("%d", iteration),
-			"foh_last_thought_len": fmt.Sprintf("%d", len(thinking)),
-		})
-
 		hasCalls := infra.HasFunctionCalls(resp)
 
 		logDebug("[iter %d] LLM response: has_function_calls=%v", iteration, hasCalls)
@@ -232,12 +214,6 @@ func RunQueryFull(ctx context.Context, app FOHEnv, question, source string, debu
 						infra.LoggerFrom(ctx).Warn("failed to enqueue save-query task", "error", err)
 					}
 				}
-
-				span.SetAttributes(map[string]string{
-					"iterations": fmt.Sprintf("%d", iteration),
-					"tool_calls": fmt.Sprintf("%d", len(toolCalls)),
-					"answer_len": fmt.Sprintf("%d", len(answer)),
-				})
 
 				logDebug("[DEBUG] LLM Final Response: %q (%d chars) after %d iterations", answer, len(answer), iteration)
 				return &QueryResult{
@@ -463,8 +439,6 @@ func RunQueryFull(ctx context.Context, app FOHEnv, question, source string, debu
 
 		resp, err = session.SendMessage(ctx, messageParts...)
 		if err != nil {
-		
-			span.RecordError(err)
 			return &QueryResult{
 				Answer:         fmt.Sprintf("Error calling Gemini API: %v", infra.WrapLLMError(err)),
 				Iterations:     iteration,
@@ -485,8 +459,6 @@ func RunQueryFull(ctx context.Context, app FOHEnv, question, source string, debu
 
 	resp, err = session.SendMessage(ctx, &genai.Part{Text: "Please provide your best answer based on the information gathered so far."})
 	if err != nil {
-	
-		span.RecordError(err)
 		return &QueryResult{
 			Answer:         fmt.Sprintf("Error calling Gemini API: %v", infra.WrapLLMError(err)),
 			Iterations:     iteration,
@@ -524,10 +496,6 @@ func RunQueryFull(ctx context.Context, app FOHEnv, question, source string, debu
 		}
 		infra.LogAssistantEfficiency(ctx, len(systemPrompt)+len(question), len(answer), iteration)
 		infra.LoggerFrom(ctx).Debug("FOH: forced conclusion", "query_run_id", queryRunID, "phase", "forced_conclusion", "event", "query_complete", "question", question, "answer", answer, "iterations", iteration, "tool_call_count", len(toolCalls), "tool_names", strings.Join(forcedToolNames, ","), "duration_ms", time.Since(startTime).Milliseconds(), "forced_conclusion", true)
-		span.SetAttributes(map[string]string{
-			"iterations":        fmt.Sprintf("%d", iteration),
-			"forced_conclusion": "true",
-		})
 		logDebug("[done] Forced conclusion after %d iterations", iteration)
 		return &QueryResult{
 			Answer:           answer,

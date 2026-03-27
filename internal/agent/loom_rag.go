@@ -33,9 +33,6 @@ func BuildLoomRAGContext(ctx context.Context, app *infra.App, logUUID, logConten
 	if app == nil {
 		return nil, fmt.Errorf("BuildLoomRAGContext: app required")
 	}
-	ctx, span := infra.StartSpan(ctx, "loom.build_rag_context")
-	defer span.End()
-
 	result := &LoomRAGContext{}
 
 	// Embed the log content once — used both for seed discovery (when no refinery seeds)

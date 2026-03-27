@@ -31,9 +31,6 @@ var decisionMarkers = []string{
 // It uses the structured toolCalls and filtered decision-point debugLogs collected by the FOH loop.
 // On failure it returns an empty string so callers can degrade gracefully.
 func GenerateDebugReport(ctx context.Context, app infra.ToolEnv, question string, toolCalls []map[string]interface{}, debugLogs []string, answer string) string {
-	ctx, span := infra.StartSpan(ctx, "agent.debug_report")
-	defer span.End()
-
 	prompt, err := prompts.BuildDebugReport(prompts.DebugReportData{
 		Question:         question,
 		ToolCallsSummary: buildToolCallsSummary(toolCalls),

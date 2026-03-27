@@ -32,13 +32,6 @@ func ProcessLogSequential(ctx context.Context, app *infra.App, logUUID, logConte
 		return nil, fmt.Errorf("ProcessLogSequential: app or config is nil")
 	}
 
-	ctx, span := infra.StartSpan(ctx, "loom.process_log_sequential")
-	defer span.End()
-	span.SetAttributes(map[string]string{
-		"log_uuid": logUUID,
-		"source":   source,
-	})
-
 	infra.LoggerFrom(ctx).Info("loom pipeline start",
 		"event", "loom_start",
 		"log_uuid", logUUID,
@@ -116,10 +109,6 @@ func ProcessEntrySyncPipeline(ctx context.Context, app *infra.App, logUUID, logC
 	if app == nil || app.Config() == nil {
 		return nil, fmt.Errorf("ProcessEntrySyncPipeline: app or config is nil")
 	}
-	ctx, span := infra.StartSpan(ctx, "loom.process_entry_sync")
-	defer span.End()
-	span.SetAttributes(map[string]string{"log_uuid": logUUID, "source": source})
-
 	nodeIDs, refineryErr := runRefineryPipeline(ctx, app, logUUID, logContent)
 	if refineryErr != nil {
 		infra.LoggerFrom(ctx).Warn("sync pipeline: refinery failed", "log_uuid", logUUID, "error", refineryErr)

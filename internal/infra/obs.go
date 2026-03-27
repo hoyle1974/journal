@@ -7,22 +7,11 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"reflect"
-	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
 
-	cloudtrace "github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/trace"
 	"github.com/jackstrohm/jot/internal/config"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/codes"
-	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
-	"go.opentelemetry.io/otel/propagation"
-	"go.opentelemetry.io/otel/sdk/resource"
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	semconv "go.opentelemetry.io/otel/semconv/v1.24.0"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -46,43 +35,13 @@ func LoggerFrom(ctx context.Context) *slog.Logger {
 	return Logger
 }
 
-var tracer trace.Tracer
-
 var observabilityOnce sync.Once
 
-type forceTraceKeyType struct{}
-
-var forceTraceKey = &forceTraceKeyType{}
-
-// WithForceTrace returns a context that forces the next span to be sampled and exported.
-func WithForceTrace(ctx context.Context) context.Context {
-	return context.WithValue(ctx, forceTraceKey, true)
-}
-
-type forceTraceSampler struct {
-	defaultSampler sdktrace.Sampler
-}
-
-func (s *forceTraceSampler) ShouldSample(p sdktrace.SamplingParameters) sdktrace.SamplingResult {
-	if p.ParentContext.Value(forceTraceKey) == true {
-		return sdktrace.SamplingResult{
-			Decision:   sdktrace.RecordAndSample,
-			Tracestate: trace.SpanContextFromContext(p.ParentContext).TraceState(),
-		}
-	}
-	return s.defaultSampler.ShouldSample(p)
-}
-
-func (s *forceTraceSampler) Description() string {
-	return "forceTrace(" + s.defaultSampler.Description() + ")"
-}
-
-// InitObservability initializes logging and tracing. Must be called at startup (e.g. before InitDefaultApp).
-// When cfg is nil, only a minimal logger and no-op tracer are used.
+// InitObservability initializes logging. Must be called at startup (e.g. before InitDefaultApp).
+// When cfg is nil, only a minimal logger is used.
 func InitObservability(cfg *config.Config) {
 	observabilityOnce.Do(func() {
 		initLogger(cfg)
-		initTracing(cfg)
 		env := "development"
 		if cfg != nil && cfg.Env != "" {
 			env = cfg.Env
@@ -180,105 +139,6 @@ func (f *flushAfterWriteWriter) Write(p []byte) (n int, err error) {
 	return n, f.w.Flush()
 }
 
-func initTracing(cfg *config.Config) {
-	var tp *sdktrace.TracerProvider
-	res := resource.NewWithAttributes(
-		semconv.SchemaURL,
-		semconv.ServiceName("jot-api"),
-		semconv.ServiceVersion(Version),
-	)
-
-	if os.Getenv("K_SERVICE") != "" && cfg != nil && cfg.GoogleCloudProject != "" {
-		exporter, err := cloudtrace.New(cloudtrace.WithProjectID(cfg.GoogleCloudProject))
-		if err != nil {
-			Logger.Error("failed to create Cloud Trace exporter", "error", err)
-			tp = sdktrace.NewTracerProvider(sdktrace.WithResource(res))
-		} else {
-			defaultSampler := sdktrace.TraceIDRatioBased(0.1)
-			env := cfg.Env
-			if env == "" {
-				env = "production"
-			}
-			tp = sdktrace.NewTracerProvider(
-				sdktrace.WithBatcher(exporter),
-				sdktrace.WithResource(resource.NewWithAttributes(
-					semconv.SchemaURL,
-					semconv.ServiceName("jot-api"),
-					semconv.ServiceVersion(Version),
-					semconv.DeploymentEnvironment(env),
-					attribute.String("cloud.project_id", cfg.GoogleCloudProject),
-				)),
-				sdktrace.WithSampler(&forceTraceSampler{defaultSampler: defaultSampler}),
-			)
-			Logger.Info("Cloud Trace exporter initialized", "project", cfg.GoogleCloudProject)
-		}
-	} else {
-		if os.Getenv("TRACE_STDOUT") == "true" {
-			exporter, err := stdouttrace.New(stdouttrace.WithPrettyPrint(), stdouttrace.WithWriter(os.Stderr))
-			if err != nil {
-				Logger.Error("failed to create stdout trace exporter", "error", err)
-				tp = sdktrace.NewTracerProvider(sdktrace.WithResource(res))
-			} else {
-				env := "development"
-				if cfg != nil && cfg.Env != "" {
-					env = cfg.Env
-				}
-				tp = sdktrace.NewTracerProvider(
-					sdktrace.WithBatcher(exporter),
-					sdktrace.WithResource(resource.NewWithAttributes(
-						semconv.SchemaURL,
-						semconv.ServiceName("jot-api"),
-						semconv.ServiceVersion(Version),
-						semconv.DeploymentEnvironment(env),
-					)),
-					sdktrace.WithSampler(sdktrace.AlwaysSample()),
-				)
-				Logger.Info("stdout trace exporter initialized")
-			}
-		} else {
-			tp = sdktrace.NewTracerProvider(sdktrace.WithResource(res))
-		}
-	}
-
-	otel.SetTracerProvider(tp)
-	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
-		propagation.TraceContext{},
-		propagation.Baggage{},
-	))
-	tracer = tp.Tracer("jot-api")
-}
-
-// Span wraps an OpenTelemetry span.
-type Span struct {
-	span      trace.Span
-	startTime time.Time
-}
-
-// StartSpan creates a new span for tracing operations.
-func StartSpan(ctx context.Context, name string) (context.Context, *Span) {
-	ctx, span := tracer.Start(ctx, name)
-	return ctx, &Span{span: span, startTime: time.Now()}
-}
-
-// End ends the span and logs duration.
-func (s *Span) End() {
-	duration := time.Since(s.startTime)
-	s.span.SetAttributes(attribute.Int64("duration_ms", duration.Milliseconds()))
-	s.span.End()
-}
-
-// SetAttributes sets attributes on the span.
-func (s *Span) SetAttributes(attrs map[string]string) {
-	for k, v := range attrs {
-		s.span.SetAttributes(attribute.String(k, v))
-	}
-}
-
-// TraceID returns the trace ID of the span.
-func (s *Span) TraceID() string {
-	return s.span.SpanContext().TraceID().String()
-}
-
 // TraceIDFromContext returns the trace ID of the current span in ctx, or "" if none.
 func TraceIDFromContext(ctx context.Context) string {
 	span := trace.SpanFromContext(ctx)
@@ -360,24 +220,6 @@ func WithLatencyBreakdown(ctx context.Context, b *LatencyBreakdown) context.Cont
 func LatencyBreakdownFromContext(ctx context.Context) *LatencyBreakdown {
 	b, _ := ctx.Value(&latencyBreakdownKey{}).(*LatencyBreakdown)
 	return b
-}
-
-// RecordError records an error on the span.
-func (s *Span) RecordError(err error) {
-	if err != nil {
-		s.span.RecordError(err)
-		s.span.SetStatus(codes.Error, err.Error())
-		s.span.SetAttributes(
-			semconv.ExceptionType(reflect.TypeOf(err).String()),
-			semconv.ExceptionMessage(err.Error()),
-			semconv.ExceptionStacktrace(string(debug.Stack())),
-		)
-	}
-}
-
-// SetStatus sets the span status.
-func (s *Span) SetStatus(code codes.Code, description string) {
-	s.span.SetStatus(code, description)
 }
 
 // LogRequest logs an incoming HTTP request with structured fields.

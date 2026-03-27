@@ -64,7 +64,6 @@ _Check all that apply and note specifics:_
 - [ ] Debug logs pass full strings — no truncation at Debug level
 - [ ] User-origin strings wrapped with `WrapAsUserData()` in any prompt
 - [ ] LLM output parsed as key/value lines via `pkg/utils.ParseKeyValueMap` (no JSON)
-- [ ] Every significant agentic step has `StartSpan` / `defer span.End()`
 - [ ] Errors wrapped with `%w`, not `%v`
 - [ ] No file exceeds 400 lines
 

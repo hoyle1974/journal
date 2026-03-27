@@ -131,7 +131,7 @@ func apiRequestWithHeaders(ctx context.Context, method, endpoint string, data an
 		if len(snippet) > 80 {
 			snippet = snippet[:80] + "..."
 		}
-		return nil, nil, fmt.Errorf("invalid response (status %d): %v (body: %q)", resp.StatusCode, err, snippet)
+		return nil, nil, fmt.Errorf("invalid response (status %d): %w (body: %q)", resp.StatusCode, err, snippet)
 	}
 
 	if resp.StatusCode >= 400 {

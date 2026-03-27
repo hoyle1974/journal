@@ -132,12 +132,8 @@ func (a *App) Dispatch(ctx context.Context, req *LLMRequest) (*genai.GenerateCon
 	if a == nil || a.Config() == nil {
 		return nil, fmt.Errorf("no app or config for LLM dispatch")
 	}
-	ctx, span := StartSpan(ctx, "gemini.dispatch")
-	defer span.End()
-
 	client, err := a.Gemini(ctx)
 	if err != nil {
-		span.RecordError(err)
 		return nil, err
 	}
 	modelName := a.EffectiveModel(a.Config().GeminiModel)
@@ -239,7 +235,6 @@ func (a *App) Dispatch(ctx context.Context, req *LLMRequest) (*genai.GenerateCon
 	contents := []*genai.Content{{Role: genai.RoleUser, Parts: sanitized}}
 	resp, err := client.Models.GenerateContent(ctx, modelName, contents, config)
 	if err != nil {
-		span.RecordError(err)
 		if resp != nil {
 			LogLLMResponse(ctx, llmID, resp)
 		}

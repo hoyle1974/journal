@@ -19,7 +19,7 @@ func HandleCountdown(ctx context.Context, env infra.ToolEnv, action, name, dateS
 		}
 		targetDate, err := time.Parse("2006-01-02", dateStr)
 		if err != nil {
-			return "", fmt.Errorf("invalid date format (use YYYY-MM-DD): %v", err)
+			return "", fmt.Errorf("invalid date format (use YYYY-MM-DD): %w", err)
 		}
 		metadata := fmt.Sprintf(`{"target_date": "%s"}`, dateStr)
 		id, err := env.MemoryStore().UpsertKnowledge(ctx, fmt.Sprintf("Countdown: %s", name), "countdown", metadata, nil)

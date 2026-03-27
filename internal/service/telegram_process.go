@@ -14,9 +14,6 @@ import (
 
 // ProcessIncomingTelegram processes an incoming Telegram message and returns the response. app must be non-nil.
 func ProcessIncomingTelegram(ctx context.Context, app *infra.App, msg *telegram.IncomingMessage) string {
-	ctx, span := infra.StartSpan(ctx, "telegram.process_message")
-	defer span.End()
-
 	text := strings.TrimSpace(msg.Text)
 	if text == "" {
 		return "Empty message received."
@@ -41,9 +38,6 @@ func ProcessIncomingTelegram(ctx context.Context, app *infra.App, msg *telegram.
 // chat and handles the message as a question answer if so. Returns (response, true) when
 // the message was consumed by the question flow, or ("", false) to let FOH run normally.
 func handlePendingQuestion(ctx context.Context, app *infra.App, chatID int64, text string) (string, bool) {
-	ctx, span := infra.StartSpan(ctx, "telegram.handle_pending_question")
-	defer span.End()
-
 	isSkip := text == "/skip" || strings.EqualFold(text, "skip")
 
 	// Check for an in-flight question (one we already sent to this chat).
@@ -176,9 +170,6 @@ func formatQuestion(q memory.PendingQuestion, remaining int) string {
 }
 
 func processQueryTelegram(ctx context.Context, app *infra.App, query string, chatID int64) string {
-	ctx, span := infra.StartSpan(ctx, "telegram.process_query")
-	defer span.End()
-
 	if app == nil {
 		return "Service unavailable. Please try again later."
 	}

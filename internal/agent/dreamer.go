@@ -42,9 +42,6 @@ type DreamResult struct {
 // When force is false the cycle is skipped if fewer than dreamMinEntries new
 // entries exist AND fewer than dreamMinInterval have elapsed since the last run.
 func RunDreamCycle(ctx context.Context, app *infra.App, force bool) (*DreamResult, error) {
-	ctx, span := infra.StartSpan(ctx, "agent.dream_cycle")
-	defer span.End()
-
 	log := infra.LoggerFrom(ctx)
 	log.Info("dreamer: cycle started", "force", force)
 
@@ -142,7 +139,6 @@ func RunDreamCycle(ctx context.Context, app *infra.App, force bool) (*DreamResul
 	thinking, raw := infra.ExtractThinkingAndAnswer(resp)
 	if thinking != "" {
 		log.Debug("dreamer: CoT trace", "thinking", thinking)
-		span.SetAttributes(map[string]string{"dream.thought_len": fmt.Sprintf("%d", len(thinking))})
 	}
 
 	raw = strings.TrimSpace(raw)
@@ -172,7 +168,6 @@ func RunDreamCycle(ctx context.Context, app *infra.App, force bool) (*DreamResul
 		return nil, fmt.Errorf("dream cycle: commit summary: %w", err)
 	}
 	log.Info("dreamer: summary committed", "uuid", summaryUUID)
-	span.SetAttributes(map[string]string{"dream.summary_uuid": summaryUUID})
 
 	// ── Phase G.5: parse question lines and self-check ───────────────────────
 	type parsedQuestion struct {

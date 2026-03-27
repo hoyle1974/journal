@@ -15,8 +15,6 @@ import (
 // Intended for dev replay of prod journal archives.
 func handleReplay(s *Server, w http.ResponseWriter, r *http.Request) (any, error) {
 	ctx := r.Context()
-	ctx, span := infra.StartSpan(ctx, "api.replay")
-	defer span.End()
 
 	app, ok := s.App.(*infra.App)
 	if !ok {

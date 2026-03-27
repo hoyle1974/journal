@@ -195,9 +195,6 @@ type GenConfig struct {
 // GenerateContentSimple generates content without tools.
 // env supplies Dispatch; pass from the caller (e.g. ToolEnv).
 func GenerateContentSimple(ctx context.Context, env ToolEnv, systemPrompt, userPrompt string, cfg *config.Config, genConfig *GenConfig) (string, error) {
-	ctx, span := StartSpan(ctx, "gemini.generate_simple")
-	defer span.End()
-
 	if env == nil || cfg == nil {
 		return "", fmt.Errorf("env and config required")
 	}
@@ -209,12 +206,10 @@ func GenerateContentSimple(ctx context.Context, env ToolEnv, systemPrompt, userP
 	}
 	resp, err := env.Dispatch(ctx, req)
 	if err != nil {
-		span.RecordError(err)
 		LoggerFrom(ctx).Error("gemini generation failed", "error", err)
 		return "", WrapLLMError(fmt.Errorf("Gemini API error: %w", err))
 	}
 	text := strings.TrimSpace(extractTextFromResponse(resp))
-	span.SetAttributes(map[string]string{"response_len": fmt.Sprintf("%d", len(text))})
 	return text, nil
 }
 
@@ -224,9 +219,6 @@ const imageCaptionSystemPrompt = `You are describing an image for a personal jou
 // imageBytes and mimeType are the image data (e.g. from Telegram). userCaption is optional text the user sent with the image.
 // Returns a combined string: userCaption + auto-generated description, suitable for the journal entry and FOH.
 func GenerateImageCaption(ctx context.Context, env ToolEnv, imageBytes []byte, mimeType, userCaption string, cfg *config.Config) (string, error) {
-	ctx, span := StartSpan(ctx, "gemini.generate_image_caption")
-	defer span.End()
-
 	if env == nil || cfg == nil {
 		return "", fmt.Errorf("env and config required")
 	}
@@ -252,12 +244,10 @@ func GenerateImageCaption(ctx context.Context, env ToolEnv, imageBytes []byte, m
 	}
 	resp, err := env.Dispatch(ctx, req)
 	if err != nil {
-		span.RecordError(err)
 		LoggerFrom(ctx).Error("image caption generation failed", "error", err)
 		return "", WrapLLMError(fmt.Errorf("Gemini image caption: %w", err))
 	}
 	generated := strings.TrimSpace(extractTextFromResponse(resp))
-	span.SetAttributes(map[string]string{"caption_len": fmt.Sprintf("%d", len(generated))})
 	// Combine user caption (if any) and generated description for journal and FOH.
 	var combined strings.Builder
 	if strings.TrimSpace(userCaption) != "" {
@@ -274,9 +264,6 @@ const audioTranscriptionSystemPrompt = `You are a speech-to-text transcription e
 // audioBytes must be audio/ogg (Telegram voice note format).
 // Returns an error if transcription fails; returns "[inaudible]" (not an error) for silent/unclear audio.
 func TranscribeAudio(ctx context.Context, env ToolEnv, audioBytes []byte, cfg *config.Config) (string, error) {
-	ctx, span := StartSpan(ctx, "gemini.transcribe_audio")
-	defer span.End()
-
 	if env == nil || cfg == nil {
 		return "", fmt.Errorf("env and config required")
 	}
@@ -295,12 +282,10 @@ func TranscribeAudio(ctx context.Context, env ToolEnv, audioBytes []byte, cfg *c
 	}
 	resp, err := env.Dispatch(ctx, req)
 	if err != nil {
-		span.RecordError(err)
 		LoggerFrom(ctx).Error("audio transcription failed", "error", err)
 		return "", WrapLLMError(fmt.Errorf("Gemini transcription: %w", err))
 	}
 	transcript := strings.TrimSpace(extractTextFromResponse(resp))
-	span.SetAttributes(map[string]string{"transcript_len": fmt.Sprintf("%d", len(transcript))})
 	if transcript == "" {
 		transcript = "[inaudible]"
 	}
@@ -319,9 +304,6 @@ const EmbedTaskRetrievalQuery = "RETRIEVAL_QUERY"
 
 // GenerateEmbedding creates a 768-dimension vector for semantic search using Vertex AI text-embedding-005.
 func GenerateEmbedding(ctx context.Context, projectID string, text string, taskType ...string) ([]float32, error) {
-	ctx, span := StartSpan(ctx, "vertex.generate_embedding")
-	defer span.End()
-
 	task := EmbedTaskRetrievalQuery
 	if len(taskType) > 0 && taskType[0] != "" {
 		task = taskType[0]
@@ -334,25 +316,21 @@ func GenerateEmbedding(ctx context.Context, projectID string, text string, taskT
 	}
 	jsonBody, err := json.Marshal(requestBody)
 	if err != nil {
-		span.RecordError(err)
 		return nil, err
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewReader(jsonBody))
 	if err != nil {
-		span.RecordError(err)
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	tokenSource, err := google.DefaultTokenSource(ctx, "https://www.googleapis.com/auth/cloud-platform")
 	if err != nil {
-		span.RecordError(err)
 		return nil, fmt.Errorf("failed to get token source: %w", err)
 	}
 	token, err := tokenSource.Token()
 	if err != nil {
-		span.RecordError(err)
 		return nil, fmt.Errorf("failed to get token: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+token.AccessToken)
@@ -362,7 +340,6 @@ func GenerateEmbedding(ctx context.Context, projectID string, text string, taskT
 	resp, err := client.Do(req)
 	embedLatency := time.Since(embedStart)
 	if err != nil {
-		span.RecordError(err)
 		LoggerFrom(ctx).Error("embedding request failed", "error", err)
 		return nil, fmt.Errorf("Embedding API error: %w", err)
 	}
@@ -371,7 +348,6 @@ func GenerateEmbedding(ctx context.Context, projectID string, text string, taskT
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		apiErr := fmt.Errorf("embedding API returned %d: %s", resp.StatusCode, string(body))
-		span.RecordError(apiErr)
 		LoggerFrom(ctx).Error("embedding failed", "status", resp.StatusCode, "body", string(body))
 		return nil, WrapLLMError(apiErr)
 	}
@@ -384,7 +360,6 @@ func GenerateEmbedding(ctx context.Context, projectID string, text string, taskT
 		} `json:"predictions"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		span.RecordError(err)
 		return nil, fmt.Errorf("failed to decode embedding response: %w", err)
 	}
 	if len(result.Predictions) == 0 || len(result.Predictions[0].Embeddings.Values) == 0 {

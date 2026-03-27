@@ -111,10 +111,6 @@ func runRefineryPipeline(ctx context.Context, app *infra.App, entryUUID, content
 		return nil, fmt.Errorf("runRefineryPipeline: app required")
 	}
 
-	ctx, span := infra.StartSpan(ctx, "agent.refinery_pipeline")
-	defer span.End()
-	span.SetAttributes(map[string]string{"entry_uuid": entryUUID})
-
 	canonMap, err := fetchCanonicalMap(ctx, app)
 	if err != nil {
 		// Non-fatal: fallback was already returned; log and proceed.
@@ -166,9 +162,6 @@ func runRefineryPipeline(ctx context.Context, app *infra.App, entryUUID, content
 }
 
 func refineryExtract(ctx context.Context, app *infra.App, entryUUID, content string, canonMap memory.CanonicalMapConfig, ownerName string) ([]refineryTriple, string, error) {
-	ctx, span := infra.StartSpan(ctx, "agent.refinery_extract")
-	defer span.End()
-
 	predicateList := strings.Join(canonMap.AllowedPredicates, ", ")
 	prompt, err := prompts.BuildRefinery(prompts.RefineryData{
 		Entry:             utils.WrapAsUserData(utils.SanitizePrompt(content)),
@@ -193,10 +186,6 @@ func refineryExtract(ctx context.Context, app *infra.App, entryUUID, content str
 }
 
 func refineryResolveCommit(ctx context.Context, app *infra.App, entryUUID string, triples []refineryTriple, canonMap memory.CanonicalMapConfig) ([]string, error) {
-	ctx, span := infra.StartSpan(ctx, "agent.refinery_resolve_commit")
-	defer span.End()
-	span.SetAttributes(map[string]string{"entry_uuid": entryUUID})
-
 	nodeIDs := make([]string, 0, len(triples)*3)
 	for _, t := range triples {
 		if t.ParseErr != "" {
@@ -266,13 +255,6 @@ func refineryResolveCommit(ctx context.Context, app *infra.App, entryUUID string
 // The new relationship node is assigned relevance_score = 1.0.
 // When the array is full, the existing edge with the lowest relevance_score is evicted.
 func updateHotEdges(ctx context.Context, app *infra.App, objectNodeID, newRelationshipID string) error {
-	ctx, span := infra.StartSpan(ctx, "loom.update_hot_edges")
-	defer span.End()
-	span.SetAttributes(map[string]string{
-		"object_node_id":    objectNodeID,
-		"new_relationship_id": newRelationshipID,
-	})
-
 	client, err := app.Firestore(ctx)
 	if err != nil {
 		return fmt.Errorf("updateHotEdges: firestore client: %w", err)

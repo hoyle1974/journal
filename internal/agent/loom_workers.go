@@ -14,9 +14,6 @@ import (
 //
 // This replaces the commitment-detection logic previously inside ProcessEntry.
 func runTaskWorker(ctx context.Context, app *infra.App, logContent string, extractedObjectIDs []string) error {
-	ctx, span := infra.StartSpan(ctx, "loom.task_worker")
-	defer span.End()
-
 	parsed, err := RunEvaluatorExtract(ctx, app, logContent)
 	if err != nil {
 		infra.LoggerFrom(ctx).Warn("loom task worker: evaluator extract failed", "error", err)

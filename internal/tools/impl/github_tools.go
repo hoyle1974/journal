@@ -40,9 +40,6 @@ func registerGitHubTools() {
 }
 
 func executeGitHubRead(ctx context.Context, env infra.ToolEnv, args any) tools.Result {
-	ctx, span := infra.StartSpan(ctx, "tool.github_read")
-	defer span.End()
-
 	a := args.(*githubReadArgs)
 	if a.Action == "" {
 		return tools.MissingParam("action")
@@ -59,8 +56,6 @@ func executeGitHubRead(ctx context.Context, env infra.ToolEnv, args any) tools.R
 
 	path := a.Path
 	limit := clampInt(a.Limit, 10, 1, 30)
-
-	span.SetAttributes(map[string]string{"action": a.Action, "repo": repo})
 
 	switch a.Action {
 	case "repo_info":

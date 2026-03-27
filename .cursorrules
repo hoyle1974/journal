@@ -48,11 +48,6 @@ Gemini’s `responseSchema` works well only for **simple, flat** structures. For
 
 The Immutable Source of Truth Rule: internal/prompts/app_capabilities.txt and blueprint.md are our system's nervous system. If a feature implementation changes the API surface, adds a tool, or changes a Firestore collection, you MUST update these files in the exact same step/commit as the code change. Do not mark a brief as done until these docs are synchronized.
 
-## Observability
-
-- **Rule:** Every significant agentic step must be traceable.
-- **Requirement:** Use `StartSpan(ctx, "operation_name")`.
-- **Requirement:** Add metadata via `span.SetAttributes(map[string]string{...})` and always `defer span.End()`.
 
 ## Go Style
 

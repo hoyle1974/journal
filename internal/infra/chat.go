@@ -92,15 +92,11 @@ type ChatSession struct {
 // NewChatSession creates a new chat session with tools enabled. app is passed explicitly by the caller.
 // Set withThinking=true to enable native Gemini 2.5 thinking (ThinkingConfig{IncludeThoughts: true}).
 func NewChatSession(ctx context.Context, app *App, systemPrompt string, tools []*genai.FunctionDeclaration, withThinking bool) (*ChatSession, error) {
-	ctx, span := StartSpan(ctx, "gemini.new_chat_session")
-	defer span.End()
-
 	if app == nil {
 		return nil, fmt.Errorf("app required")
 	}
 	client, err := app.Gemini(ctx)
 	if err != nil {
-		span.RecordError(err)
 		return nil, err
 	}
 
@@ -121,7 +117,6 @@ func NewChatSession(ctx context.Context, app *App, systemPrompt string, tools []
 
 	chat, err := client.Chats.Create(ctx, modelName, config, nil)
 	if err != nil {
-		span.RecordError(err)
 		return nil, err
 	}
 
@@ -172,9 +167,6 @@ func sanitizeParts(parts []*genai.Part) []*genai.Part {
 // SendMessage sends a message and returns the response.
 // Before the call it collects context telemetry (token counts by category); after the call it logs a single LLM_CONTEXT_AUDIT line.
 func (cs *ChatSession) SendMessage(ctx context.Context, parts ...*genai.Part) (*genai.GenerateContentResponse, error) {
-	ctx, span := StartSpan(ctx, "gemini.send_message")
-	defer span.End()
-
 	llmID := genLLMCorrelationID()
 	sanitized := sanitizeParts(parts)
 	inputSizeBytes := estimatePartsSize(sanitized)
@@ -204,7 +196,6 @@ func (cs *ChatSession) SendMessage(ctx context.Context, parts ...*genai.Part) (*
 	}
 	resp, err := cs.chat.SendMessage(ctx, partValues...)
 	if err != nil {
-		span.RecordError(err)
 		LoggerFrom(ctx).Error("chat message failed", "error", err)
 		return nil, fmt.Errorf("Gemini chat error: %w", err)
 	}

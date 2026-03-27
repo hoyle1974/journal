@@ -200,9 +200,6 @@ func registerKnowledgeTools() {
 		Category:    "knowledge",
 		Args:        &getEntityNetworkArgs{},
 		Execute: func(ctx context.Context, env infra.ToolEnv, args any) tools.Result {
-			ctx, span := infra.StartSpan(ctx, "tool.get_entity_network")
-			defer span.End()
-
 			a := args.(*getEntityNetworkArgs)
 			entityName := strings.TrimSpace(a.EntityName)
 			if entityName == "" {
@@ -211,8 +208,6 @@ func registerKnowledgeTools() {
 			if env == nil || env.Config() == nil {
 				return tools.Fail("Error: no app in context")
 			}
-			span.SetAttributes(map[string]string{"entity_name": entityName})
-
 			node, err := env.MemoryStore().FindEntityNodeByName(ctx, entityName)
 			if err != nil {
 				return tools.Fail("Error finding entity: %v", err)
