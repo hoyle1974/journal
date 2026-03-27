@@ -81,12 +81,7 @@ func ErrQueryResult(answer string, iteration int, debugLogs []string, debugTrace
 	return &QueryResult{Answer: answer, Iterations: iteration, Error: true, DebugLogs: debugLogs, DebugTrace: debugTrace}
 }
 
-// RunQuery runs a query against the journal using the agentic loop.
-func RunQuery(ctx context.Context, app FOHEnv, question, source string) *QueryResult {
-	return RunQueryWithDebug(ctx, app, question, source, true)
-}
-
-// RunQueryWithDebug is preserved for backward compat; passes empty ragContext.
+// RunQueryWithDebug passes empty ragContext.
 func RunQueryWithDebug(ctx context.Context, app FOHEnv, question, source string, debug bool) *QueryResult {
 	return RunQueryFull(ctx, app, question, source, debug, "")
 }

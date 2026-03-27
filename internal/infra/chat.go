@@ -233,18 +233,6 @@ func estimatePartsSize(parts []*genai.Part) int {
 	return n
 }
 
-// AddFunctionResponse returns a Part that can be sent as a function response in the next message.
-func (cs *ChatSession) AddFunctionResponse(name string, response map[string]any) *genai.Part {
-	return &genai.Part{
-		FunctionResponse: &genai.FunctionResponse{Name: name, Response: response},
-	}
-}
-
-// GetHistory returns the current conversation history (curated).
-func (cs *ChatSession) GetHistory() []*genai.Content {
-	return cs.chat.History(true)
-}
-
 // formatPartsToText returns a single string for logging: text parts concatenated, function calls/responses summarized (no tool defs).
 func formatPartsToText(parts []*genai.Part) string {
 	var b strings.Builder

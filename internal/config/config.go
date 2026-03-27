@@ -107,13 +107,6 @@ func normalizeToFlash(model string) string {
 	return model
 }
 
-func loadSecretWithDefault(projectID, secretID, defaultValue string) string {
-	if v := loadSecret(projectID, secretID); v != "" {
-		return v
-	}
-	return defaultValue
-}
-
 // loadSecretOptional is like loadSecret but does not log when the secret is not found (NotFound).
 // Use for optional features (e.g. Twilio) so production logs are not spammed.
 func loadSecretOptional(projectID, secretID string) string {

@@ -25,9 +25,6 @@ var evaluatorTxt string
 //go:embed activity_history.txt
 var activityHistoryTxt string
 
-//go:embed app_capabilities.txt
-var appCapabilitiesTxt string
-
 //go:embed debug_report_prompt.txt
 var debugReportPromptTxt string
 
@@ -101,12 +98,6 @@ func DataSafety() string { return dataSafetyTxt }
 
 // Evaluator returns the evaluator system prompt (without data safety suffix).
 func Evaluator() string { return evaluatorTxt }
-
-// AppCapabilities returns the static, LLM-readable description of Jot's parts (entry points, memory, journal, tools).
-// Keep app_capabilities.txt up to date when the codebase changes.
-func AppCapabilities() string {
-	return appCapabilitiesTxt
-}
 
 // DebugReportData holds all inputs for the first-person debug report narrative prompt.
 type DebugReportData struct {

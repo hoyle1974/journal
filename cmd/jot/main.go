@@ -344,50 +344,6 @@ func cmdIngest(input string) {
 	}
 }
 
-func cmdQuery(question string) {
-	result, headers, err := api.Do(context.Background(), "POST", "/query", map[string]string{
-		"question": question,
-		"source":   fmt.Sprintf("cli:%s", MachineName),
-	}, time.Duration(timeout.QuerySeconds)*time.Second)
-	if err != nil {
-		if err.Error() == "offline" {
-			fmt.Println("Error: Cannot query while offline. Queries require cloud connection.")
-		} else {
-			fmt.Printf("Error: %v\n", err)
-		}
-		os.Exit(1)
-	}
-	if result == nil {
-		fmt.Println("Error: No response from API")
-		os.Exit(1)
-	}
-	if traceFlag && headers != nil {
-		printTraceInfo(headers)
-	}
-
-	// Check for error - can be string (auth error) or bool (query error)
-	if errStr := jsonStr(result, "error"); errStr != "" {
-		fmt.Printf("Error: %s\n", errStr)
-		os.Exit(1)
-	}
-	if errFlag, ok := result["error"].(bool); ok && errFlag {
-		printResponseSeparatorIfDebug(printDebugTraceIfAny(result))
-		if answer := jsonStr(result, "answer"); answer != "" {
-			fmt.Printf("%s\n", answer)
-		} else {
-			fmt.Println("Error: Query failed")
-		}
-		os.Exit(1)
-	}
-
-	printResponseSeparatorIfDebug(printDebugTraceIfAny(result))
-	if answer := jsonStr(result, "answer"); answer != "" {
-		fmt.Println(answer)
-	} else {
-		fmt.Println("No answer received")
-	}
-}
-
 func cmdEntries(limit int) {
 	result, _ := api.DoOrExit(context.Background(), "GET", fmt.Sprintf("/entries?limit=%d", limit), nil, RequestTimeout)
 	entriesRaw, ok := result["entries"].([]interface{})

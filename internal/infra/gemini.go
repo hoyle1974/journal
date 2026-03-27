@@ -162,22 +162,6 @@ func newGeminiClientForApp(ctx context.Context, cfg *config.Config, log *slog.Lo
 	return client, effGen, nil
 }
 
-// GetGeminiClient returns the Gemini client from the given App.
-func GetGeminiClient(ctx context.Context, app *App) (*genai.Client, error) {
-	if app == nil {
-		return nil, fmt.Errorf("app required")
-	}
-	return app.Gemini(ctx)
-}
-
-// GetEffectiveModel returns the resolved model name for API calls.
-func GetEffectiveModel(app *App, configured string) string {
-	if app != nil {
-		return app.EffectiveModel(configured)
-	}
-	return configured
-}
-
 // MIMETypeJSON is the MIME type for JSON responses. Use with GenConfig.ResponseMIMEType
 // when requesting structured JSON from Gemini. For complex or conditional JSON, prefer
 // this with prompt-driven structure (and no ResponseSchema) over genai.Schema; see .cursorrules.

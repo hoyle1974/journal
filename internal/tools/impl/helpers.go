@@ -97,35 +97,6 @@ func formatKnowledgeNodes(ctx context.Context, env infra.ToolEnv, nodes []memory
 	return strings.Join(lines, "\n")
 }
 
-// formatEntries formats entries for LLM context (short form).
-func formatEntries(entries []memory.Entry) string {
-	var lines []string
-	for i, e := range entries {
-		content := e.Content
-		if len(content) > 200 {
-			content = content[:197] + "..."
-		}
-		ts := memory.TruncateTimestamp(e.Timestamp, memory.DateTimeDisplayLen)
-		if ts == "" {
-			ts = "(no date)"
-		}
-		src := ""
-		if e.Source != "" {
-			src = fmt.Sprintf(" (%s)", e.Source)
-		}
-		line := fmt.Sprintf("%d. [%s]%s %s", i+1, ts, src, content)
-		if e.ImageURL != "" {
-			if e.ParsedImageDescription != "" {
-				line += fmt.Sprintf(" [Attached Image: %s]", e.ParsedImageDescription)
-			} else {
-				line += " [Attached image]"
-			}
-		}
-		lines = append(lines, line)
-	}
-	return strings.Join(lines, "\n")
-}
-
 // formatQueriesForContext formats query history for LLM context using jot's formatter.
 func formatQueriesForContext(queries []memory.QueryLog) string {
 	return memory.FormatQueriesForContext(queries, 10000)

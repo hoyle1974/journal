@@ -20,19 +20,11 @@ import (
 )
 
 var (
-	defaultServer      *api.Server
-	defaultConfig      *config.Config
-	testConfigOverride *config.Config
-	serverOnce         sync.Once
-	serverInitErr      error
+	defaultServer *api.Server
+	defaultConfig *config.Config
+	serverOnce    sync.Once
+	serverInitErr error
 )
-
-func getConfig() *config.Config {
-	if testConfigOverride != nil {
-		return testConfigOverride
-	}
-	return defaultConfig
-}
 
 // InitDefaultApp loads config, initializes observability and the default infra.App.
 // Call from cmd/server or tests before using the API so startup fails fast on misconfiguration.
@@ -45,20 +37,6 @@ func InitDefaultApp(ctx context.Context) error {
 	}
 	infra.InitObservability(defaultConfig)
 	return infra.InitDefaultApp(ctx, defaultConfig, nil)
-}
-
-// SetTestConfig sets a config override for tests. Returns a restore func to call in defer.
-func SetTestConfig(cfg *config.Config) (restore func()) {
-	old := testConfigOverride
-	testConfigOverride = cfg
-	return func() { testConfigOverride = old }
-}
-
-// SetServer injects the server for tests or embedding. If set before the first JotAPI call,
-// that server is used and lazy initialization is skipped. Useful to avoid side effects when
-// testing or embedding the handler.
-func SetServer(s *api.Server) {
-	serverOnce.Do(func() { defaultServer = s })
 }
 
 func init() {
@@ -94,7 +72,7 @@ func ensureServer() error {
 		journalSvc := service.NewJournalService(app, defaultConfig)
 		memorySvc := service.NewMemoryService(app)
 		agentSvc := service.NewAgentService(app)
-		telegramSvc := service.NewTelegramService(getConfig)
+		telegramSvc := service.NewTelegramService(func() *config.Config { return defaultConfig })
 		systemSvc := service.NewSystemService(app)
 		defaultServer = api.NewServer(app, defaultConfig, infra.Logger, journalSvc, memorySvc, agentSvc, telegramSvc, systemSvc)
 	})
