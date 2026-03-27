@@ -59,10 +59,6 @@ func EntryAlreadyAddedUUID(ctx context.Context) string {
 	return ""
 }
 
-func withCurrentEntryUUID(ctx context.Context, entryUUID string) context.Context {
-	return WithCurrentEntryUUID(ctx, entryUUID)
-}
-
 // QueryResult represents the result of a query.
 type QueryResult struct {
 	Answer           string                   `json:"answer"`
@@ -110,7 +106,7 @@ func RunQueryFull(ctx context.Context, app FOHEnv, question, source string, debu
 	var entryUUID string
 	if existing := EntryAlreadyAddedUUID(ctx); existing != "" {
 		entryUUID = existing
-		ctx = withCurrentEntryUUID(ctx, entryUUID)
+		ctx = WithCurrentEntryUUID(ctx, entryUUID)
 		infra.LoggerFrom(ctx).Debug("FOH: using caller-provided entry (skip log)", "query_run_id", queryRunID, "phase", "start", "event", "query_start", "question", question, "entry_uuid", entryUUID, "source", source)
 	} else {
 	
@@ -120,7 +116,7 @@ func RunQueryFull(ctx context.Context, app FOHEnv, question, source string, debu
 			infra.LoggerFrom(ctx).Error("failed to log user input", "error", err)
 			return ErrQueryResult(fmt.Sprintf("Error saving input: %v", err), 0, debugLogs, nil)
 		}
-		ctx = withCurrentEntryUUID(ctx, entryUUID)
+		ctx = WithCurrentEntryUUID(ctx, entryUUID)
 		infra.LoggerFrom(ctx).Debug("FOH: user input logged as entry", "query_run_id", queryRunID, "phase", "start", "event", "query_start", "question", question, "entry_uuid", entryUUID, "source", source)
 	}
 
@@ -151,8 +147,6 @@ func RunQueryFull(ctx context.Context, app FOHEnv, question, source string, debu
 	var repeatedToolName string
 	var knowledgeGapDetected bool
 	var retrievedContent strings.Builder
-	searchToolCallCount := 0
-
 	resp, err := session.SendMessage(ctx, &genai.Part{Text: question})
 	if err != nil {
 		return ErrQueryResult(fmt.Sprintf("Error calling Gemini API: %v", infra.WrapLLMError(err)), 1, debugLogs, nil)
@@ -397,7 +391,6 @@ func RunQueryFull(ctx context.Context, app FOHEnv, question, source string, debu
 
 			if searchTools[r.fcName] {
 				searchToolCalled = true
-				searchToolCallCount++
 				retrievedContent.WriteString(r.result.Result)
 				retrievedContent.WriteString("\n\n")
 			}

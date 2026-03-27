@@ -136,21 +136,6 @@ func ParamInfosFromArgs(ptr any) []ParamInfo {
 	return out
 }
 
-// ParamNamesFromArgs returns JSON param names in order (for ToolSummary.ParamNames).
-// Optional params get "?" suffix for display.
-func ParamNamesFromArgs(ptr any) []string {
-	infos := ParamInfosFromArgs(ptr)
-	names := make([]string, 0, len(infos))
-	for _, p := range infos {
-		s := p.Name
-		if !p.Required {
-			s += "?"
-		}
-		names = append(names, s)
-	}
-	return names
-}
-
 // ApplyDefaults sets default values on the struct from the "default" tag.
 // Only supports string and int defaults; call after unmarshaling.
 func ApplyDefaults(ptr any) {

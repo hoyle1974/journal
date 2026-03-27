@@ -6,25 +6,9 @@ import (
 
 	"github.com/hoyle1974/memory"
 	"github.com/jackstrohm/jot/internal/agent"
-	"github.com/jackstrohm/jot/internal/api"
 	"github.com/jackstrohm/jot/internal/infra"
 	"github.com/jackstrohm/jot/pkg/utils"
 )
-
-func queryResultToAPI(r *agent.QueryResult) *api.QueryResult {
-	if r == nil {
-		return nil
-	}
-	return &api.QueryResult{
-		Answer:           r.Answer,
-		Iterations:       r.Iterations,
-		ToolCalls:        r.ToolCalls,
-		ForcedConclusion: r.ForcedConclusion,
-		Error:            r.Error,
-		DebugLogs:  r.DebugLogs,
-		DebugTrace: r.DebugTrace,
-	}
-}
 
 // AgentService handles agent and cron operations for the API.
 type AgentService struct {
@@ -58,16 +42,16 @@ func (a *AgentService) AddEntry(ctx context.Context, content, source string, tim
 }
 
 // RunQuery runs the query agent and returns the result.
-func (a *AgentService) RunQuery(ctx context.Context, question, source string) *api.QueryResult {
+func (a *AgentService) RunQuery(ctx context.Context, question, source string) *agent.QueryResult {
 	infra.LoggerFrom(ctx).Info("function call", "fn", "RunQuery", "source", source, "question_preview", utils.TruncateString(question, 80))
 	result := RunQuery(ctx, a.app, question, source)
 	infra.LoggerFrom(ctx).Info("function result", "fn", "RunQuery", "error", result.Error, "iterations", result.Iterations, "tool_call_count", len(result.ToolCalls), "answer_preview", utils.TruncateString(result.Answer, 100))
-	return queryResultToAPI(result)
+	return result
 }
 
 // ProcessAndRespond runs the unified synchronous pipeline for a user input:
 // save entry → refinery + task worker → 2-hop Loom RAG → FOH with native thinking.
-func (a *AgentService) ProcessAndRespond(ctx context.Context, input, source string) *api.QueryResult {
+func (a *AgentService) ProcessAndRespond(ctx context.Context, input, source string) *agent.QueryResult {
 	infra.LoggerFrom(ctx).Info("function call", "fn", "ProcessAndRespond", "source", source, "input_len", len(input))
 
 	// 1. Save entry (no enqueue — pipeline runs synchronously below).
@@ -75,7 +59,7 @@ func (a *AgentService) ProcessAndRespond(ctx context.Context, input, source stri
 	entryUUID, err := agent.AddEntryOnly(ctx, a.app, input, source, &ts, "")
 	if err != nil {
 		infra.LoggerFrom(ctx).Error("ProcessAndRespond: save entry failed", "error", err)
-		return queryResultToAPI(agent.ErrQueryResult("Error saving entry: "+err.Error(), 0, nil, nil))
+		return agent.ErrQueryResult("Error saving entry: "+err.Error(), 0, nil, nil)
 	}
 
 	// 2. Refinery + task worker (stages 2-3 only — entry already persisted by AddEntryOnly).
@@ -100,11 +84,11 @@ func (a *AgentService) ProcessAndRespond(ctx context.Context, input, source stri
 	infra.LoggerFrom(ctx).Info("function result", "fn", "ProcessAndRespond",
 		"error", result.Error, "iterations", result.Iterations,
 		"has_debug_trace", len(result.DebugTrace) > 0)
-	return queryResultToAPI(result)
+	return result
 }
 
 // RunDreamer runs the Dreamer background cycle and returns a summary of what was synthesised.
-func (a *AgentService) RunDreamer(ctx context.Context, force bool) (*api.DreamResult, error) {
+func (a *AgentService) RunDreamer(ctx context.Context, force bool) (*agent.DreamResult, error) {
 	infra.LoggerFrom(ctx).Info("function call", "fn", "RunDreamer", "force", force)
 	result, err := agent.RunDreamCycle(ctx, a.app, force)
 	if err != nil {
@@ -115,12 +99,7 @@ func (a *AgentService) RunDreamer(ctx context.Context, force bool) (*api.DreamRe
 		"skipped", result.Skipped,
 		"summary_uuid", result.SummaryUUID,
 		"question_count", len(result.Questions))
-	return &api.DreamResult{
-		SummaryUUID: result.SummaryUUID,
-		Questions:   result.Questions,
-		Skipped:     result.Skipped,
-		SkipReason:  result.SkipReason,
-	}, nil
+	return result, nil
 }
 
 // IngestGapAnswer creates a journal entry for a resolved gap question and runs the refinery.

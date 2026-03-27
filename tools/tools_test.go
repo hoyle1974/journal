@@ -377,25 +377,6 @@ func TestParamInfosFromArgs(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// ParamNamesFromArgs
-// ---------------------------------------------------------------------------
-
-func TestParamNamesFromArgs(t *testing.T) {
-	t.Run("required field has no suffix, optional has question mark", func(t *testing.T) {
-		names := ParamNamesFromArgs(&testPIArgs{})
-		if len(names) != 2 {
-			t.Fatalf("expected 2 names, got %d: %v", len(names), names)
-		}
-		if names[0] != "query" {
-			t.Errorf("names[0] = %q, want %q", names[0], "query")
-		}
-		if names[1] != "limit?" {
-			t.Errorf("names[1] = %q, want %q", names[1], "limit?")
-		}
-	})
-}
-
-// ---------------------------------------------------------------------------
 // ApplyDefaults
 // ---------------------------------------------------------------------------
 

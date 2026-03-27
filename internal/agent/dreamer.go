@@ -30,10 +30,10 @@ const (
 
 // DreamResult summarises the outcome of a single dream cycle.
 type DreamResult struct {
-	SummaryUUID string
-	Questions   []string
-	Skipped     bool
-	SkipReason  string
+	SummaryUUID string   `json:"summary_uuid,omitempty"`
+	Questions   []string `json:"questions,omitempty"`
+	Skipped     bool     `json:"skipped,omitempty"`
+	SkipReason  string   `json:"skip_reason,omitempty"`
 }
 
 // RunDreamCycle synthesises recent log entries into a summary node and enqueues
