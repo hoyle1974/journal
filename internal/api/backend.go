@@ -17,6 +17,7 @@ type SystemService interface {
 }
 
 // PendingQuestion is an unresolved question (returned by MemoryService.GetUnresolvedPendingQuestions).
+// Intentionally omits internal fields (Answer, ResolvedAt, AskCount, etc.) from memory.PendingQuestion.
 type PendingQuestion struct {
 	UUID           string   `json:"uuid"`
 	Question       string   `json:"question"`
@@ -26,34 +27,14 @@ type PendingQuestion struct {
 	CreatedAt      string   `json:"created_at"`
 }
 
-// QueryResult is the API response shape for a query (avoids api importing internal/agent).
-type QueryResult struct {
-	Answer           string                   `json:"answer"`
-	Iterations       int                      `json:"iterations"`
-	ToolCalls        []map[string]interface{} `json:"tool_calls,omitempty"`
-	ForcedConclusion bool                     `json:"forced_conclusion,omitempty"`
-	Error            bool                     `json:"error"`
-	DebugLogs  []string `json:"debug_logs,omitempty"`
-	DebugTrace []string `json:"debug_trace,omitempty"`
-}
-
-// Entry is the API shape for a journal entry (avoids api importing pkg/journal).
+// Entry is the API shape for a journal entry.
+// Intentionally omits internal fields (ParsedImageDescription, AudioURL, Transcription) from memory.Entry.
 type Entry struct {
 	UUID      string `json:"uuid"`
 	Content   string `json:"content"`
 	Source    string `json:"source"`
 	Timestamp string `json:"timestamp"`
 	ImageURL  string `json:"image_url,omitempty"`
-}
-
-// KnowledgeNode is the API shape for a knowledge node (avoids api importing pkg/memory).
-type KnowledgeNode struct {
-	UUID            string   `json:"uuid"`
-	Content         string   `json:"content"`
-	NodeType        string   `json:"node_type"`
-	Metadata        string   `json:"metadata"`
-	Timestamp       string   `json:"timestamp"`
-	JournalEntryIDs []string `json:"journal_entry_ids,omitempty"`
 }
 
 // JournalService provides journal and entry operations for HTTP handlers.
@@ -73,21 +54,13 @@ type MemoryService interface {
 	ResolvePendingQuestion(ctx context.Context, id, answer string) error
 }
 
-// DreamResult is the API response shape for a dream cycle.
-type DreamResult struct {
-	SummaryUUID string   `json:"summary_uuid,omitempty"`
-	Questions   []string `json:"questions,omitempty"`
-	Skipped     bool     `json:"skipped,omitempty"`
-	SkipReason  string   `json:"skip_reason,omitempty"`
-}
-
 // AgentService provides agent and cron operations for HTTP handlers.
 type AgentService interface {
 	AddEntry(ctx context.Context, content, source string, timestamp *string, imageBytes []byte) (string, error)
-	RunQuery(ctx context.Context, question, source string) *QueryResult
+	RunQuery(ctx context.Context, question, source string) *agent.QueryResult
 	ProcessLogSequential(ctx context.Context, logUUID, logContent, timestamp, source string) (*agent.ProcessEntryReport, error)
-	ProcessAndRespond(ctx context.Context, input, source string) *QueryResult
-	RunDreamer(ctx context.Context, force bool) (*DreamResult, error)
+	ProcessAndRespond(ctx context.Context, input, source string) *agent.QueryResult
+	RunDreamer(ctx context.Context, force bool) (*agent.DreamResult, error)
 	IngestGapAnswer(ctx context.Context, question, answer string)
 }
 
