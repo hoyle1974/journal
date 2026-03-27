@@ -103,54 +103,6 @@ func MapToTypedArgs(tool *Tool, arguments map[string]interface{}) (any, error) {
 	return ptr, nil
 }
 
-// ParamInfo describes a single parameter for discovery/formatting.
-type ParamInfo struct {
-	Name        string
-	Required    bool
-	Description string
-}
-
-// ParamInfosFromArgs returns param name, required, and description from a pointer-to-struct.
-func ParamInfosFromArgs(ptr any) []ParamInfo {
-	t := reflect.TypeOf(ptr)
-	if t.Kind() == reflect.Ptr {
-		t = t.Elem()
-	}
-	if t.Kind() != reflect.Struct {
-		return nil
-	}
-	var out []ParamInfo
-	for i := 0; i < t.NumField(); i++ {
-		field := t.Field(i)
-		jsonTag := field.Tag.Get("json")
-		if jsonTag == "" || jsonTag == "-" {
-			continue
-		}
-		name := strings.Split(jsonTag, ",")[0]
-		out = append(out, ParamInfo{
-			Name:        name,
-			Required:    field.Tag.Get("required") == "true",
-			Description: field.Tag.Get("description"),
-		})
-	}
-	return out
-}
-
-// ParamNamesFromArgs returns JSON param names in order (for ToolSummary.ParamNames).
-// Optional params get "?" suffix for display.
-func ParamNamesFromArgs(ptr any) []string {
-	infos := ParamInfosFromArgs(ptr)
-	names := make([]string, 0, len(infos))
-	for _, p := range infos {
-		s := p.Name
-		if !p.Required {
-			s += "?"
-		}
-		names = append(names, s)
-	}
-	return names
-}
-
 // ApplyDefaults sets default values on the struct from the "default" tag.
 // Only supports string and int defaults; call after unmarshaling.
 func ApplyDefaults(ptr any) {

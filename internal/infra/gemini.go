@@ -193,7 +193,7 @@ func GenerateContentSimple(ctx context.Context, env ToolEnv, systemPrompt, userP
 		LoggerFrom(ctx).Error("gemini generation failed", "error", err)
 		return "", WrapLLMError(fmt.Errorf("Gemini API error: %w", err))
 	}
-	text := strings.TrimSpace(extractTextFromResponse(resp))
+	text := strings.TrimSpace(ExtractTextFromResponse(resp))
 	return text, nil
 }
 
@@ -231,7 +231,7 @@ func GenerateImageCaption(ctx context.Context, env ToolEnv, imageBytes []byte, m
 		LoggerFrom(ctx).Error("image caption generation failed", "error", err)
 		return "", WrapLLMError(fmt.Errorf("Gemini image caption: %w", err))
 	}
-	generated := strings.TrimSpace(extractTextFromResponse(resp))
+	generated := strings.TrimSpace(ExtractTextFromResponse(resp))
 	// Combine user caption (if any) and generated description for journal and FOH.
 	var combined strings.Builder
 	if strings.TrimSpace(userCaption) != "" {
@@ -269,18 +269,11 @@ func TranscribeAudio(ctx context.Context, env ToolEnv, audioBytes []byte, cfg *c
 		LoggerFrom(ctx).Error("audio transcription failed", "error", err)
 		return "", WrapLLMError(fmt.Errorf("Gemini transcription: %w", err))
 	}
-	transcript := strings.TrimSpace(extractTextFromResponse(resp))
+	transcript := strings.TrimSpace(ExtractTextFromResponse(resp))
 	if transcript == "" {
 		transcript = "[inaudible]"
 	}
 	return transcript, nil
-}
-
-func extractTextFromResponse(resp *genai.GenerateContentResponse) string {
-	if resp == nil {
-		return ""
-	}
-	return resp.Text()
 }
 
 // EmbedTaskRetrievalQuery is the task type for retrieval queries (text-embedding-005).

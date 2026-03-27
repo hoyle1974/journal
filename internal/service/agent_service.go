@@ -60,7 +60,7 @@ func (a *AgentService) AddEntry(ctx context.Context, content, source string, tim
 // RunQuery runs the query agent and returns the result.
 func (a *AgentService) RunQuery(ctx context.Context, question, source string) *api.QueryResult {
 	infra.LoggerFrom(ctx).Info("function call", "fn", "RunQuery", "source", source, "question_preview", utils.TruncateString(question, 80))
-	result := RunQuery(ctx, a.app, question, source)
+	result := agent.RunQueryWithDebug(ctx, a.app, question, source, false)
 	infra.LoggerFrom(ctx).Info("function result", "fn", "RunQuery", "error", result.Error, "iterations", result.Iterations, "tool_call_count", len(result.ToolCalls), "answer_preview", utils.TruncateString(result.Answer, 100))
 	return queryResultToAPI(result)
 }

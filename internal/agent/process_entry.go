@@ -58,39 +58,12 @@ func ProcessLogSequential(ctx context.Context, app *infra.App, logUUID, logConte
 	}
 	infra.LoggerFrom(ctx).Info("loom stage 1 done: log node persisted", "log_uuid", logUUID)
 
-	// ── Stage 2: Refinery ─────────────────────────────────────────────────────
-	infra.LoggerFrom(ctx).Debug("loom stage 2: refinery", "log_uuid", logUUID)
-	var extractedNodeIDs []string
-	nodeIDs, refineryErr := runRefineryPipeline(ctx, app, logUUID, logContent)
-	if refineryErr != nil {
-		infra.LoggerFrom(ctx).Warn("loom stage 2 FAILED: refinery pipeline error — pipeline continues",
-			"log_uuid", logUUID, "error", refineryErr)
-	} else {
-		extractedNodeIDs = nodeIDs
-		infra.LoggerFrom(ctx).Info("loom stage 2 done: refinery complete",
-			"log_uuid", logUUID, "node_count", len(extractedNodeIDs))
-	}
-
-	// ── Stage 3: Task Worker ──────────────────────────────────────────────────
-	// Pass the log UUID as the initial object ID set so tasks backlink to this entry.
-	infra.LoggerFrom(ctx).Debug("loom stage 3: task worker", "log_uuid", logUUID)
-	taskErr := runTaskWorker(ctx, app, logContent, []string{logUUID})
-	if taskErr != nil {
-		infra.LoggerFrom(ctx).Warn("loom stage 3 FAILED: task worker error",
-			"log_uuid", logUUID,
-			"error", taskErr,
-		)
-	} else {
-		infra.LoggerFrom(ctx).Info("loom stage 3 done: task worker complete", "log_uuid", logUUID)
-	}
-
-	// Stage 4 removed — FOH+thinking replaces response worker
+	// ── Stages 2 & 3: Refinery + Task Worker ─────────────────────────────────
+	extractedNodeIDs, _ := ProcessEntrySyncPipeline(ctx, app, logUUID, logContent, source)
 
 	infra.LoggerFrom(ctx).Info("loom pipeline complete",
 		"event", "loom_done",
 		"log_uuid", logUUID,
-		"stage2_ok", refineryErr == nil,
-		"stage3_ok", taskErr == nil,
 	)
 
 	return &ProcessEntryReport{
@@ -109,12 +82,26 @@ func ProcessEntrySyncPipeline(ctx context.Context, app *infra.App, logUUID, logC
 	if app == nil || app.Config() == nil {
 		return nil, fmt.Errorf("ProcessEntrySyncPipeline: app or config is nil")
 	}
+
+	// ── Stage 2: Refinery ─────────────────────────────────────────────────────
+	infra.LoggerFrom(ctx).Debug("loom stage 2: refinery", "log_uuid", logUUID)
 	nodeIDs, refineryErr := runRefineryPipeline(ctx, app, logUUID, logContent)
 	if refineryErr != nil {
-		infra.LoggerFrom(ctx).Warn("sync pipeline: refinery failed", "log_uuid", logUUID, "error", refineryErr)
+		infra.LoggerFrom(ctx).Warn("loom stage 2 FAILED: refinery pipeline error — pipeline continues",
+			"log_uuid", logUUID, "error", refineryErr)
+	} else {
+		infra.LoggerFrom(ctx).Info("loom stage 2 done: refinery complete",
+			"log_uuid", logUUID, "node_count", len(nodeIDs))
 	}
+
+	// ── Stage 3: Task Worker ──────────────────────────────────────────────────
+	infra.LoggerFrom(ctx).Debug("loom stage 3: task worker", "log_uuid", logUUID)
 	if taskErr := runTaskWorker(ctx, app, logContent, []string{logUUID}); taskErr != nil {
-		infra.LoggerFrom(ctx).Warn("sync pipeline: task worker failed", "log_uuid", logUUID, "error", taskErr)
+		infra.LoggerFrom(ctx).Warn("loom stage 3 FAILED: task worker error",
+			"log_uuid", logUUID, "error", taskErr)
+	} else {
+		infra.LoggerFrom(ctx).Info("loom stage 3 done: task worker complete", "log_uuid", logUUID)
 	}
+
 	return nodeIDs, nil
 }

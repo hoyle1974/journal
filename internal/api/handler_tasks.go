@@ -212,7 +212,7 @@ func handleProcessTelegramQuery(s *Server, w http.ResponseWriter, r *http.Reques
 // [SEND_IMAGE:<uuid>] sentinel, the image is fetched from GCS and sent via sendPhoto;
 // the remaining text (caption) is sent alongside it. Falls back to sendMessage on error.
 func sendTelegramResponse(ctx context.Context, s *Server, chatID int64, response string) error {
-	entryUUID, caption, hasImage := parseSentinel(response)
+	entryUUID, caption, hasImage := utils.ParseImageSentinel(response)
 	if !hasImage {
 		if err := s.Telegram.SendMessage(ctx, chatID, response); err != nil {
 			infra.LoggerFrom(ctx).Error("process-telegram-query: send reply failed", "chat_id", chatID, "error", err)
@@ -244,27 +244,6 @@ func sendTelegramResponse(ctx context.Context, s *Server, chatID int64, response
 	}
 	infra.LoggerFrom(ctx).Info("process-telegram-query: photo sent", "chat_id", chatID, "entry_uuid", entryUUID, "bytes", len(imageBytes))
 	return nil
-}
-
-// parseSentinel extracts an image sentinel [SEND_IMAGE:<uuid>] from a response string.
-// Returns the entry UUID, the remaining caption text (sentinel stripped), and whether a sentinel was found.
-func parseSentinel(response string) (entryUUID, caption string, ok bool) {
-	const prefix = "[SEND_IMAGE:"
-	start := strings.Index(response, prefix)
-	if start < 0 {
-		return "", "", false
-	}
-	end := strings.Index(response[start:], "]")
-	if end < 0 {
-		return "", "", false
-	}
-	end += start
-	entryUUID = strings.TrimSpace(response[start+len(prefix) : end])
-	if entryUUID == "" {
-		return "", "", false
-	}
-	caption = strings.TrimSpace(response[:start] + response[end+1:])
-	return entryUUID, caption, true
 }
 
 // sendFallback sends the caption as a plain text message (used when image delivery fails).

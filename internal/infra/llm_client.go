@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
-	"strings"
 
 	"github.com/jackstrohm/jot/pkg/utils"
 	"google.golang.org/genai"
@@ -30,11 +29,6 @@ type LLMRequest struct {
 	Model          string // empty = use app default
 	GenConfig      *GenConfig
 	ResponseSchema *genai.Schema // optional JSON schema for response
-}
-
-// genLLMCorrelationID returns a short hex ID to correlate one LLM request with its response and metrics.
-func genLLMCorrelationID() string {
-	return GenShortRunID()
 }
 
 // GenShortRunID returns an 8-character hex ID for correlating logs across a single run (e.g. one query or one dreamer pass).
@@ -92,37 +86,6 @@ func LogLLMResponse(ctx context.Context, llmCorrelationID string, resp *genai.Ge
 		attrs = append(attrs, slog.String("response_type", "tool_calls_only"))
 	}
 	LoggerFrom(ctx).Debug("LLM_RAW_RESPONSE", attrs...)
-}
-
-func formatPartsForLog(parts []*genai.Part) string {
-	var b strings.Builder
-	for _, p := range parts {
-		if p == nil {
-			continue
-		}
-		if p.Text != "" {
-			b.WriteString(p.Text)
-			continue
-		}
-		if p.FunctionCall != nil {
-			b.WriteString(fmt.Sprintf("[function_call: %s]", p.FunctionCall.Name))
-			continue
-		}
-		if p.FunctionResponse != nil {
-			b.WriteString(fmt.Sprintf("[tool_result: %s]", p.FunctionResponse.Name))
-			if len(p.FunctionResponse.Response) > 0 {
-				b.WriteString(" ")
-				b.WriteString(fmt.Sprintf("%v", p.FunctionResponse.Response))
-			}
-			continue
-		}
-		if p.InlineData != nil {
-			b.WriteString("[image]")
-			continue
-		}
-		b.WriteString("[part]")
-	}
-	return b.String()
 }
 
 // Dispatch runs a single-shot LLM call through the central choke point: logs request (DEBUG), calls Gemini, logs response (DEBUG).
@@ -195,9 +158,9 @@ func (a *App) Dispatch(ctx context.Context, req *LLMRequest) (*genai.GenerateCon
 	if len(requestContext) > 0 {
 		requestContext += "\n\n"
 	}
-	requestContext += formatPartsForLog(req.Parts)
+	requestContext += formatPartsToText(req.Parts)
 	hasTools := len(req.Tools) > 0
-	llmID := genLLMCorrelationID()
+	llmID := GenShortRunID()
 	LogLLMRequest(ctx, llmID, modelName, requestContext, hasTools)
 
 	sanitized := make([]*genai.Part, len(req.Parts))

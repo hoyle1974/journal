@@ -6,11 +6,42 @@ import (
 	"fmt"
 	"math/rand"
 	"net/url"
+	"regexp"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
 )
+
+// imageSentinelRE matches the [SEND_IMAGE:<uuid>] sentinel inserted by the FOH answer.
+var imageSentinelRE = regexp.MustCompile(`\[SEND_IMAGE:[^\]]+\]`)
+
+// ParseImageSentinel extracts the first [SEND_IMAGE:<uuid>] sentinel from response.
+// Returns the entry UUID, the remaining caption text (sentinel stripped), and whether one was found.
+func ParseImageSentinel(response string) (entryUUID, caption string, found bool) {
+	const prefix = "[SEND_IMAGE:"
+	start := strings.Index(response, prefix)
+	if start < 0 {
+		return "", "", false
+	}
+	end := strings.Index(response[start:], "]")
+	if end < 0 {
+		return "", "", false
+	}
+	end += start
+	entryUUID = strings.TrimSpace(response[start+len(prefix) : end])
+	if entryUUID == "" {
+		return "", "", false
+	}
+	caption = strings.TrimSpace(response[:start] + response[end+1:])
+	return entryUUID, caption, true
+}
+
+// SanitizeImageSentinels replaces all [SEND_IMAGE:<uuid>] sentinels with [Photo sent]
+// so stored query logs don't confuse the LLM when they appear in conversation context.
+func SanitizeImageSentinels(s string) string {
+	return strings.TrimSpace(imageSentinelRE.ReplaceAllString(s, "[Photo sent]"))
+}
 
 // TruncateToMaxBytes truncates s to at most maxBytes bytes, never cutting a multi-byte rune in half.
 func TruncateToMaxBytes(s string, maxBytes int) string {

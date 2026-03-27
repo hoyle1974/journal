@@ -3,22 +3,12 @@ package agent
 import (
 	"context"
 	"fmt"
-	"regexp"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackstrohm/jot/internal/infra"
+	"github.com/jackstrohm/jot/pkg/utils"
 )
-
-var imageSentinelRE = regexp.MustCompile(`\[SEND_IMAGE:[^\]]+\]`)
-
-// sanitizeAnswerForLog replaces image-delivery sentinels with a human-readable placeholder
-// so the stored query log doesn't confuse the LLM when it appears in recent-conversation context.
-func sanitizeAnswerForLog(answer string) string {
-	replaced := imageSentinelRE.ReplaceAllString(answer, "[Photo sent]")
-	return strings.TrimSpace(replaced)
-}
 
 // AddEntryAndEnqueue adds the entry to the journal and enqueues process-entry (or runs it inline if enqueue fails). Returns entry UUID.
 // imageURL is optional (e.g. gs://bucket/path); pass "" when no image.
@@ -71,7 +61,7 @@ func EnqueueSaveQuery(ctx context.Context, app *infra.App, question, answer, sou
 	parentTraceID := infra.TraceIDFromContext(ctx)
 	return app.EnqueueTask(ctx, "/internal/save-query", map[string]interface{}{
 		"question":        question,
-		"answer":          sanitizeAnswerForLog(answer),
+		"answer":          utils.SanitizeImageSentinels(answer),
 		"source":          source,
 		"is_gap":          isGap,
 		"task_id":         taskID,

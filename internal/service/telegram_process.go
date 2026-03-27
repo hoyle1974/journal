@@ -173,7 +173,7 @@ func processQueryTelegram(ctx context.Context, app *infra.App, query string, cha
 	if app == nil {
 		return "Service unavailable. Please try again later."
 	}
-	result := RunQuery(ctx, app, query, "telegram")
+	result := agent.RunQueryWithDebug(ctx, app, query, "telegram", false)
 	if result.Error {
 		infra.LoggerFrom(ctx).Error("telegram query failed", "answer", result.Answer)
 		return "Sorry, I couldn't process your query. Please try again."

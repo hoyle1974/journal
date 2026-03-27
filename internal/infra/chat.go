@@ -167,7 +167,7 @@ func sanitizeParts(parts []*genai.Part) []*genai.Part {
 // SendMessage sends a message and returns the response.
 // Before the call it collects context telemetry (token counts by category); after the call it logs a single LLM_CONTEXT_AUDIT line.
 func (cs *ChatSession) SendMessage(ctx context.Context, parts ...*genai.Part) (*genai.GenerateContentResponse, error) {
-	llmID := genLLMCorrelationID()
+	llmID := GenShortRunID()
 	sanitized := sanitizeParts(parts)
 	inputSizeBytes := estimatePartsSize(sanitized)
 
@@ -233,7 +233,8 @@ func estimatePartsSize(parts []*genai.Part) int {
 	return n
 }
 
-// formatPartsToText returns a single string for logging: text parts concatenated, function calls/responses summarized (no tool defs).
+// formatPartsToText returns a single string for logging: text parts concatenated, function calls/responses
+// summarized, inline data noted. Tool definitions are excluded. Used by both chat and single-shot dispatch.
 func formatPartsToText(parts []*genai.Part) string {
 	var b strings.Builder
 	for _, p := range parts {
@@ -258,6 +259,10 @@ func formatPartsToText(parts []*genai.Part) string {
 				}
 				b.WriteString(preview)
 			}
+			continue
+		}
+		if p.InlineData != nil {
+			b.WriteString("[image]")
 			continue
 		}
 		b.WriteString("[part]")

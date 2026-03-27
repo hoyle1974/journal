@@ -345,57 +345,6 @@ func TestMapToTypedArgs(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// ParamInfosFromArgs
-// ---------------------------------------------------------------------------
-
-type testPIArgs struct {
-	Query  string `json:"query" required:"true" description:"Search query"`
-	Limit  int    `json:"limit" description:"Max results"`
-	Hidden string `json:"-"`
-	NoTag  string
-}
-
-func TestParamInfosFromArgs(t *testing.T) {
-	t.Run("returns only json-tagged non-dash fields", func(t *testing.T) {
-		infos := ParamInfosFromArgs(&testPIArgs{})
-		if len(infos) != 2 {
-			t.Fatalf("expected 2 params, got %d: %+v", len(infos), infos)
-		}
-		if infos[0].Name != "query" || !infos[0].Required || infos[0].Description != "Search query" {
-			t.Errorf("first param unexpected: %+v", infos[0])
-		}
-		if infos[1].Name != "limit" || infos[1].Required || infos[1].Description != "Max results" {
-			t.Errorf("second param unexpected: %+v", infos[1])
-		}
-	})
-
-	t.Run("non-struct input returns nil", func(t *testing.T) {
-		if got := ParamInfosFromArgs("not a struct"); got != nil {
-			t.Errorf("expected nil, got %v", got)
-		}
-	})
-}
-
-// ---------------------------------------------------------------------------
-// ParamNamesFromArgs
-// ---------------------------------------------------------------------------
-
-func TestParamNamesFromArgs(t *testing.T) {
-	t.Run("required field has no suffix, optional has question mark", func(t *testing.T) {
-		names := ParamNamesFromArgs(&testPIArgs{})
-		if len(names) != 2 {
-			t.Fatalf("expected 2 names, got %d: %v", len(names), names)
-		}
-		if names[0] != "query" {
-			t.Errorf("names[0] = %q, want %q", names[0], "query")
-		}
-		if names[1] != "limit?" {
-			t.Errorf("names[1] = %q, want %q", names[1], "limit?")
-		}
-	})
-}
-
-// ---------------------------------------------------------------------------
 // ApplyDefaults
 // ---------------------------------------------------------------------------
 
