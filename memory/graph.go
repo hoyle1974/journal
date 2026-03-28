@@ -149,6 +149,7 @@ func (sg *SubGraph) writeEntitiesAndRelationships(sb *strings.Builder) {
 		if n.SignificanceWeight > 0 {
 			label += fmt.Sprintf(" (sig:%.1f)", n.SignificanceWeight)
 		}
+		label += fmt.Sprintf(" (ID: %s)", uuid)
 		if sg.SeedUUIDs[uuid] {
 			label += " ★"
 		}
@@ -157,6 +158,8 @@ func (sg *SubGraph) writeEntitiesAndRelationships(sb *strings.Builder) {
 
 	sb.WriteString("\n## Relationships\n")
 	seenRel := make(map[string]bool)
+
+	// Render reified relationship nodes (SPO triples).
 	for uuid, n := range sg.Nodes {
 		if n.NodeType != NodeTypeRelationship {
 			continue
@@ -183,6 +186,23 @@ func (sg *SubGraph) writeEntitiesAndRelationships(sb *strings.Builder) {
 		fmt.Fprintln(sb, line)
 	}
 
+	// Also render structural edges (entity_link, incoming_link, etc.) from sg.Edges.
+	for _, e := range sg.Edges {
+		key := e.SourceUUID + "|" + e.Predicate + "|" + e.TargetUUID
+		if seenRel[key] {
+			continue
+		}
+		seenRel[key] = true
+		srcLabel := e.SourceUUID
+		if src, ok := sg.Nodes[e.SourceUUID]; ok {
+			srcLabel = nodeLabel(src)
+		}
+		tgtLabel := e.TargetUUID
+		if tgt, ok := sg.Nodes[e.TargetUUID]; ok {
+			tgtLabel = nodeLabel(tgt)
+		}
+		fmt.Fprintf(sb, "* %s -[%s]-> %s\n", srcLabel, e.Predicate, tgtLabel)
+	}
 }
 
 // pruneCandidates returns the top-maxK candidates sorted by cosine similarity to

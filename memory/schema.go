@@ -321,10 +321,14 @@ func normalizeProjectGoal(m map[string]any) (map[string]any, error) {
 		pid = getString(m, "parent_goal_id")
 	}
 	if pid == "" {
+		pid = getString(m, "project_id")
+	}
+	if pid == "" {
 		pid = getString(m, "project_uuid")
 	}
 	if pid != "" {
 		out["parent_goal"] = pid
+		out["project_id"] = pid
 		out["project_uuid"] = pid
 	}
 	s := getString(m, "status")
