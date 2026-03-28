@@ -33,8 +33,17 @@ func relationshipContent(subjectContent, predicate, objectContent, subjectID, ob
 	return fmt.Sprintf("%s %s %s", sub, predicate, obj)
 }
 
-// EnsureNode returns an existing entity node by deterministic key or creates one.
-// This prevents duplicate nodes under concurrent ingest.
+// entitySimilarityThreshold is the maximum cosine distance at which two entity names
+// are considered semantically equivalent during EnsureNode resolution.
+const entitySimilarityThreshold = 0.15
+
+// EnsureNode returns an existing entity node by semantic or deterministic key, or creates one.
+// Resolution order:
+//  1. Vector search by node_type within entitySimilarityThreshold — catches name variants.
+//  2. SHA1 doc ID fast path (exact string match via deterministic key).
+//  3. name_key exact match (backfill for pre-existing nodes).
+//  4. Create new node if none of the above match.
+//
 // ts is the source timestamp to anchor the node historically; if empty, time.Now() is used.
 func (s *Store) EnsureNode(ctx context.Context, identifier, nodeType, sourceEntryID, ts string) (*KnowledgeNode, error) {
 	cleanIdentifier := strings.TrimSpace(identifier)
@@ -45,6 +54,25 @@ func (s *Store) EnsureNode(ctx context.Context, identifier, nodeType, sourceEntr
 		nodeType = NodeTypePerson
 	}
 
+	// Step 1: generate embedding upfront for semantic search and potential creation.
+	vector, embErr := s.embedder.GenerateEmbedding(ctx, cleanIdentifier, EmbedTaskRetrievalDocument)
+	if embErr != nil {
+		return nil, fmt.Errorf("ensure node embedding: %w", embErr)
+	}
+
+	// Step 2: semantic search — return an existing node if a near-match exists for this type.
+	nearest, err := s.FindNearestByType(ctx, vector, nodeType, entitySimilarityThreshold)
+	if err == nil && nearest != nil {
+		s.log.Debug("ensure node: semantic match", "input", cleanIdentifier, "matched", nearest.Content, "uuid", nearest.UUID)
+		if sourceEntryID != "" {
+			_, _ = s.db.Collection(KnowledgeCollection).Doc(nearest.UUID).Update(ctx, []firestore.Update{
+				{Path: "journal_entry_ids", Value: firestore.ArrayUnion(sourceEntryID)},
+			})
+		}
+		return nearest, nil
+	}
+
+	// Step 3: fall through to SHA1 / name_key / create via transaction.
 	docID := stableEntityDocID(nodeType, cleanIdentifier)
 	if looksLikeEntityDocID(cleanIdentifier) {
 		docID = cleanIdentifier
@@ -70,18 +98,15 @@ func (s *Store) EnsureNode(ctx context.Context, identifier, nodeType, sourceEntr
 			return fmt.Errorf("ensure node: entity id not found: %s", cleanIdentifier)
 		}
 
-		vector, embErr := s.embedder.GenerateEmbedding(ctx, cleanIdentifier, EmbedTaskRetrievalDocument)
-		if embErr != nil {
-			return fmt.Errorf("ensure node embedding: %w", embErr)
-		}
-		if ts == "" {
-			ts = time.Now().Format(time.RFC3339)
+		nodeTS := ts
+		if nodeTS == "" {
+			nodeTS = time.Now().Format(time.RFC3339)
 		}
 		data := map[string]any{
 			"content":             cleanIdentifier,
 			"name_key":            strings.ToLower(cleanIdentifier),
 			"node_type":           nodeType,
-			"timestamp":           ts,
+			"timestamp":           nodeTS,
 			"significance_weight": 0.55,
 			"embedding":           firestore.Vector32(vector),
 		}
@@ -115,21 +140,47 @@ func (s *Store) EnsureNode(ctx context.Context, identifier, nodeType, sourceEntr
 	return out, nil
 }
 
-// CreateRelationshipNode creates a reified relationship node with its own embedding.
+// stableRelID returns a deterministic document ID for a (subject, predicate, object) triple.
+// Using a stable ID ensures that re-observing the same relationship upserts rather than duplicates.
+func stableRelID(subjectID, predicate, objectID string) string {
+	key := subjectID + ":" + predicate + ":" + objectID
+	sum := sha1.Sum([]byte(key))
+	return "rel_" + hex.EncodeToString(sum[:])
+}
+
+// CreateRelationshipNode creates or updates a reified relationship node with its own embedding.
+// The document ID is derived deterministically from (subjectID, predicate, objectID), so
+// re-observing the same triple appends to journal_entry_ids rather than creating a duplicate edge.
 // ts is the source timestamp to anchor the relationship historically; if empty, time.Now() is used.
 func (s *Store) CreateRelationshipNode(ctx context.Context, subjectID, predicate, objectID, sourceEntryID, subjectContent, objectContent, ts string) (string, error) {
 	predicate = NormalizedPredicate(predicate)
 	if subjectID == "" || objectID == "" || predicate == "" {
 		return "", fmt.Errorf("create relationship: subject, predicate, object required")
 	}
-	content := relationshipContent(subjectContent, predicate, objectContent, subjectID, objectID)
-	vector, err := s.embedder.GenerateEmbedding(ctx, content, EmbedTaskRetrievalDocument)
-	if err != nil {
-		return "", fmt.Errorf("create relationship embedding: %w", err)
+
+	relID := stableRelID(subjectID, predicate, objectID)
+	ref := s.db.Collection(KnowledgeCollection).Doc(relID)
+
+	// If the edge already exists, just append the source entry and return.
+	doc, err := ref.Get(ctx)
+	if err == nil && doc.Exists() {
+		if sourceEntryID != "" {
+			_, _ = ref.Update(ctx, []firestore.Update{
+				{Path: "journal_entry_ids", Value: firestore.ArrayUnion(sourceEntryID)},
+			})
+		}
+		return relID, nil
 	}
-	uuid := generateUUID()
-	if ts == "" {
-		ts = time.Now().Format(time.RFC3339)
+
+	content := relationshipContent(subjectContent, predicate, objectContent, subjectID, objectID)
+	vector, embErr := s.embedder.GenerateEmbedding(ctx, content, EmbedTaskRetrievalDocument)
+	if embErr != nil {
+		return "", fmt.Errorf("create relationship embedding: %w", embErr)
+	}
+
+	relTS := ts
+	if relTS == "" {
+		relTS = time.Now().Format(time.RFC3339)
 	}
 	data := map[string]any{
 		"content":             content,
@@ -137,9 +188,9 @@ func (s *Store) CreateRelationshipNode(ctx context.Context, subjectID, predicate
 		"predicate":           predicate,
 		"subject_uuid":        subjectID,
 		"object_uuid":         objectID,
-		"source_entry_uuid":     sourceEntryID,
+		"source_entry_uuid":   sourceEntryID,
 		"entity_links":        []string{subjectID, objectID},
-		"timestamp":           ts,
+		"timestamp":           relTS,
 		"domain":              "relationship",
 		"significance_weight": 0.8,
 		"embedding":           firestore.Vector32(vector),
@@ -147,8 +198,8 @@ func (s *Store) CreateRelationshipNode(ctx context.Context, subjectID, predicate
 	if sourceEntryID != "" {
 		data["journal_entry_ids"] = []string{sourceEntryID}
 	}
-	if _, err := s.db.Collection(KnowledgeCollection).Doc(uuid).Set(ctx, data); err != nil {
+	if _, err := ref.Set(ctx, data); err != nil {
 		return "", fmt.Errorf("create relationship set: %w", err)
 	}
-	return uuid, nil
+	return relID, nil
 }

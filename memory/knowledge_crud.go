@@ -86,6 +86,30 @@ func (s *Store) FindNearestWithThreshold(ctx context.Context, queryVector []floa
 	return n, nil
 }
 
+// FindNearestByType returns the single nearest knowledge node of the given node_type within distanceThreshold, else nil.
+func (s *Store) FindNearestByType(ctx context.Context, queryVector []float32, nodeType string, distanceThreshold float64) (*KnowledgeNode, error) {
+	vectorQuery := s.db.Collection(KnowledgeCollection).
+		Where("node_type", "==", nodeType).
+		FindNearest("embedding", firestore.Vector32(queryVector), 1, firestore.DistanceMeasureCosine,
+			&firestore.FindNearestOptions{DistanceThreshold: &distanceThreshold})
+	iter := vectorQuery.Documents(ctx)
+	doc, err := iter.Next()
+	iter.Stop()
+	if err != nil || doc == nil {
+		return nil, nil
+	}
+	data := doc.Data()
+	n := &KnowledgeNode{
+		UUID:            doc.Ref.ID,
+		Content:         getStringField(data, "content"),
+		NodeType:        getStringField(data, "node_type"),
+		Metadata:        getStringField(data, "metadata"),
+		Timestamp:       getStringField(data, "timestamp"),
+		JournalEntryIDs: getStringSliceField(data, "journal_entry_ids"),
+	}
+	return n, nil
+}
+
 // AppendJournalEntryIDsToNode merges entryIDs into the node's journal_entry_ids (deduped) and updates the document.
 func (s *Store) AppendJournalEntryIDsToNode(ctx context.Context, nodeUUID string, entryIDs []string) error {
 	if len(entryIDs) == 0 {
