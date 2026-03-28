@@ -307,8 +307,8 @@ func registerKnowledgeTools() {
 					continue
 				}
 				entryContent := e.Content
-				if len(entryContent) > 200 {
-					entryContent = entryContent[:197] + "..."
+				if len([]rune(entryContent)) > 200 {
+					entryContent = utils.TruncateString(entryContent, 197) + "..."
 				}
 				entryTs := memory.TruncateTimestamp(e.Timestamp, memory.DateTimeDisplayLen)
 				if entryTs == "" {

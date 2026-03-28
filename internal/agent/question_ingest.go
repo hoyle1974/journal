@@ -33,7 +33,7 @@ func IngestQuestionAnswer(ctx context.Context, app *infra.App, q memory.PendingQ
 	}
 	log.Info("question ingest: entry created", "question_uuid", q.UUID, "entry_uuid", entryUUID)
 
-	if _, err := ProcessEntrySyncPipeline(ctx, app, entryUUID, text, "dreamer"); err != nil {
+	if _, err := ProcessEntrySyncPipeline(ctx, app, entryUUID, text, "dreamer", ts); err != nil {
 		log.Warn("question ingest: refinery pipeline failed", "question_uuid", q.UUID, "entry_uuid", entryUUID, "error", err)
 	}
 }

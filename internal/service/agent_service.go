@@ -63,7 +63,7 @@ func (a *AgentService) ProcessAndRespond(ctx context.Context, input, source stri
 	}
 
 	// 2. Refinery + task worker (stages 2-3 only — entry already persisted by AddEntryOnly).
-	nodeIDs, err := agent.ProcessEntrySyncPipeline(ctx, a.app, entryUUID, input, source)
+	nodeIDs, err := agent.ProcessEntrySyncPipeline(ctx, a.app, entryUUID, input, source, ts)
 	if err != nil {
 		infra.LoggerFrom(ctx).Warn("ProcessAndRespond: pipeline failed (continuing to FOH)", "error", err)
 	}

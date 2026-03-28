@@ -106,7 +106,7 @@ func appendPredicateToCanonicalMap(ctx context.Context, app *infra.App, predicat
 	return nil
 }
 
-func runRefineryPipeline(ctx context.Context, app *infra.App, entryUUID, content string) ([]string, error) {
+func runRefineryPipeline(ctx context.Context, app *infra.App, entryUUID, content, timestamp string) ([]string, error) {
 	if app == nil {
 		return nil, fmt.Errorf("runRefineryPipeline: app required")
 	}
@@ -158,7 +158,7 @@ func runRefineryPipeline(ctx context.Context, app *infra.App, entryUUID, content
 		infra.LoggerFrom(ctx).Debug("refinery: no triples", "entry_uuid", entryUUID)
 		return nil, nil
 	}
-	return refineryResolveCommit(ctx, app, entryUUID, triples, canonMap)
+	return refineryResolveCommit(ctx, app, entryUUID, triples, canonMap, timestamp)
 }
 
 func refineryExtract(ctx context.Context, app *infra.App, entryUUID, content string, canonMap memory.CanonicalMapConfig, ownerName string) ([]refineryTriple, string, error) {
@@ -185,7 +185,7 @@ func refineryExtract(ctx context.Context, app *infra.App, entryUUID, content str
 	return parseRefineryTriples(lines, ownerName), detectedOwner, nil
 }
 
-func refineryResolveCommit(ctx context.Context, app *infra.App, entryUUID string, triples []refineryTriple, canonMap memory.CanonicalMapConfig) ([]string, error) {
+func refineryResolveCommit(ctx context.Context, app *infra.App, entryUUID string, triples []refineryTriple, canonMap memory.CanonicalMapConfig, timestamp string) ([]string, error) {
 	nodeIDs := make([]string, 0, len(triples)*3)
 	for _, t := range triples {
 		if t.ParseErr != "" {
@@ -218,17 +218,17 @@ func refineryResolveCommit(ctx context.Context, app *infra.App, entryUUID string
 		}
 		subType := memory.CanonicalEntityNodeType(t.SubType)
 		objType := memory.CanonicalEntityNodeType(t.ObjType)
-		subj, err := app.Memory.EnsureNode(ctx, t.Subject, subType, entryUUID)
+		subj, err := app.Memory.EnsureNode(ctx, t.Subject, subType, entryUUID, timestamp)
 		if err != nil {
 			infra.LoggerFrom(ctx).Warn("refinery ensure subject failed", "entry_uuid", entryUUID, "subject", t.Subject, "subject_type", subType, "error", err)
 			continue
 		}
-		obj, err := app.Memory.EnsureNode(ctx, t.Object, objType, entryUUID)
+		obj, err := app.Memory.EnsureNode(ctx, t.Object, objType, entryUUID, timestamp)
 		if err != nil {
 			infra.LoggerFrom(ctx).Warn("refinery ensure object failed", "entry_uuid", entryUUID, "object", t.Object, "object_type", objType, "error", err)
 			continue
 		}
-		relID, err := app.Memory.CreateRelationshipNode(ctx, subj.UUID, predicate, obj.UUID, entryUUID, subj.Content, obj.Content)
+		relID, err := app.Memory.CreateRelationshipNode(ctx, subj.UUID, predicate, obj.UUID, entryUUID, subj.Content, obj.Content, timestamp)
 		if err != nil {
 			infra.LoggerFrom(ctx).Warn("refinery create relationship failed", "entry_uuid", entryUUID, "subject_uuid", subj.UUID, "predicate", predicate, "object_uuid", obj.UUID, "error", err)
 			continue

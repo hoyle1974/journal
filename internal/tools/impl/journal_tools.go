@@ -133,7 +133,7 @@ func registerJournalTools() {
 			if a.EndDate == "" {
 				return tools.MissingParam("end_date")
 			}
-			startStr, endStr, err := resolveToolDateRange(a.StartDate, a.EndDate)
+			startStr, endStr, err := utils.ResolveDateRange(a.StartDate, a.EndDate)
 			if err != nil {
 				return tools.Fail("Date range error: %v", err)
 			}
@@ -182,7 +182,7 @@ func registerJournalTools() {
 			var entries []memory.Entry
 			var err error
 			if categoryFilter != "" {
-				startStr, endStr, err := resolveToolDateRange("last month", "today")
+				startStr, endStr, err := utils.ResolveDateRange("last month", "today")
 				if err != nil {
 					return tools.Fail("Date range error: %v", err)
 				}
@@ -316,7 +316,7 @@ func registerJournalTools() {
 			var entries []memory.Entry
 			var err error
 			if a.Timeframe != "" {
-				startStr, endStr, err := resolveToolDateRange(a.Timeframe, "today")
+				startStr, endStr, err := utils.ResolveDateRange(a.Timeframe, "today")
 				if err != nil {
 					return tools.Fail("Invalid timeframe: %v", err)
 				}
@@ -383,7 +383,7 @@ func registerJournalTools() {
 			if endDate == "" {
 				endDate = "today"
 			}
-			startStr, endStr, err := resolveToolDateRange(startDate, endDate)
+			startStr, endStr, err := utils.ResolveDateRange(startDate, endDate)
 			if err != nil {
 				return tools.Fail("Date range error: %v", err)
 			}
@@ -443,7 +443,7 @@ func registerJournalTools() {
 			if a.Date == "" {
 				return tools.MissingParam("date")
 			}
-			startStr, endStr, err := resolveToolDateRange(a.Date, a.Date)
+			startStr, endStr, err := utils.ResolveDateRange(a.Date, a.Date)
 			if err != nil {
 				return tools.Fail("Invalid date: %v", err)
 			}

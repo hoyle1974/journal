@@ -16,6 +16,11 @@ import (
 // imageSentinelRE matches the [SEND_IMAGE:<uuid>] sentinel inserted by the FOH answer.
 var imageSentinelRE = regexp.MustCompile(`\[SEND_IMAGE:[^\]]+\]`)
 
+// BuildImageSentinel returns the [SEND_IMAGE:<uuid>] sentinel string for the given entry UUID.
+func BuildImageSentinel(entryUUID string) string {
+	return "[SEND_IMAGE:" + entryUUID + "]"
+}
+
 // ParseImageSentinel extracts the first [SEND_IMAGE:<uuid>] sentinel from response.
 // Returns the entry UUID, the remaining caption text (sentinel stripped), and whether one was found.
 func ParseImageSentinel(response string) (entryUUID, caption string, found bool) {

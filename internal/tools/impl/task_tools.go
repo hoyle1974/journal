@@ -318,7 +318,7 @@ func registerTaskTools() {
 					break
 				}
 			}
-			startStr, endStr, err := resolveToolDateRange("last month", "today")
+			startStr, endStr, err := utils.ResolveDateRange("last month", "today")
 			if err != nil {
 				return tools.Fail("Date range error: %v", err)
 			}

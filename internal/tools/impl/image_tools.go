@@ -2,21 +2,12 @@ package impl
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/jackstrohm/jot/internal/infra"
 	"github.com/hoyle1974/memory"
+	"github.com/jackstrohm/jot/pkg/utils"
 	"github.com/jackstrohm/jot/tools"
 )
-
-// imageSentinelPrefix is embedded in the FOH answer to signal the Telegram handler to send a photo.
-// Format: [SEND_IMAGE:<entry_uuid>]
-const imageSentinelPrefix = "[SEND_IMAGE:"
-
-// ImageSentinel returns the sentinel string for a given entry UUID.
-func ImageSentinel(entryUUID string) string {
-	return fmt.Sprintf("%s%s]", imageSentinelPrefix, entryUUID)
-}
 
 type retrieveImageArgs struct {
 	EntryUUID string `json:"entry_uuid" description:"UUID of the journal entry whose image should be sent back to the user." required:"true"`
@@ -49,7 +40,7 @@ func registerImageTools() {
 				desc = "(no description available)"
 			}
 			ts := memory.TruncateTimestamp(entry.Timestamp, memory.DateTimeDisplayLen)
-			sentinel := ImageSentinel(a.EntryUUID)
+			sentinel := utils.BuildImageSentinel(a.EntryUUID)
 			return tools.OK("Image found from %s. Description: %s\n\nInclude this token verbatim in your answer to deliver the image: %s", ts, desc, sentinel)
 		},
 	})

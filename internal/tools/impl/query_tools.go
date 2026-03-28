@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/jackstrohm/jot/internal/infra"
+	"github.com/jackstrohm/jot/pkg/utils"
 	"github.com/jackstrohm/jot/tools"
 )
 
@@ -83,7 +84,7 @@ func registerQueryTools() {
 			if a.EndDate == "" {
 				return tools.MissingParam("end_date")
 			}
-			startStr, endStr, err := resolveToolDateRange(a.StartDate, a.EndDate)
+			startStr, endStr, err := utils.ResolveDateRange(a.StartDate, a.EndDate)
 			if err != nil {
 				return tools.Fail("Date range error: %v", err)
 			}

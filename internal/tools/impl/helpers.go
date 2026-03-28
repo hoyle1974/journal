@@ -25,12 +25,6 @@ func clampInt(val, def, min, max int) int {
 	return val
 }
 
-// resolveToolDateRange resolves start_date and end_date (natural language or YYYY-MM-DD) to YYYY-MM-DD strings for tool/DB use.
-// Use this in all tools that accept date ranges (get_entries_by_date_range, get_queries_by_date, etc.) for consistent behavior.
-func resolveToolDateRange(startExpr, endExpr string) (startStr, endStr string, err error) {
-	return utils.ResolveDateRange(startExpr, endExpr)
-}
-
 const maxSourceDatesPerNode = 5
 const maxEntryIDsToResolve = 25
 
@@ -62,8 +56,8 @@ func formatKnowledgeNodes(ctx context.Context, env infra.ToolEnv, nodes []memory
 	var lines []string
 	for i, n := range nodes {
 		content := n.Content
-		if len(content) > 200 {
-			content = content[:197] + "..."
+		if len([]rune(content)) > 200 {
+			content = utils.TruncateString(content, 197) + "..."
 		}
 		ts := memory.TruncateTimestamp(n.Timestamp, memory.DateTimeDisplayLen)
 		if ts == "" {

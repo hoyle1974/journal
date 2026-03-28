@@ -35,7 +35,8 @@ func relationshipContent(subjectContent, predicate, objectContent, subjectID, ob
 
 // EnsureNode returns an existing entity node by deterministic key or creates one.
 // This prevents duplicate nodes under concurrent ingest.
-func (s *Store) EnsureNode(ctx context.Context, identifier, nodeType, sourceEntryID string) (*KnowledgeNode, error) {
+// ts is the source timestamp to anchor the node historically; if empty, time.Now() is used.
+func (s *Store) EnsureNode(ctx context.Context, identifier, nodeType, sourceEntryID, ts string) (*KnowledgeNode, error) {
 	cleanIdentifier := strings.TrimSpace(identifier)
 	if cleanIdentifier == "" {
 		return nil, fmt.Errorf("ensure node: empty name")
@@ -73,7 +74,9 @@ func (s *Store) EnsureNode(ctx context.Context, identifier, nodeType, sourceEntr
 		if embErr != nil {
 			return fmt.Errorf("ensure node embedding: %w", embErr)
 		}
-		ts := time.Now().Format(time.RFC3339)
+		if ts == "" {
+			ts = time.Now().Format(time.RFC3339)
+		}
 		data := map[string]any{
 			"content":             cleanIdentifier,
 			"name_key":            strings.ToLower(cleanIdentifier),
@@ -113,7 +116,8 @@ func (s *Store) EnsureNode(ctx context.Context, identifier, nodeType, sourceEntr
 }
 
 // CreateRelationshipNode creates a reified relationship node with its own embedding.
-func (s *Store) CreateRelationshipNode(ctx context.Context, subjectID, predicate, objectID, sourceEntryID, subjectContent, objectContent string) (string, error) {
+// ts is the source timestamp to anchor the relationship historically; if empty, time.Now() is used.
+func (s *Store) CreateRelationshipNode(ctx context.Context, subjectID, predicate, objectID, sourceEntryID, subjectContent, objectContent, ts string) (string, error) {
 	predicate = NormalizedPredicate(predicate)
 	if subjectID == "" || objectID == "" || predicate == "" {
 		return "", fmt.Errorf("create relationship: subject, predicate, object required")
@@ -124,7 +128,9 @@ func (s *Store) CreateRelationshipNode(ctx context.Context, subjectID, predicate
 		return "", fmt.Errorf("create relationship embedding: %w", err)
 	}
 	uuid := generateUUID()
-	ts := time.Now().Format(time.RFC3339)
+	if ts == "" {
+		ts = time.Now().Format(time.RFC3339)
+	}
 	data := map[string]any{
 		"content":             content,
 		"node_type":           NodeTypeRelationship,

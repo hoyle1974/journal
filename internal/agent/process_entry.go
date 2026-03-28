@@ -59,7 +59,7 @@ func ProcessLogSequential(ctx context.Context, app *infra.App, logUUID, logConte
 	infra.LoggerFrom(ctx).Info("loom stage 1 done: log node persisted", "log_uuid", logUUID)
 
 	// ── Stages 2 & 3: Refinery + Task Worker ─────────────────────────────────
-	extractedNodeIDs, _ := ProcessEntrySyncPipeline(ctx, app, logUUID, logContent, source)
+	extractedNodeIDs, _ := ProcessEntrySyncPipeline(ctx, app, logUUID, logContent, source, timestamp)
 
 	infra.LoggerFrom(ctx).Info("loom pipeline complete",
 		"event", "loom_done",
@@ -78,14 +78,14 @@ func ProcessLogSequential(ctx context.Context, app *infra.App, logUUID, logConte
 // Stage errors are logged but do not abort the pipeline; the caller always receives a nil error.
 // Use from the unified synchronous pipeline (ProcessAndRespond); use ProcessLogSequential for
 // the async Cloud Task path.
-func ProcessEntrySyncPipeline(ctx context.Context, app *infra.App, logUUID, logContent, source string) ([]string, error) {
+func ProcessEntrySyncPipeline(ctx context.Context, app *infra.App, logUUID, logContent, source, timestamp string) ([]string, error) {
 	if app == nil || app.Config() == nil {
 		return nil, fmt.Errorf("ProcessEntrySyncPipeline: app or config is nil")
 	}
 
 	// ── Stage 2: Refinery ─────────────────────────────────────────────────────
 	infra.LoggerFrom(ctx).Debug("loom stage 2: refinery", "log_uuid", logUUID)
-	nodeIDs, refineryErr := runRefineryPipeline(ctx, app, logUUID, logContent)
+	nodeIDs, refineryErr := runRefineryPipeline(ctx, app, logUUID, logContent, timestamp)
 	if refineryErr != nil {
 		infra.LoggerFrom(ctx).Warn("loom stage 2 FAILED: refinery pipeline error — pipeline continues",
 			"log_uuid", logUUID, "error", refineryErr)

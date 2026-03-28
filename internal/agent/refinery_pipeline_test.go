@@ -7,7 +7,7 @@ import (
 
 func TestRunRefineryPipelineReturnsNodeIDs(t *testing.T) {
 	// nil app returns error, not panic, and empty IDs
-	ids, err := runRefineryPipeline(context.Background(), nil, "uuid-1", "test content")
+	ids, err := runRefineryPipeline(context.Background(), nil, "uuid-1", "test content", "")
 	if err == nil {
 		t.Fatal("expected error for nil app")
 	}
