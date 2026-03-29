@@ -24,6 +24,11 @@ func WithLogger(l *slog.Logger) Option {
 	return func(s *Store) { s.log = l }
 }
 
+// Embedder returns the embedder used by this store.
+func (s *Store) Embedder() Embedder {
+	return s.embedder
+}
+
 // New creates a Store with the given Firestore client, embedder, and LLM dispatcher.
 func New(db *firestore.Client, embedder Embedder, llm LLMDispatcher, opts ...Option) *Store {
 	s := &Store{

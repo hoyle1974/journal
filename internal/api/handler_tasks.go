@@ -92,6 +92,9 @@ func runTelegramMessage(ctx context.Context, s *Server, msg *telegram.IncomingMe
 				infra.LoggerFrom(ctx).Error("telegram: add image entry failed", "chat_id", msg.ChatID, "error", addErr)
 			} else {
 				ctx = agent.WithEntryAlreadyAdded(ctx, entryUUID)
+				if embedErr := s.App.(*infra.App).Memory.EmbedEntryMedia(ctx, entryUUID, imageBytes, mime); embedErr != nil {
+					infra.LoggerFrom(ctx).Warn("telegram: multimodal image embed failed", "chat_id", msg.ChatID, "error", embedErr)
+				}
 			}
 		}
 		if body == "Photo" {
@@ -145,6 +148,9 @@ func runTelegramMessage(ctx context.Context, s *Server, msg *telegram.IncomingMe
 				if updateErr := app.Memory.UpdateEntryAudio(ctx, entryUUID, audioURL, transcript); updateErr != nil {
 					infra.LoggerFrom(ctx).Warn("telegram: update audio fields failed", "chat_id", msg.ChatID, "error", updateErr)
 				}
+			}
+			if embedErr := app.Memory.EmbedEntryMedia(ctx, entryUUID, audioBytes, "audio/ogg"); embedErr != nil {
+				infra.LoggerFrom(ctx).Warn("telegram: multimodal audio embed failed", "chat_id", msg.ChatID, "error", embedErr)
 			}
 		}
 		body = transcript

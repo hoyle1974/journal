@@ -27,6 +27,7 @@ type ToolEnv interface {
 	Config() *config.Config
 	Firestore(ctx context.Context) (*firestore.Client, error)
 	Dispatch(ctx context.Context, req *LLMRequest) (*genai.GenerateContentResponse, error)
+	GeminiClient() *genai.Client
 	MemoryStore() *memory.Store
 
 	// Domain-specific accessors — prefer these over MemoryStore() for new code.
@@ -73,6 +74,12 @@ func (a *App) Gemini(ctx context.Context) (*genai.Client, error) {
 		return nil, a.geminiErr
 	}
 	return a.geminiClient, nil
+}
+
+// GeminiClient returns the Gemini client directly (nil if initialization failed).
+// Use for embedding calls where error handling is managed by the caller.
+func (a *App) GeminiClient() *genai.Client {
+	return a.geminiClient
 }
 
 // EffectiveModel returns the resolved model name for API calls.
@@ -268,7 +275,7 @@ func NewApp(ctx context.Context, cfg *config.Config, geminiFactory GeminiFactory
 
 	app.Memory = memory.New(
 		app.firestoreClient,
-		memorygem.NewEmbedder(cfg.GoogleCloudProject),
+		memorygem.NewEmbedder(app.geminiClient),
 		memorygem.NewDispatcher(app.geminiClient, app.effectiveGeminiModel),
 	)
 

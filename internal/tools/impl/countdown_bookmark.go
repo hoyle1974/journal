@@ -188,5 +188,5 @@ func embeddingForContext(ctx context.Context, env infra.ToolEnv, text string) ([
 	if env == nil || env.Config() == nil {
 		return nil, fmt.Errorf("no app in context for embedding")
 	}
-	return infra.GenerateEmbedding(ctx, env.Config().GoogleCloudProject, text)
+	return infra.GenerateEmbedding(ctx, env.GeminiClient(), text)
 }

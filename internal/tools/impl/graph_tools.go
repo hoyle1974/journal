@@ -36,7 +36,7 @@ func registerGraphTools() {
 				if a.Query == "" {
 					return tools.Fail("graph_expand with hops > 1 requires the 'query' field — re-invoke with the question or topic you are investigating so the traversal can prune semantically.")
 				}
-				vec, err := infra.GenerateEmbedding(ctx, env.Config().GoogleCloudProject, a.Query, infra.EmbedTaskRetrievalQuery)
+				vec, err := infra.GenerateEmbedding(ctx, env.GeminiClient(), a.Query, infra.EmbedTaskRetrievalQuery)
 				if err != nil {
 					return tools.Fail("graph_expand: failed to embed query for pruning: %v", err)
 				}

@@ -1,44 +1,36 @@
-// Package gemini provides Gemini/Vertex AI implementations of memory.Embedder and memory.LLMDispatcher.
+// Package gemini provides Gemini SDK implementations of memory.Embedder and memory.LLMDispatcher.
 package gemini
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
-	"time"
 
-	"golang.org/x/oauth2/google"
+	"google.golang.org/genai"
 
 	"github.com/hoyle1974/memory"
 )
 
-const embeddingBatchSize = 250
+const (
+	embeddingModel     = "gemini-embedding-2-preview"
+	embeddingDimension = int32(1536)
+	embeddingBatchSize = 250
+)
 
 type embedder struct {
-	projectID string
+	client *genai.Client
 }
 
-// NewEmbedder returns a memory.Embedder backed by Vertex AI text-embedding-005.
-// projectID is the GCP project that hosts the Vertex AI endpoint.
-func NewEmbedder(projectID string) memory.Embedder {
-	return &embedder{projectID: projectID}
+// NewEmbedder returns a memory.Embedder backed by gemini-embedding-2-preview at 1536 dimensions.
+// client is the existing genai.Client from infra.App (Gemini API key, BackendGeminiAPI).
+func NewEmbedder(client *genai.Client) memory.Embedder {
+	return &embedder{client: client}
 }
 
 func (e *embedder) GenerateEmbedding(ctx context.Context, text string, taskType string) ([]float32, error) {
 	if taskType == "" {
 		taskType = memory.EmbedTaskRetrievalQuery
 	}
-	results, err := e.batch(ctx, []string{text}, taskType)
-	if err != nil {
-		return nil, err
-	}
-	if len(results) == 0 {
-		return nil, fmt.Errorf("no embedding returned")
-	}
-	return results[0], nil
+	return e.embedText(ctx, text, taskType)
 }
 
 func (e *embedder) GenerateEmbeddingsBatch(ctx context.Context, texts []string, taskType string) ([][]float32, error) {
@@ -55,7 +47,11 @@ func (e *embedder) GenerateEmbeddingsBatch(ctx context.Context, texts []string, 
 			end = len(texts)
 		}
 		chunk := texts[i:end]
-		vecs, err := e.batch(ctx, chunk, taskType)
+		contents := make([]*genai.Content, len(chunk))
+		for j, t := range chunk {
+			contents[j] = &genai.Content{Parts: []*genai.Part{genai.NewPartFromText(t)}}
+		}
+		vecs, err := e.callBatch(ctx, contents, taskType)
 		if err != nil {
 			return nil, err
 		}
@@ -66,60 +62,72 @@ func (e *embedder) GenerateEmbeddingsBatch(ctx context.Context, texts []string, 
 	return out, nil
 }
 
-func (e *embedder) batch(ctx context.Context, texts []string, taskType string) ([][]float32, error) {
-	endpoint := fmt.Sprintf(
-		"https://us-central1-aiplatform.googleapis.com/v1/projects/%s/locations/us-central1/publishers/google/models/text-embedding-005:predict",
-		e.projectID,
+func (e *embedder) EmbedContent(ctx context.Context, parts []memory.EmbedPart) ([]float32, error) {
+	if len(parts) == 0 {
+		return nil, fmt.Errorf("EmbedContent: at least one part required")
+	}
+	if e.client == nil {
+		return nil, fmt.Errorf("EmbedContent: gemini client is nil")
+	}
+	gParts := make([]*genai.Part, 0, len(parts))
+	for _, p := range parts {
+		if len(p.Bytes) > 0 {
+			gParts = append(gParts, genai.NewPartFromBytes(p.Bytes, p.MIMEType))
+		} else if p.Text != "" {
+			gParts = append(gParts, genai.NewPartFromText(p.Text))
+		}
+	}
+	if len(gParts) == 0 {
+		return nil, fmt.Errorf("EmbedContent: no non-empty parts provided")
+	}
+	dim := embeddingDimension
+	cfg := &genai.EmbedContentConfig{OutputDimensionality: &dim}
+	resp, err := e.client.Models.EmbedContent(ctx, embeddingModel,
+		[]*genai.Content{{Parts: gParts}},
+		cfg,
 	)
-	instances := make([]map[string]any, len(texts))
-	for i, t := range texts {
-		instances[i] = map[string]any{"content": t, "task_type": taskType}
-	}
-	body, err := json.Marshal(map[string]any{"instances": instances})
 	if err != nil {
-		return nil, fmt.Errorf("marshal embedding request: %w", err)
+		return nil, fmt.Errorf("EmbedContent: %w", err)
 	}
+	if len(resp.Embeddings) == 0 || len(resp.Embeddings[0].Values) == 0 {
+		return nil, fmt.Errorf("EmbedContent: no embedding returned")
+	}
+	return resp.Embeddings[0].Values, nil
+}
 
-	tokenSource, err := google.DefaultTokenSource(ctx, "https://www.googleapis.com/auth/cloud-platform")
-	if err != nil {
-		return nil, fmt.Errorf("get token source: %w", err)
+// embedText embeds a single text string with the given task type.
+func (e *embedder) embedText(ctx context.Context, text string, taskType string) ([]float32, error) {
+	if e.client == nil {
+		return nil, fmt.Errorf("GenerateEmbedding: gemini client is nil")
 	}
-	token, err := tokenSource.Token()
-	if err != nil {
-		return nil, fmt.Errorf("get token: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewReader(body))
+	contents := []*genai.Content{{Parts: []*genai.Part{genai.NewPartFromText(text)}}}
+	vecs, err := e.callBatch(ctx, contents, taskType)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+token.AccessToken)
+	if len(vecs) == 0 {
+		return nil, fmt.Errorf("no embedding returned")
+	}
+	return vecs[0], nil
+}
 
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
+// callBatch sends a batch of contents to the embedding model and returns their vectors.
+func (e *embedder) callBatch(ctx context.Context, contents []*genai.Content, taskType string) ([][]float32, error) {
+	dim := embeddingDimension
+	cfg := &genai.EmbedContentConfig{
+		TaskType:             taskType,
+		OutputDimensionality: &dim,
+	}
+	resp, err := e.client.Models.EmbedContent(ctx, embeddingModel, contents, cfg)
 	if err != nil {
-		return nil, fmt.Errorf("embedding API request: %w", err)
+		return nil, fmt.Errorf("embedding API: %w", err)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("embedding API %d: %s", resp.StatusCode, b)
+	if len(resp.Embeddings) == 0 {
+		return nil, fmt.Errorf("no embeddings returned")
 	}
-
-	var result struct {
-		Predictions []struct {
-			Embeddings struct {
-				Values []float32 `json:"values"`
-			} `json:"embeddings"`
-		} `json:"predictions"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decode embedding response: %w", err)
-	}
-	out := make([][]float32, len(result.Predictions))
-	for i, p := range result.Predictions {
-		out[i] = p.Embeddings.Values
+	out := make([][]float32, len(resp.Embeddings))
+	for i, emb := range resp.Embeddings {
+		out[i] = emb.Values
 	}
 	return out, nil
 }

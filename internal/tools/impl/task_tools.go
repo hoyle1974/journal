@@ -236,7 +236,7 @@ func registerTaskTools() {
 				if env == nil || env.Config() == nil {
 					return tools.Fail("Error: no app in context")
 				}
-				vec, err := infra.GenerateEmbedding(ctx, env.Config().GoogleCloudProject, query, infra.EmbedTaskRetrievalQuery)
+				vec, err := infra.GenerateEmbedding(ctx, env.GeminiClient(), query, infra.EmbedTaskRetrievalQuery)
 				if err != nil {
 					return tools.Fail("Error generating embedding: %v", err)
 				}
@@ -303,7 +303,7 @@ func registerTaskTools() {
 			if env == nil || env.Config() == nil {
 				return tools.Fail("Error: no app in context")
 			}
-			vec, err := infra.GenerateEmbedding(ctx, env.Config().GoogleCloudProject, "Project: "+a.ProjectName)
+			vec, err := infra.GenerateEmbedding(ctx, env.GeminiClient(), "Project: "+a.ProjectName)
 			if err != nil {
 				return tools.Fail("Error finding project: %v", err)
 			}

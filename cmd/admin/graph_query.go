@@ -32,7 +32,7 @@ func runGraphQuery(ctx context.Context, app *infra.App, args []string) {
 	infra.InitObservability(cfg)
 
 	// 1. Embed the query — used for both seed discovery and multi-hop semantic pruning.
-	queryVec, err := infra.GenerateEmbedding(ctx, cfg.GoogleCloudProject, query, infra.EmbedTaskRetrievalQuery)
+	queryVec, err := infra.GenerateEmbedding(ctx, app.GeminiClient(), query, infra.EmbedTaskRetrievalQuery)
 	if err != nil {
 		log.Fatalf("embed query: %v", err)
 	}

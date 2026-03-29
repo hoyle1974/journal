@@ -39,7 +39,7 @@ func BuildLoomRAGContext(ctx context.Context, app *infra.App, logUUID, logConten
 	// and for semantic pruning during graph expansion.
 	var queryVec []float32
 	if logContent != "" {
-		vec, err := infra.GenerateEmbedding(ctx, app.Config().GoogleCloudProject, logContent, infra.EmbedTaskRetrievalQuery)
+		vec, err := infra.GenerateEmbedding(ctx, app.GeminiClient(), logContent, infra.EmbedTaskRetrievalQuery)
 		if err != nil {
 			infra.LoggerFrom(ctx).Warn("loom rag: embed content failed", "error", err)
 		} else {

@@ -1,7 +1,6 @@
 package infra
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -13,7 +12,6 @@ import (
 
 	"github.com/jackstrohm/jot/internal/config"
 	"github.com/jackstrohm/jot/pkg/utils"
-	"golang.org/x/oauth2/google"
 	"google.golang.org/genai"
 )
 
@@ -276,74 +274,41 @@ func TranscribeAudio(ctx context.Context, env ToolEnv, audioBytes []byte, cfg *c
 	return transcript, nil
 }
 
-// EmbedTaskRetrievalQuery is the task type for retrieval queries (text-embedding-005).
+// EmbedTaskRetrievalQuery is the task type for retrieval queries.
 const EmbedTaskRetrievalQuery = "RETRIEVAL_QUERY"
 
-// GenerateEmbedding creates a 768-dimension vector for semantic search using Vertex AI text-embedding-005.
-func GenerateEmbedding(ctx context.Context, projectID string, text string, taskType ...string) ([]float32, error) {
+const (
+	embeddingModel     = "gemini-embedding-2-preview"
+	embeddingDimension = int32(1536)
+)
+
+// GenerateEmbedding creates a 1536-dimension vector using gemini-embedding-2-preview.
+// client is the Gemini API client from infra.App (obtain via env.GeminiClient() or app.GeminiClient()).
+func GenerateEmbedding(ctx context.Context, client *genai.Client, text string, taskType ...string) ([]float32, error) {
 	task := EmbedTaskRetrievalQuery
 	if len(taskType) > 0 && taskType[0] != "" {
 		task = taskType[0]
 	}
-
-	endpoint := fmt.Sprintf("https://us-central1-aiplatform.googleapis.com/v1/projects/%s/locations/us-central1/publishers/google/models/text-embedding-005:predict", projectID)
-	instance := map[string]interface{}{"content": text, "task_type": task}
-	requestBody := map[string]interface{}{
-		"instances": []map[string]interface{}{instance},
-	}
-	jsonBody, err := json.Marshal(requestBody)
-	if err != nil {
-		return nil, err
-	}
-
-	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewReader(jsonBody))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	tokenSource, err := google.DefaultTokenSource(ctx, "https://www.googleapis.com/auth/cloud-platform")
-	if err != nil {
-		return nil, fmt.Errorf("failed to get token source: %w", err)
-	}
-	token, err := tokenSource.Token()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get token: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+token.AccessToken)
-
-	client := &http.Client{Timeout: 30 * time.Second}
 	embedStart := time.Now()
-	resp, err := client.Do(req)
+	dim := embeddingDimension
+	cfg := &genai.EmbedContentConfig{
+		TaskType:             task,
+		OutputDimensionality: &dim,
+	}
+	resp, err := client.Models.EmbedContent(ctx, embeddingModel,
+		[]*genai.Content{{Parts: []*genai.Part{genai.NewPartFromText(text)}}},
+		cfg,
+	)
 	embedLatency := time.Since(embedStart)
 	if err != nil {
 		LoggerFrom(ctx).Error("embedding request failed", "error", err)
-		return nil, fmt.Errorf("Embedding API error: %w", err)
+		return nil, fmt.Errorf("embedding API: %w", err)
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		apiErr := fmt.Errorf("embedding API returned %d: %s", resp.StatusCode, string(body))
-		LoggerFrom(ctx).Error("embedding failed", "status", resp.StatusCode, "body", string(body))
-		return nil, WrapLLMError(apiErr)
-	}
-
-	var result struct {
-		Predictions []struct {
-			Embeddings struct {
-				Values []float32 `json:"values"`
-			} `json:"embeddings"`
-		} `json:"predictions"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("failed to decode embedding response: %w", err)
-	}
-	if len(result.Predictions) == 0 || len(result.Predictions[0].Embeddings.Values) == 0 {
+	if len(resp.Embeddings) == 0 || len(resp.Embeddings[0].Values) == 0 {
 		return nil, fmt.Errorf("no embedding returned")
 	}
-	dims := len(result.Predictions[0].Embeddings.Values)
+	dims := len(resp.Embeddings[0].Values)
 	LoggerFrom(ctx).Debug("embedding generated", "dimensions", dims)
 	LogEmbeddingStats(ctx, dims, embedLatency)
-	return result.Predictions[0].Embeddings.Values, nil
+	return resp.Embeddings[0].Values, nil
 }

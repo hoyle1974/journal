@@ -117,7 +117,7 @@ func registerKnowledgeTools() {
 			if env == nil || env.Config() == nil {
 				return tools.Fail("Error: no app in context")
 			}
-			queryVec, err := infra.GenerateEmbedding(ctx, env.Config().GoogleCloudProject, a.Query)
+			queryVec, err := infra.GenerateEmbedding(ctx, env.GeminiClient(), a.Query)
 			if err != nil {
 				return tools.Fail("Error generating embedding: %v", err)
 			}
@@ -164,7 +164,7 @@ func registerKnowledgeTools() {
 			if env == nil || env.Config() == nil {
 				return tools.Fail("Error: no app in context")
 			}
-			queryVec, err := infra.GenerateEmbedding(ctx, env.Config().GoogleCloudProject, queryStr)
+			queryVec, err := infra.GenerateEmbedding(ctx, env.GeminiClient(), queryStr)
 			if err != nil {
 				return tools.Fail("Error generating embedding: %v", err)
 			}
