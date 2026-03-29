@@ -65,9 +65,8 @@ func (s *Store) EnsureNode(ctx context.Context, identifier, nodeType, sourceEntr
 	if err == nil && nearest != nil {
 		s.log.Debug("ensure node: semantic match", "input", cleanIdentifier, "matched", nearest.Content, "uuid", nearest.UUID)
 		if sourceEntryID != "" {
-			_, _ = s.db.Collection(KnowledgeCollection).Doc(nearest.UUID).Update(ctx, []firestore.Update{
-				{Path: "journal_entry_ids", Value: firestore.ArrayUnion(sourceEntryID)},
-			})
+			updates := buildRelationshipReobserveUpdates(sourceEntryID, ts)
+			_, _ = s.db.Collection(KnowledgeCollection).Doc(nearest.UUID).Update(ctx, updates)
 		}
 		return nearest, nil
 	}
@@ -148,6 +147,20 @@ func stableRelID(subjectID, predicate, objectID string) string {
 	return "rel_" + hex.EncodeToString(sum[:])
 }
 
+// buildRelationshipReobserveUpdates returns the Firestore Update slice to apply when
+// a relationship or entity node is re-observed. It always appends the sourceEntryID to
+// journal_entry_ids; if ts is non-empty it also refreshes the node's timestamp so
+// that temporal decay scoring reflects the most recent observation date.
+func buildRelationshipReobserveUpdates(sourceEntryID, ts string) []firestore.Update {
+	updates := []firestore.Update{
+		{Path: "journal_entry_ids", Value: firestore.ArrayUnion(sourceEntryID)},
+	}
+	if ts != "" {
+		updates = append(updates, firestore.Update{Path: "timestamp", Value: ts})
+	}
+	return updates
+}
+
 // CreateRelationshipNode creates or updates a reified relationship node with its own embedding.
 // The document ID is derived deterministically from (subjectID, predicate, objectID), so
 // re-observing the same triple appends to journal_entry_ids rather than creating a duplicate edge.
@@ -161,13 +174,12 @@ func (s *Store) CreateRelationshipNode(ctx context.Context, subjectID, predicate
 	relID := stableRelID(subjectID, predicate, objectID)
 	ref := s.db.Collection(KnowledgeCollection).Doc(relID)
 
-	// If the edge already exists, just append the source entry and return.
+	// If the edge already exists, append the source entry and refresh the timestamp.
 	doc, err := ref.Get(ctx)
 	if err == nil && doc.Exists() {
 		if sourceEntryID != "" {
-			_, _ = ref.Update(ctx, []firestore.Update{
-				{Path: "journal_entry_ids", Value: firestore.ArrayUnion(sourceEntryID)},
-			})
+			updates := buildRelationshipReobserveUpdates(sourceEntryID, ts)
+			_, _ = ref.Update(ctx, updates)
 		}
 		return relID, nil
 	}
