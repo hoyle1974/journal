@@ -126,10 +126,18 @@ func RunMorningBriefing(ctx context.Context, app *infra.App, force bool) (*Morni
 	log.Debug("morning_briefing: LLM response received", "response", raw)
 
 	// ── Phase F: parse LLM output ────────────────────────────────────────────
-	simple, _ := utils.ParseKeyValueMap(raw)
-	patterns := strings.TrimSpace(simple["patterns"])
-	alignment := strings.TrimSpace(simple["alignment"])
-	coachingQ := strings.TrimSpace(simple["coaching_question"])
+	// The LLM may return keys as section headers (multi-line bullet lists) or
+	// as inline key: value pairs — check both maps.
+	simple, sections := utils.ParseKeyValueMap(raw)
+	resolveField := func(key string) string {
+		if v := strings.TrimSpace(simple[key]); v != "" {
+			return v
+		}
+		return strings.TrimSpace(strings.Join(sections[key], "\n"))
+	}
+	patterns := resolveField("patterns")
+	alignment := resolveField("alignment")
+	coachingQ := resolveField("coaching_question")
 
 	if patterns == "" && alignment == "" && coachingQ == "" {
 		return nil, fmt.Errorf("morning briefing: LLM returned no usable output")
