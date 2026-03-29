@@ -17,6 +17,13 @@ const PendingQuestionsCollection = KnowledgeCollection
 // asked to each client. Documents are keyed by clientID string.
 const ActiveQuestionStateCollection = "telegram_question_state"
 
+// Kind constants for PendingQuestion.
+const (
+	KindGap           = "gap"
+	KindContradiction = "contradiction"
+	KindTaskProposal  = "task_proposal" // commitment detected by agency; user must confirm before task is created
+)
+
 // PendingQuestion is a gap or contradiction detected during knowledge synthesis, to be clarified by the user.
 type PendingQuestion struct {
 	UUID           string    `firestore:"-" json:"uuid"`

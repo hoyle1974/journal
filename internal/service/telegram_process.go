@@ -55,12 +55,32 @@ func handlePendingQuestion(ctx context.Context, app *infra.App, chatID int64, te
 				infra.LoggerFrom(ctx).Error("telegram: resolve pending question failed", "chat_id", chatID, "uuid", active.UUID, "error", resolveErr)
 			} else {
 				infra.LoggerFrom(ctx).Info("telegram: pending question resolved", "chat_id", chatID, "uuid", active.UUID)
-				// Ingest answered gap questions into the knowledge graph.
-				if active.Kind == "gap" {
+				switch active.Kind {
+				case memory.KindGap:
+					// Ingest answered gap questions into the knowledge graph.
 					bgCtx := context.WithoutCancel(ctx)
 					answered := *active
 					answered.Answer = text
 					go agent.IngestQuestionAnswer(bgCtx, app, answered)
+				case memory.KindTaskProposal:
+					// Create the task only if the user confirmed.
+					if isAffirmative(text) {
+						bgCtx := context.WithoutCancel(ctx)
+						taskContent := active.Context
+						sourceIDs := active.SourceEntryIDs
+						go func() {
+							t := &memory.Task{
+								Content:         taskContent,
+								Status:          memory.TaskStatusPending,
+								JournalEntryIDs: sourceIDs,
+							}
+							if _, createErr := app.Memory.CreateTask(bgCtx, t); createErr != nil {
+								infra.LoggerFrom(bgCtx).Warn("telegram: create task from proposal failed", "error", createErr)
+							} else {
+								infra.LoggerFrom(bgCtx).Info("telegram: task created from proposal", "content", taskContent)
+							}
+						}()
+					}
 				}
 			}
 		} else {
@@ -162,11 +182,27 @@ func formatQuestion(q memory.PendingQuestion, remaining int) string {
 		sb.WriteString(fmt.Sprintf("I have %d questions for you. Here's the first:\n\n", remaining))
 	}
 	sb.WriteString(q.Question)
-	if q.Context != "" {
+	if q.Context != "" && q.Kind != memory.KindTaskProposal {
 		sb.WriteString(fmt.Sprintf("\n\n_%s_", q.Context))
 	}
-	sb.WriteString("\n\n(Reply to answer, or send /skip to skip.)")
+	if q.Kind == memory.KindTaskProposal {
+		sb.WriteString("\n\n(Reply yes/no, or send /skip to skip.)")
+	} else {
+		sb.WriteString("\n\n(Reply to answer, or send /skip to skip.)")
+	}
 	return sb.String()
+}
+
+// isAffirmative returns true if the user's response is a clear yes.
+func isAffirmative(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	affirmatives := []string{"yes", "y", "yeah", "yep", "yup", "sure", "ok", "okay", "do it", "create it", "go ahead", "please", "absolutely"}
+	for _, a := range affirmatives {
+		if lower == a || strings.HasPrefix(lower, a+" ") {
+			return true
+		}
+	}
+	return false
 }
 
 func processQueryTelegram(ctx context.Context, app *infra.App, query string, chatID int64) string {

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/hoyle1974/memory"
@@ -29,17 +30,17 @@ func runTaskWorker(ctx context.Context, app *infra.App, logContent string, extra
 	if len(intent) < MinCommitmentIntentLen {
 		return nil
 	}
-	t := &memory.Task{
-		Content:         intent,
-		Status:          memory.TaskStatusPending,
-		JournalEntryIDs: extractedObjectIDs,
+	q := memory.PendingQuestion{
+		Question:       fmt.Sprintf("Should I create a task for: \"%s\"?", intent),
+		Kind:           memory.KindTaskProposal,
+		Context:        intent,
+		SourceEntryIDs: extractedObjectIDs,
 	}
-	taskUUID, err := app.Memory.CreateTask(ctx, t)
-	if err != nil {
-		infra.LoggerFrom(ctx).Warn("loom task worker: create task failed", "error", err)
+	if err := app.Memory.InsertPendingQuestions(ctx, []memory.PendingQuestion{q}); err != nil {
+		infra.LoggerFrom(ctx).Warn("loom task worker: insert task proposal failed", "error", err)
 		return err
 	}
-	infra.LoggerFrom(ctx).Info("loom task worker: task created", "task_uuid", taskUUID, "intent", intent)
+	infra.LoggerFrom(ctx).Info("loom task worker: task proposal queued", "intent", intent)
 	return nil
 }
 

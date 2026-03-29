@@ -17,6 +17,7 @@ Jot is a personal journaling and memory system. It ingests journal entries, extr
 
 ## Pipeline
 All input runs a synchronous pipeline: save entry → refinery (Subject/Predicate/Object graph extraction) → task worker → 2-hop Loom RAG → FOH with Gemini 2.5 native thinking. Reasoning tokens are returned as `reasoning_trace` in the response.
+- **Task worker**: When a commitment is detected (future_commitment ≥ 0.6), the task worker queues a `pending_question` of kind `task_proposal` instead of creating the task directly. The user is asked "Should I create a task for: '[intent]'?" on next Telegram interaction. If confirmed, the task is created. If declined or skipped, no task is created.
 
 ## Agents
 - **FOH (Front of House)**: Query loop. Uses system prompt, identity, knowledge-gap block, open todos, a Loom RAG context block (2-hop neighbourhood of nodes extracted from the current entry), and a RECENT REFLECTIONS block (3 most recent Dreamer summary nodes). Can call tools (journal, knowledge, task, web, utility). Uses Gemini 2.5 native thinking — reasoning tokens surface as `reasoning_trace` in the response. Tool calls use key/value or native function call format (no JSON from the model). Before answering, the model performs an in-prompt audit (reflection, gap detection, synthesis). If the model reports missing info via MISSING_INFO:, the query is saved as a knowledge gap (is_gap). Graph neighbourhood context is obtained via the `graph_expand` tool (compact tools include it); FOH does not auto-inject subgraphs after `semantic_search`.
