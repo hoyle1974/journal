@@ -212,6 +212,41 @@ if [ -n "${DEPLOYED_BASE_URL:-}" ]; then
   echo ""
 fi
 
+# Upsert Cloud Scheduler morning-briefing job (idempotent on every deploy)
+if [ -n "${DEPLOYED_BASE_URL:-}" ]; then
+  BRIEFING_JOB="jot-morning-briefing"
+  BRIEFING_URL="${DEPLOYED_BASE_URL%/}/internal/morning-briefing"
+  BRIEFING_HEADERS="Content-Type=application/json"
+  if [ -n "${JOT_API_KEY:-}" ]; then
+    BRIEFING_HEADERS="$BRIEFING_HEADERS,X-API-Key=${JOT_API_KEY}"
+  fi
+  echo -e "${YELLOW}Upserting Cloud Scheduler morning-briefing job...${NC}"
+  if gcloud scheduler jobs describe $BRIEFING_JOB --location=$REGION 2>/dev/null; then
+    gcloud scheduler jobs update http $BRIEFING_JOB \
+      --location=$REGION \
+      --schedule="0 6 * * *" \
+      --uri="$BRIEFING_URL" \
+      --message-body='{"force":false}' \
+      --update-headers="$BRIEFING_HEADERS" \
+      --time-zone="America/Los_Angeles" \
+      --attempt-deadline=300s \
+      --quiet
+    echo -e "${GREEN}Morning briefing job updated: $BRIEFING_URL${NC}"
+  else
+    gcloud scheduler jobs create http $BRIEFING_JOB \
+      --location=$REGION \
+      --schedule="0 6 * * *" \
+      --uri="$BRIEFING_URL" \
+      --message-body='{"force":false}' \
+      --headers="$BRIEFING_HEADERS" \
+      --time-zone="America/Los_Angeles" \
+      --attempt-deadline=300s \
+      --quiet
+    echo -e "${GREEN}Morning briefing job created: $BRIEFING_URL${NC}"
+  fi
+  echo ""
+fi
+
 # Set Telegram webhook if bot token is available (from env file)
 if [ -n "${TELEGRAM_BOT_TOKEN:-}" ] && [ -n "${DEPLOYED_BASE_URL:-}" ]; then
   TELEGRAM_WEBHOOK_URL="${DEPLOYED_BASE_URL%/}/telegram"

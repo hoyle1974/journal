@@ -11,3 +11,6 @@ const OnboardingDoc = "onboarding"
 
 // DreamMetaDoc is the _system document ID for the Dreamer background cycle watermark.
 const DreamMetaDoc = "dream_meta"
+
+// BriefingMetaDoc is the _system document ID for the Morning Briefing watermark.
+const BriefingMetaDoc = "briefing_meta"

@@ -37,13 +37,17 @@ var dreamerTxt string
 //go:embed dreamer_selfcheck.txt
 var dreamerSelfCheckTxt string
 
+//go:embed morning_briefing.txt
+var morningBriefingTxt string
+
 var (
-	systemPromptTmpl    = template.Must(template.New("system").Parse(systemPromptTxt))
-	activityHistoryTmpl = template.Must(template.New("activityHistory").Parse(activityHistoryTxt))
-	debugReportTmpl     = template.Must(template.New("debugReport").Parse(debugReportPromptTxt))
-	refineryTmpl        = template.Must(template.New("refinery").Parse(refineryTxt))
+	systemPromptTmpl     = template.Must(template.New("system").Parse(systemPromptTxt))
+	activityHistoryTmpl  = template.Must(template.New("activityHistory").Parse(activityHistoryTxt))
+	debugReportTmpl      = template.Must(template.New("debugReport").Parse(debugReportPromptTxt))
+	refineryTmpl         = template.Must(template.New("refinery").Parse(refineryTxt))
 	dreamerTmpl          = template.Must(template.New("dreamer").Parse(dreamerTxt))
 	dreamerSelfCheckTmpl = template.Must(template.New("dreamerSelfCheck").Parse(dreamerSelfCheckTxt))
+	morningBriefingTmpl  = template.Must(template.New("morningBriefing").Parse(morningBriefingTxt))
 )
 
 // SystemPromptData holds all inputs for the main FOH system prompt.
@@ -166,6 +170,23 @@ func BuildDreamerSelfCheck(data DreamerSelfCheckData) (string, error) {
 	var buf bytes.Buffer
 	if err := dreamerSelfCheckTmpl.Execute(&buf, data); err != nil {
 		return "", fmt.Errorf("execute dreamer self-check: %w", err)
+	}
+	return buf.String(), nil
+}
+
+// MorningBriefingData holds inputs for the Morning Briefing agent prompt.
+type MorningBriefingData struct {
+	Today        string
+	CurrentTime  string
+	GravelEntries string // formatted log entries since last briefing
+	GoldNodes    string // formatted active goals and projects
+}
+
+// BuildMorningBriefing executes the morning briefing prompt template.
+func BuildMorningBriefing(data MorningBriefingData) (string, error) {
+	var buf bytes.Buffer
+	if err := morningBriefingTmpl.Execute(&buf, data); err != nil {
+		return "", fmt.Errorf("execute morning briefing: %w", err)
 	}
 	return buf.String(), nil
 }

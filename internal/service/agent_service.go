@@ -87,6 +87,20 @@ func (a *AgentService) ProcessAndRespond(ctx context.Context, input, source stri
 	return result
 }
 
+// RunMorningBriefing runs the Morning Briefing agent cycle and pushes the result to Telegram.
+func (a *AgentService) RunMorningBriefing(ctx context.Context, force bool) (*agent.MorningBriefingResult, error) {
+	infra.LoggerFrom(ctx).Info("function call", "fn", "RunMorningBriefing", "force", force)
+	result, err := agent.RunMorningBriefing(ctx, a.app, force)
+	if err != nil {
+		infra.LoggerFrom(ctx).Error("function result", "fn", "RunMorningBriefing", "error", err.Error())
+		return nil, err
+	}
+	infra.LoggerFrom(ctx).Info("function result", "fn", "RunMorningBriefing",
+		"skipped", result.Skipped,
+		"message_length", len(result.MessageSent))
+	return result, nil
+}
+
 // RunDreamer runs the Dreamer background cycle and returns a summary of what was synthesised.
 func (a *AgentService) RunDreamer(ctx context.Context, force bool) (*agent.DreamResult, error) {
 	infra.LoggerFrom(ctx).Info("function call", "fn", "RunDreamer", "force", force)

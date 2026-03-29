@@ -48,6 +48,7 @@ func NewRouter(s *Server) *chi.Mux {
 		r.Post("/internal/save-query", wrapAPI(handleSaveQuery))
 		r.Post("/internal/replay", wrapAPI(handleReplay))
 		r.Post("/internal/dream", wrapAPI(handleDream))
+		r.Post("/internal/morning-briefing", wrapAPI(handleMorningBriefing))
 	})
 
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {

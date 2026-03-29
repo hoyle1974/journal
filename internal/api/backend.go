@@ -61,6 +61,7 @@ type AgentService interface {
 	ProcessLogSequential(ctx context.Context, logUUID, logContent, timestamp, source string) (*agent.ProcessEntryReport, error)
 	ProcessAndRespond(ctx context.Context, input, source string) *agent.QueryResult
 	RunDreamer(ctx context.Context, force bool) (*agent.DreamResult, error)
+	RunMorningBriefing(ctx context.Context, force bool) (*agent.MorningBriefingResult, error)
 	IngestGapAnswer(ctx context.Context, question, answer string)
 }
 
