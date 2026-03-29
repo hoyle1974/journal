@@ -97,7 +97,7 @@ func registerKnowledgeTools() {
 
 	tools.Register(&tools.Tool{
 		Name:        "semantic_search",
-		Description: "Search semantic memory (high-significance facts) using vector similarity. Routes to knowledge nodes with significance_weight >= 0.7 — people, facts, preferences, projects, goals. Use this FIRST for factual questions (who is X, what do I prefer, what's the status of Y). For searching past events or log entries use search_entries instead. When answering, include the source date when results show one (e.g. 'Buy ice [Source: 2026-02-15]'). Results include UUID: lines — call graph_expand(node_id=<that uuid>, hops=1) when you need relationships or neighbourhood context around a hit; expansion is not injected automatically.",
+		Description: "Search semantic memory (high-significance facts) using vector similarity. Routes to knowledge nodes with significance_weight >= 0.5 — people, facts, preferences, projects, goals. Use this FIRST for factual questions (who is X, what do I prefer, what's the status of Y). For searching past events or log entries use search_entries instead. When answering, include the source date when results show one (e.g. 'Buy ice [Source: 2026-02-15]'). Results include UUID: lines — call graph_expand(node_id=<that uuid>, hops=1) when you need relationships or neighbourhood context around a hit; expansion is not injected automatically.",
 		Category:    "knowledge",
 		Args:        &semanticSearchArgs{},
 		Execute: func(ctx context.Context, env infra.ToolEnv, args any) tools.Result {
@@ -122,10 +122,10 @@ func registerKnowledgeTools() {
 				return tools.Fail("Error generating embedding: %v", err)
 			}
 
-			candidateLimit := limit * 3
-			// Single-pass vector search: significance_weight >= 0.7 pre-filter routes directly to
-			// semantic knowledge (Gold), excluding low-value gravel and raw log entries.
-			const semanticMinSignificance = 0.7
+			candidateLimit := limit * 5
+			// significance_weight >= 0.5 includes entity nodes (0.55) alongside Gold facts (0.7+).
+			// A wider candidate pool gives temporal re-ranking more material to work with.
+			const semanticMinSignificance = 0.5
 			vectorNodes, vecErr := env.MemoryGraph().QuerySimilar(ctx, queryVec, memory.SearchOptions{Limit: candidateLimit, MinSignificance: semanticMinSignificance})
 			if vecErr != nil {
 				infra.LogVectorSearchFailed(ctx, "journal(semantic)", vecErr, 0)
@@ -135,7 +135,8 @@ func registerKnowledgeTools() {
 			keywordNodes, _ := env.MemoryGraph().SearchKeywords(ctx, a.Query, candidateLimit)
 
 			fusedNodes := memory.FuseKnowledgeNodes(vectorNodes, keywordNodes, limit*2)
-			nodes, _ := env.MemoryGraph().Rerank(ctx, a.Query, fusedNodes, limit)
+			temporalNodes := memory.ApplyTemporalBias(fusedNodes, memory.TemporalDecayHalfLifeDays)
+			nodes, _ := env.MemoryGraph().Rerank(ctx, a.Query, temporalNodes, limit)
 
 			if vecErr != nil && len(nodes) == 0 {
 				return tools.Fail("Error: semantic search failed (vector: %v)", vecErr)
