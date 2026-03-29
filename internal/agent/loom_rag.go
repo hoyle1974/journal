@@ -51,9 +51,13 @@ func BuildLoomRAGContext(ctx context.Context, app *infra.App, logUUID, logConten
 	// search so graph context is always populated with semantically relevant nodes.
 	if len(seedNodeIDs) == 0 && len(queryVec) > 0 {
 		result.SeedSource = "vector_fallback"
-		hits, err := app.MemoryGraph().QuerySimilar(ctx, queryVec, memory.SearchOptions{Limit: 10, MinSignificance: 0.5})
+		hits, err := app.MemoryGraph().QuerySimilar(ctx, queryVec, memory.SearchOptions{Limit: 20, MinSignificance: 0.5})
 		if err != nil {
 			infra.LoggerFrom(ctx).Warn("loom rag: vector fallback search failed", "error", err)
+		}
+		hits = memory.ApplyTemporalBias(hits, memory.TemporalDecayHalfLifeDays)
+		if len(hits) > 10 {
+			hits = hits[:10]
 		}
 		for _, n := range hits {
 			seedNodeIDs = append(seedNodeIDs, n.UUID)
