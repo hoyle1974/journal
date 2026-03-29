@@ -106,7 +106,7 @@ func registerKnowledgeTools() {
 				return tools.MissingParam("query")
 			}
 			limit := clampInt(a.Limit, 10, 1, 20)
-			logArgs := []interface{}{"query", a.Query, "limit", limit, "reason", "semantic search over unified journal (significance>=0.7)"}
+			logArgs := []interface{}{"query", a.Query, "limit", limit, "reason", "semantic search over unified journal (significance>=0.5)"}
 			if a.SourceText != "" {
 				logArgs = append(logArgs, "source_text", a.SourceText)
 			}
