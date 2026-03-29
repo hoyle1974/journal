@@ -66,7 +66,9 @@ func (s *Store) EnsureNode(ctx context.Context, identifier, nodeType, sourceEntr
 		s.log.Debug("ensure node: semantic match", "input", cleanIdentifier, "matched", nearest.Content, "uuid", nearest.UUID)
 		if sourceEntryID != "" {
 			updates := buildRelationshipReobserveUpdates(sourceEntryID, ts)
-			_, _ = s.db.Collection(KnowledgeCollection).Doc(nearest.UUID).Update(ctx, updates)
+			if _, err := s.db.Collection(KnowledgeCollection).Doc(nearest.UUID).Update(ctx, updates); err != nil {
+				s.log.Warn("ensure node: failed to update re-observed node", "uuid", nearest.UUID, "error", err)
+			}
 		}
 		return nearest, nil
 	}
@@ -152,9 +154,8 @@ func stableRelID(subjectID, predicate, objectID string) string {
 // journal_entry_ids; if ts is non-empty it also refreshes the node's timestamp so
 // that temporal decay scoring reflects the most recent observation date.
 func buildRelationshipReobserveUpdates(sourceEntryID, ts string) []firestore.Update {
-	updates := []firestore.Update{
-		{Path: "journal_entry_ids", Value: firestore.ArrayUnion(sourceEntryID)},
-	}
+	updates := make([]firestore.Update, 0, 2)
+	updates = append(updates, firestore.Update{Path: "journal_entry_ids", Value: firestore.ArrayUnion(sourceEntryID)})
 	if ts != "" {
 		updates = append(updates, firestore.Update{Path: "timestamp", Value: ts})
 	}
@@ -179,7 +180,9 @@ func (s *Store) CreateRelationshipNode(ctx context.Context, subjectID, predicate
 	if err == nil && doc.Exists() {
 		if sourceEntryID != "" {
 			updates := buildRelationshipReobserveUpdates(sourceEntryID, ts)
-			_, _ = ref.Update(ctx, updates)
+			if _, err := ref.Update(ctx, updates); err != nil {
+				s.log.Warn("create relationship: failed to update re-observed node", "relID", relID, "error", err)
+			}
 		}
 		return relID, nil
 	}

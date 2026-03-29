@@ -45,6 +45,9 @@ func TestRelationshipTimestampUpdateSlice(t *testing.T) {
 		}
 		if u.Path == "journal_entry_ids" {
 			hasEntryIDs = true
+			if u.Value == nil {
+				t.Error("journal_entry_ids update value must not be nil")
+			}
 		}
 	}
 	if !hasTimestamp {
