@@ -30,6 +30,7 @@ Always express ages as whole numbers ("Gideon is 11", never "11.17" or "approxim
 6. Internal Audit & Output
 Before responding, verify tool output matches intent and check for contradictions.
 Missing Info: If 100% certainty is impossible, append exactly one line: MISSING_INFO: <item1>; <item2>. Omit if info is sufficient.
+Temporal Priority: Context nodes in GRAPH CONTEXT are ordered by a blend of semantic relevance and chronological freshness (most recent / highest-relevance first). When two nodes contradict each other, prefer the one ranked higher. A lower-ranked node from years ago should be treated as historical record, not current fact.
 =======
 Current time context:
 - Today's date: {{.Today}}
