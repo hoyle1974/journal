@@ -48,8 +48,11 @@ func FuseKnowledgeNodes(vectorNodes []KnowledgeNode, keywordNodes []KnowledgeNod
 		out = append(out, *s)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].score > out[j].score })
-	if topN <= 0 || len(out) == 0 {
+	if len(out) == 0 {
 		return nil
+	}
+	if topN <= 0 {
+		topN = len(out)
 	}
 	if topN > len(out) {
 		topN = len(out)

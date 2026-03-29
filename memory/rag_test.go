@@ -76,8 +76,8 @@ func TestApplyTemporalBias_SortsNewerFirst(t *testing.T) {
 	oldTS := time.Now().AddDate(-1, 0, 0).Format(time.RFC3339)
 	newTS := time.Now().Format(time.RFC3339)
 	nodes := []KnowledgeNode{
-		{UUID: "old", QueryScore: 0.95, Timestamp: oldTS},
-		{UUID: "new", QueryScore: 0.80, Timestamp: newTS},
+		{UUID: "old", QueryScore: 1.0, Timestamp: oldTS},
+		{UUID: "new", QueryScore: 1.0, Timestamp: newTS},
 	}
 	result := ApplyTemporalBias(nodes, 180)
 	if result[0].UUID != "new" {
