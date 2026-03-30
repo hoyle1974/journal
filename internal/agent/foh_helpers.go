@@ -10,7 +10,8 @@ import (
 	"github.com/jackstrohm/jot/pkg/utils"
 )
 
-// AddEntryAndEnqueue adds the entry to the journal and enqueues process-entry (or runs it inline if enqueue fails). Returns entry UUID.
+// AddEntryAndEnqueue adds the entry to the journal and enqueues process-entry. Returns entry UUID.
+// If enqueue fails, the entry remains saved but un-processed; the failure is logged as CRITICAL.
 // imageURL is optional (e.g. gs://bucket/path); pass "" when no image.
 // app is passed explicitly; use app.Firestore(ctx) for journal and app for enqueue/ProcessEntry.
 func AddEntryAndEnqueue(ctx context.Context, app *infra.App, content, source string, timestamp *string, imageURL string) (string, error) {

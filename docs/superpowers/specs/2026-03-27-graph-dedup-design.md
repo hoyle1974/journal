@@ -38,7 +38,7 @@ Requires a new composite index on `(node_type ASC, embedding VECTOR)` in `firest
 Updated flow:
 
 1. Generate embedding for the identifier (always, upfront)
-2. Call `FindNearestByType` with cosine distance threshold `0.15`
+2. Call `FindNearestByType` with cosine distance threshold `0.08`
    - If a match is found: append `sourceEntryID` to its `journal_entry_ids` via `ArrayUnion`, return the matched node
 3. If no match: run the existing transaction (SHA1 doc check → `name_key` exact match → create new node using the embedding already in hand)
 
@@ -87,6 +87,6 @@ New composite index required in `firestore.indexes.json`:
 
 ## Out of Scope
 
-- LLM-driven entity collision detection (Option C) — vector threshold sufficient given `node_type` filter
+- LLM-driven entity collision detection — deferred to v2 pending production metrics on graph fragmentation rates. A two-stage gate (auto-merge below 0.05, LLM validation between 0.05–0.08) was considered but rejected to keep the pipeline fast and deterministic. The `node_type` filter is the primary safeguard against false positives; the 0.08 threshold handles the rest conservatively.
 - Migration of existing orphaned relationship nodes
 - Changes to `UpsertKnowledge` or the FOH loop

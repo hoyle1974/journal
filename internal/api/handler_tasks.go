@@ -177,8 +177,8 @@ func runTelegramMessage(ctx context.Context, s *Server, msg *telegram.IncomingMe
 }
 
 // handleProcessTelegramQuery runs the full Telegram processing pipeline for a Cloud Tasks dispatch.
-// The core logic lives in runTelegramMessage, which is also called directly by the inline goroutine
-// in handleTelegram for resilience when Cloud Tasks dispatch is unreliable.
+// The core logic lives in runTelegramMessage, which is also called from the SubmitAsync goroutine
+// in handleTelegram. handleTelegram no longer dispatches via Cloud Tasks; it uses SubmitAsync exclusively.
 func handleProcessTelegramQuery(s *Server, w http.ResponseWriter, r *http.Request) (any, error) {
 	ctx := r.Context()
 	path := pathForLog(r.URL.Path)

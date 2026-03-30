@@ -37,8 +37,8 @@ type searchEntriesArgs struct {
 }
 
 type countEntriesArgs struct {
-	StartDate string `json:"start_date" description:"Start date (YYYY-MM-DD, optional)"`
-	EndDate   string `json:"end_date" description:"End date (YYYY-MM-DD, optional)"`
+	StartDate string `json:"start_date" description:"Start date (YYYY-MM-DD, optional). When provided without end_date, counts entries on or after this date."`
+	EndDate   string `json:"end_date" description:"End date (YYYY-MM-DD, optional). When provided without start_date, counts entries on or before this date."`
 }
 
 type getEntriesBySourceArgs struct {
@@ -48,7 +48,7 @@ type getEntriesBySourceArgs struct {
 
 type queryActivityHistoryArgs struct {
 	Topic     string `json:"topic" description:"The topic or keyword to summarize (e.g. 'migraines', 'work stress', 'jot app')" required:"true"`
-	Timeframe string `json:"timeframe" description:"Optional timeframe: 'last 6 months', 'last 30 days', 'this year', or leave empty for all matching entries (up to 100)"`
+	Timeframe string `json:"timeframe" description:"Optional timeframe using supported expressions only: 'today', 'yesterday', 'last week', 'last month', 'since monday' (or any weekday name), or a date like '2025-01-01'. Phrases like 'last 6 months' or 'last 30 days' are not supported. Leave empty for all matching entries (up to 100)."`
 }
 
 type queryEntitiesArgs struct {

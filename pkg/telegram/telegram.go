@@ -119,7 +119,9 @@ func ValidateSecretToken(cfg *config.Config, r *http.Request, log Logger) bool {
 	return true
 }
 
-// ParseWebhook parses the request body as a Telegram Update and returns the first text message, if any.
+// ParseWebhook parses the request body as a Telegram Update into an IncomingMessage.
+// Handles text messages, photo captions (ImageFileID), voice notes (VoiceFileID),
+// and location pins (HasLocation, Latitude, Longitude).
 func ParseWebhook(r *http.Request) (*WebhookUpdate, *IncomingMessage, error) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {

@@ -198,19 +198,16 @@ func (s *Store) SearchEntries(ctx context.Context, keywords string, limit int) (
 	return entries, nil
 }
 
-// CountEntries counts entries, optionally within a date range.
+// CountEntries counts entries, optionally filtered by date range.
+// startDate and endDate are each optional; when only one is provided, the query applies
+// that single bound. Both must be non-empty strings to activate their respective bound.
 func (s *Store) CountEntries(ctx context.Context, startDate, endDate *string) (int, error) {
-	var query firestore.Query
-	if startDate != nil && endDate != nil && *startDate != "" && *endDate != "" {
-		start := padDateStart(*startDate)
-		end := padDateEnd(*endDate)
-		query = s.db.Collection(KnowledgeCollection).
-			Where("node_type", "==", NodeTypeLog).
-			Where("timestamp", ">=", start).
-			Where("timestamp", "<=", end)
-	} else {
-		query = s.db.Collection(KnowledgeCollection).
-			Where("node_type", "==", NodeTypeLog)
+	query := s.db.Collection(KnowledgeCollection).Where("node_type", "==", NodeTypeLog)
+	if startDate != nil && *startDate != "" {
+		query = query.Where("timestamp", ">=", padDateStart(*startDate))
+	}
+	if endDate != nil && *endDate != "" {
+		query = query.Where("timestamp", "<=", padDateEnd(*endDate))
 	}
 	result, err := query.NewAggregationQuery().WithCount("count").Get(ctx)
 	if err != nil {

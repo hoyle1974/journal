@@ -32,7 +32,7 @@ type updateTaskArgs struct {
 	TaskID                string  `json:"task_id" description:"Task UUID" required:"true"`
 	Content               string  `json:"content" description:"New task description/title"`
 	ParentID              string  `json:"parent_uuid" description:"New parent task UUID, or empty to make root"`
-	DueDate               string  `json:"due_date" description:"Due date (YYYY-MM-DD), or empty to clear"`
+	DueDate               string  `json:"due_date" description:"Due date (YYYY-MM-DD), or 'none' to clear the due date"`
 	SystemPrompt          string  `json:"system_prompt" description:"Instructions for the LLM when working on this task"`
 	AddJournalEntryIDs    string  `json:"add_journal_entry_ids" description:"Comma-separated journal entry UUIDs to link to this task"`
 	RemoveJournalEntryIDs string  `json:"remove_journal_entry_ids" description:"Comma-separated journal entry UUIDs to unlink from this task"`
@@ -142,7 +142,7 @@ func registerTaskTools() {
 
 	tools.Register(&tools.Tool{
 		Name:        "update_task",
-		Description: "Update a task's editable fields. Provide task_id and any of: content, parent_id, due_date (YYYY-MM-DD or empty to clear), system_prompt; or add/remove journal or memory backlinks (comma-separated UUIDs). Only provided fields are changed. Use update_task_status to change status.",
+		Description: "Update a task's editable fields. Provide task_id and any of: content, parent_id, due_date (YYYY-MM-DD or 'none' to clear), system_prompt; or add/remove journal or memory backlinks (comma-separated UUIDs). Only provided fields are changed. Use update_task_status to change status.",
 		Category:    "task",
 		Args:        &updateTaskArgs{},
 		Execute: func(ctx context.Context, env infra.ToolEnv, args any) tools.Result {
@@ -157,7 +157,10 @@ func registerTaskTools() {
 			if a.ParentID != "" {
 				opts.ParentID = &a.ParentID
 			}
-			if a.DueDate != "" {
+			if a.DueDate == "none" {
+				cleared := ""
+				opts.DueDate = &cleared
+			} else if a.DueDate != "" {
 				opts.DueDate = &a.DueDate
 			}
 			if a.SystemPrompt != "" {

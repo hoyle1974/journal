@@ -75,7 +75,7 @@ func RunEvaluatorExtract(ctx context.Context, app *infra.App, content string) (*
 }
 
 // AgencyTaskCommitmentThreshold is the minimum future_commitment score for the Loom task worker
-// to auto-create a task node from a log entry.
+// to queue a PendingQuestion task proposal from a log entry.
 const AgencyTaskCommitmentThreshold = 0.6
 
 // MinCommitmentIntentLen is the minimum length of commitment_intent to auto-create a task (avoid vague commitments).

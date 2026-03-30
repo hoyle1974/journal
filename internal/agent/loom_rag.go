@@ -21,11 +21,9 @@ type LoomRAGContext struct {
 }
 
 // BuildLoomRAGContext performs 2-hop context retrieval from seed node IDs produced by the refinery.
-// Uses two batch RPCs instead of N individual fetches:
-//  1. Batch-fetch all seed nodes; classify as relationship or entity.
-//  2. Collect second-hop IDs (subject/object for rels, EntityLinks for entities).
-//  3. Batch-fetch second-hop nodes.
-//  4. Always include open root tasks for task-aware reasoning.
+// Graph expansion is delegated to app.MemoryGraph().ExpandMulti(), which handles batching
+// and deduplication internally. Open root tasks for task-aware reasoning are injected
+// separately by prompter.go (GetOpenRootTasks), not here.
 //
 // logContent is used as a keyword-search fallback when seedNodeIDs is empty (e.g. for questions
 // that yield no extractable triples from the refinery).

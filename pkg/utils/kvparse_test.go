@@ -59,6 +59,25 @@ func TestParseKeyValueMap(t *testing.T) {
 				"args": {"content | Note: use a | b for options"},
 			},
 		},
+		{
+			name: "chatty preamble is ignored",
+			text: "Here are the extracted triples:\nsubject: Alice\npredicate: knows\nobject: Bob",
+			wantSimple: map[string]string{
+				"subject":   "Alice",
+				"predicate": "knows",
+				"object":    "Bob",
+			},
+			wantSections: map[string][]string{},
+		},
+		{
+			name: "preamble section header does not consume real keys",
+			text: "Sure, here are your results:\nname: Alice\nrole: engineer",
+			wantSimple: map[string]string{
+				"name": "Alice",
+				"role": "engineer",
+			},
+			wantSections: map[string][]string{},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
