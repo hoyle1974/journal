@@ -25,8 +25,10 @@ type ProcessEntryReport struct {
 //	Stage 2: Refinery       — extract KG triples and commit graph objects/relationships.
 //	Stage 3: Task Worker    — scan for commitments and create task nodes linked to graph objects.
 //
-// Stage 2 and 3 failures are logged but do NOT abort the pipeline.
-// Stage 4 removed — FOH+thinking replaces response worker.
+// Stage 2 (Refinery) failures abort the pipeline and return an error so the
+// Cloud Tasks handler returns HTTP 500 and retries automatically. Stage 3
+// (Task Worker) failures are logged but do not abort (retry idempotency not
+// yet verified). Stage 4 removed — FOH+thinking replaces response worker.
 func ProcessLogSequential(ctx context.Context, app *infra.App, logUUID, logContent, timestamp, source string) (*ProcessEntryReport, error) {
 	if app == nil || app.Config() == nil {
 		return nil, fmt.Errorf("ProcessLogSequential: app or config is nil")
@@ -58,8 +60,30 @@ func ProcessLogSequential(ctx context.Context, app *infra.App, logUUID, logConte
 	}
 	infra.LoggerFrom(ctx).Info("loom stage 1 done: log node persisted", "log_uuid", logUUID)
 
-	// ── Stages 2 & 3: Refinery + Task Worker ─────────────────────────────────
-	extractedNodeIDs, _ := ProcessEntrySyncPipeline(ctx, app, logUUID, logContent, source, timestamp)
+	// ── Stage 2: Refinery ────────────────────────────────────────────────────
+	// Errors are propagated so Cloud Tasks returns HTTP 500 and retries on
+	// transient LLM failures (rate limits, timeouts). Lost Gold is unrecoverable
+	// when swallowed, whereas a retry is free.
+	infra.LoggerFrom(ctx).Debug("loom stage 2: refinery", "log_uuid", logUUID)
+	extractedNodeIDs, refineryErr := runRefineryPipeline(ctx, app, logUUID, logContent, timestamp)
+	if refineryErr != nil {
+		infra.LoggerFrom(ctx).Error("loom stage 2 FAILED: refinery pipeline — propagating for Cloud Tasks retry",
+			"log_uuid", logUUID, "error", refineryErr)
+		return nil, fmt.Errorf("loom stage 2: refinery: %w", refineryErr)
+	}
+	infra.LoggerFrom(ctx).Info("loom stage 2 done: refinery complete",
+		"log_uuid", logUUID, "node_count", len(extractedNodeIDs))
+
+	// ── Stage 3: Task Worker ──────────────────────────────────────────────────
+	// Still log-and-continue: task creation has dedup guards but full retry
+	// idempotency is not yet verified.
+	infra.LoggerFrom(ctx).Debug("loom stage 3: task worker", "log_uuid", logUUID)
+	if taskErr := runTaskWorker(ctx, app, logContent, []string{logUUID}); taskErr != nil {
+		infra.LoggerFrom(ctx).Warn("loom stage 3 FAILED: task worker error — pipeline continues",
+			"log_uuid", logUUID, "error", taskErr)
+	} else {
+		infra.LoggerFrom(ctx).Info("loom stage 3 done: task worker complete", "log_uuid", logUUID)
+	}
 
 	infra.LoggerFrom(ctx).Info("loom pipeline complete",
 		"event", "loom_done",
