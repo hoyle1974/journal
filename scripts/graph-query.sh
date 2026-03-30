@@ -25,15 +25,13 @@ else
   exit 1
 fi
 
-DOT_FILE="$(mktemp /tmp/jot-graph-XXXXXX.dot)"
-PNG_FILE="${DOT_FILE%.dot}.png"
+DOT_FILE="/tmp/jot-graph-query.dot"
+PNG_FILE="/tmp/jot-graph-query.png"
 
 JOT_PROFILE="$ENV_TARGET" go run ./cmd/admin graph-query -dot-file="$DOT_FILE" "$@"
 
 if [ -s "$DOT_FILE" ] && command -v dot &>/dev/null && command -v imgcat &>/dev/null; then
-  dot -Tpng "$DOT_FILE" -o "$PNG_FILE" 2>/dev/null 
+  dot -Tpng "$DOT_FILE" -o "$PNG_FILE" 2>/dev/null
   imgcat --width $(tput cols) "$PNG_FILE"
   echo "(graph saved to $PNG_FILE)"
 fi
-
-rm -f "$DOT_FILE"

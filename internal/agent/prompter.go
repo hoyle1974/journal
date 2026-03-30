@@ -27,7 +27,24 @@ func BuildSystemPrompt(ctx context.Context, env infra.ToolEnv, ragContext string
 	lastWeekStr := fmt.Sprintf("%d-W%02d", lastWeek.Year(), lastWeekNum)
 	currentMonth := now.Format("2006-01")
 
+	// Identity block: always pin identity_anchor (owner name) + user_identity nodes.
+	// These are immutable system facts that must not depend on vector similarity.
 	identityWrapped := ""
+	if env != nil {
+		ownerName, _ := env.MemoryStore().FetchOwnerName(ctx)
+		identityNodes, _ := env.MemoryStore().GetUserIdentityNodes(ctx, 20)
+		if ownerName != "" || len(identityNodes) > 0 {
+			var lines []string
+			if ownerName != "" {
+				lines = append(lines, fmt.Sprintf("Owner: %s", ownerName))
+			}
+			for _, n := range identityNodes {
+				lines = append(lines, "- "+n.Content)
+			}
+			identityBlock := fmt.Sprintf("\n---\n## 👤 IDENTITY\n# Core facts about the user. Always treat these as ground truth.\n\n%s", strings.Join(lines, "\n"))
+			identityWrapped = utils.WrapAsUserData(identityBlock)
+		}
+	}
 
 	// 1. Recent Conversation
 	var queries []memory.QueryLog
