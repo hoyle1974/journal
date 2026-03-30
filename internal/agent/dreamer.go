@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/firestore"
-	"github.com/hoyle1974/memory"
+	"github.com/jackstrohm/jot/memory"
 	"github.com/jackstrohm/jot/internal/infra"
 	"github.com/jackstrohm/jot/internal/prompts"
 	"github.com/jackstrohm/jot/pkg/system"
@@ -115,7 +115,7 @@ func RunDreamCycle(ctx context.Context, app *infra.App, force bool) (*DreamResul
 	prompt, err := prompts.BuildDreamer(prompts.DreamerData{
 		Today:               now.Format("2006-01-02"),
 		CurrentTime:         now.Format("15:04 MST"),
-		EntriesText:         utils.WrapAsUserData(dreamFormatEntries(entries)),
+		EntriesText:         utils.WrapAsUserData(formatEntriesForPrompt(entries)),
 		OpenTasksText:       utils.WrapAsUserData(dreamFormatTasks(openTasks)),
 		LoomContextBlock:    utils.WrapAsUserData(ragContext),
 		RecentQuestionsText: utils.WrapAsUserData(dreamFormatQuestions(openQuestions, resolvedQuestions)),
@@ -324,21 +324,6 @@ func dreamFetchEntries(ctx context.Context, app *infra.App, sinceTimestamp strin
 	return entries, nil
 }
 
-// dreamFormatEntries renders log entries as a numbered list for the LLM prompt.
-func dreamFormatEntries(entries []memory.Entry) string {
-	if len(entries) == 0 {
-		return "(no recent entries)"
-	}
-	var sb strings.Builder
-	for i, e := range entries {
-		ts := e.Timestamp
-		if len(ts) > 10 {
-			ts = ts[:10]
-		}
-		sb.WriteString(fmt.Sprintf("%d. [%s] %s\n", i+1, ts, e.Content))
-	}
-	return strings.TrimRight(sb.String(), "\n")
-}
 
 // dreamFormatQuestions renders recently asked (open) and answered questions for the LLM prompt.
 // Open questions are listed first so the model knows what's still pending; answered questions

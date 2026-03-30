@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hoyle1974/memory"
+	"github.com/jackstrohm/jot/memory"
 	"github.com/jackstrohm/jot/internal/timeout"
 	"github.com/joho/godotenv"
 	"github.com/spf13/cobra"

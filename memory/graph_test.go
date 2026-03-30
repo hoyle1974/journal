@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hoyle1974/memory"
+	"github.com/jackstrohm/jot/memory"
 )
 
 func TestGraphExpandValidation(t *testing.T) {

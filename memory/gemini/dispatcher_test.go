@@ -9,7 +9,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/hoyle1974/memory"
+	"github.com/jackstrohm/jot/memory"
 )
 
 func TestIsSafetyResponse(t *testing.T) {

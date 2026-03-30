@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/firestore"
-	"github.com/hoyle1974/memory"
+	"github.com/jackstrohm/jot/memory"
 	"github.com/jackstrohm/jot/internal/infra"
 	"github.com/jackstrohm/jot/internal/prompts"
 	"github.com/jackstrohm/jot/pkg/system"
@@ -101,7 +101,7 @@ func RunMorningBriefing(ctx context.Context, app *infra.App, force bool) (*Morni
 	prompt, err := prompts.BuildMorningBriefing(prompts.MorningBriefingData{
 		Today:         dateStr,
 		CurrentTime:   now.Format("15:04 MST"),
-		GravelEntries: utils.WrapAsUserData(briefingFormatGravelEntries(gravelEntries)),
+		GravelEntries: utils.WrapAsUserData(formatEntriesForPrompt(gravelEntries)),
 		GoldNodes:     utils.WrapAsUserData(briefingFormatGoldNodes(goldNodes)),
 	})
 	if err != nil {
@@ -271,21 +271,6 @@ func parseTelegramChatID(app *infra.App) (int64, error) {
 	return id, nil
 }
 
-// briefingFormatGravelEntries renders log entries as a numbered list for the LLM prompt.
-func briefingFormatGravelEntries(entries []memory.Entry) string {
-	if len(entries) == 0 {
-		return "(no recent entries)"
-	}
-	var sb strings.Builder
-	for i, e := range entries {
-		ts := e.Timestamp
-		if len(ts) > 10 {
-			ts = ts[:10]
-		}
-		sb.WriteString(fmt.Sprintf("%d. [%s] %s\n", i+1, ts, e.Content))
-	}
-	return strings.TrimRight(sb.String(), "\n")
-}
 
 // briefingFormatGoldNodes renders active goals/projects for the LLM prompt.
 func briefingFormatGoldNodes(nodes []briefingGoldNode) string {

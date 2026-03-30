@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/hoyle1974/memory"
+	"github.com/jackstrohm/jot/memory"
 	"github.com/jackstrohm/jot/internal/infra"
 )
 

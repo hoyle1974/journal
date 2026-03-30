@@ -74,16 +74,7 @@ func (s *Store) FindNearestWithThreshold(ctx context.Context, queryVector []floa
 	if err != nil || doc == nil {
 		return nil, nil
 	}
-	data := doc.Data()
-	n := &KnowledgeNode{
-		UUID:            doc.Ref.ID,
-		Content:         getStringField(data, "content"),
-		NodeType:        getStringField(data, "node_type"),
-		Metadata:        getStringField(data, "metadata"),
-		Timestamp:       getStringField(data, "timestamp"),
-		JournalEntryIDs: getStringSliceField(data, "journal_entry_ids"),
-	}
-	return n, nil
+	return nodeFromDoc(doc)
 }
 
 // FindNearestByType returns the single nearest knowledge node of the given node_type within distanceThreshold, else nil.
@@ -98,16 +89,7 @@ func (s *Store) FindNearestByType(ctx context.Context, queryVector []float32, no
 	if err != nil || doc == nil {
 		return nil, nil
 	}
-	data := doc.Data()
-	n := &KnowledgeNode{
-		UUID:            doc.Ref.ID,
-		Content:         getStringField(data, "content"),
-		NodeType:        getStringField(data, "node_type"),
-		Metadata:        getStringField(data, "metadata"),
-		Timestamp:       getStringField(data, "timestamp"),
-		JournalEntryIDs: getStringSliceField(data, "journal_entry_ids"),
-	}
-	return n, nil
+	return nodeFromDoc(doc)
 }
 
 // AppendJournalEntryIDsToNode merges entryIDs into the node's journal_entry_ids (deduped) and updates the document.
@@ -167,26 +149,11 @@ func (s *Store) GetKnowledgeNodeByID(ctx context.Context, id string) (*Knowledge
 	if err != nil {
 		return nil, err
 	}
-	data := doc.Data()
-	n := &KnowledgeNodeWithLinks{
-		KnowledgeNode: KnowledgeNode{
-			UUID:               doc.Ref.ID,
-			Content:            getStringField(data, "content"),
-			NodeType:           getStringField(data, "node_type"),
-			Metadata:           getStringField(data, "metadata"),
-			Timestamp:          getStringField(data, "timestamp"),
-			Predicate:          getStringField(data, "predicate"),
-			SubjectUUID:        getStringField(data, "subject_uuid"),
-			ObjectUUID:         getStringField(data, "object_uuid"),
-			SignificanceWeight: getFloat64Field(data, "significance_weight"),
-		},
-		EntityLinks:     getStringSliceField(data, "entity_links"),
-		JournalEntryIDs: getStringSliceField(data, "journal_entry_ids"),
+	n, err := nodeWithLinksFromDoc(doc)
+	if err != nil {
+		return nil, err
 	}
-	if v, ok := data["embedding"].(firestore.Vector32); ok {
-		n.KnowledgeNode.Embedding = []float32(v)
-	}
-	return n, nil
+	return &n, nil
 }
 
 // GetKnowledgeNodesByIDs fetches multiple knowledge nodes by UUID using Firestore
@@ -230,24 +197,10 @@ func (s *Store) GetKnowledgeNodesByIDs(ctx context.Context, ids []string) ([]Kno
 				s.log.Debug("get knowledge nodes batch: doc not found", "id", doc.Ref.ID)
 				continue
 			}
-			data := doc.Data()
-			n := KnowledgeNodeWithLinks{
-				KnowledgeNode: KnowledgeNode{
-					UUID:               doc.Ref.ID,
-					Content:            getStringField(data, "content"),
-					NodeType:           getStringField(data, "node_type"),
-					Metadata:           getStringField(data, "metadata"),
-					Timestamp:          getStringField(data, "timestamp"),
-					Predicate:          getStringField(data, "predicate"),
-					ObjectUUID:         getStringField(data, "object_uuid"),
-					SubjectUUID:        getStringField(data, "subject_uuid"),
-					SignificanceWeight: getFloat64Field(data, "significance_weight"),
-				},
-				EntityLinks:     getStringSliceField(data, "entity_links"),
-				JournalEntryIDs: getStringSliceField(data, "journal_entry_ids"),
-			}
-			if v, ok := data["embedding"].(firestore.Vector32); ok {
-				n.KnowledgeNode.Embedding = []float32(v)
+			n, err := nodeWithLinksFromDoc(doc)
+			if err != nil {
+				s.log.Debug("get knowledge nodes batch: deserialise failed", "id", doc.Ref.ID, "err", err)
+				continue
 			}
 			nodes = append(nodes, n)
 		}
@@ -262,15 +215,11 @@ func (s *Store) GetUserIdentityNodes(ctx context.Context, limit int) ([]Knowledg
 		OrderBy("timestamp", firestore.Desc).
 		Limit(limit)
 	nodes, err := queryDocuments(ctx, query, func(doc *firestore.DocumentSnapshot) (KnowledgeNode, error) {
-		data := doc.Data()
-		return KnowledgeNode{
-			UUID:            doc.Ref.ID,
-			Content:         getStringField(data, "content"),
-			NodeType:        getStringField(data, "node_type"),
-			Metadata:        getStringField(data, "metadata"),
-			Timestamp:       getStringField(data, "timestamp"),
-			JournalEntryIDs: getStringSliceField(data, "journal_entry_ids"),
-		}, nil
+		n, err := nodeFromDoc(doc)
+		if err != nil {
+			return KnowledgeNode{}, err
+		}
+		return *n, nil
 	})
 	if err != nil {
 		return nil, wrapFirestoreIndexError(err)

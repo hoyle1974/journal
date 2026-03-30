@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/hoyle1974/memory"
+	"github.com/jackstrohm/jot/memory"
 	"github.com/jackstrohm/jot/internal/infra"
 )
 

@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/hoyle1974/memory"
+	"github.com/jackstrohm/jot/memory"
 )
 
 // compile-time assertion: embedder must satisfy the full Embedder interface including EmbedContent.

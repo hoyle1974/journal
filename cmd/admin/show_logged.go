@@ -13,7 +13,7 @@ import (
 	"google.golang.org/api/iterator"
 
 	"github.com/jackstrohm/jot/internal/infra"
-	"github.com/hoyle1974/memory"
+	"github.com/jackstrohm/jot/memory"
 )
 
 func runShowLogged(ctx context.Context, app *infra.App, args []string) {

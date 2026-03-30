@@ -7,7 +7,7 @@ import (
 
 	"google.golang.org/genai"
 
-	"github.com/hoyle1974/memory"
+	"github.com/jackstrohm/jot/memory"
 )
 
 const (

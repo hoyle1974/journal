@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"cloud.google.com/go/firestore"
-	"github.com/hoyle1974/memory"
+	"github.com/jackstrohm/jot/memory"
 	"github.com/jackstrohm/jot/internal/infra"
 	"github.com/jackstrohm/jot/pkg/utils"
 )

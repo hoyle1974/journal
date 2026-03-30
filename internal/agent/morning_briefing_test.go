@@ -5,13 +5,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hoyle1974/memory"
+	"github.com/jackstrohm/jot/memory"
 )
 
 // ── formatGravelEntries ──────────────────────────────────────────────────────
 
 func TestBriefingFormatGravelEntriesEmpty(t *testing.T) {
-	out := briefingFormatGravelEntries(nil)
+	out := formatEntriesForPrompt(nil)
 	if out != "(no recent entries)" {
 		t.Fatalf("expected '(no recent entries)', got %q", out)
 	}
@@ -22,7 +22,7 @@ func TestBriefingFormatGravelEntriesIncludesContent(t *testing.T) {
 		{Content: "went for a run", Timestamp: "2026-03-29T07:00:00Z"},
 		{Content: "felt anxious about project X", Timestamp: "2026-03-29T09:00:00Z"},
 	}
-	out := briefingFormatGravelEntries(entries)
+	out := formatEntriesForPrompt(entries)
 	if !strings.Contains(out, "went for a run") {
 		t.Errorf("expected output to contain first entry content")
 	}
