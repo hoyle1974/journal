@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/jackstrohm/jot/pkg/utils"
 )
 
 // FormatQueriesForContext formats queries into a readable string for LLM context.
@@ -15,17 +17,17 @@ func FormatQueriesForContext(queries []QueryLog, maxChars int) string {
 	var lines []string
 	totalRunes := 0
 	for i, q := range queries {
-		answer := sanitizePrompt(q.Answer)
+		answer := utils.SanitizePrompt(q.Answer)
 		if utf8.RuneCountInString(answer) > 300 {
-			answer = truncateString(answer, 300) + "..."
+			answer = utils.TruncateString(answer, 300) + "..."
 		}
 		ts := q.Timestamp
 		if ts == "" {
 			ts = "(no date)"
 		} else {
-			ts = truncateString(ts, 19)
+			ts = utils.TruncateString(ts, 19)
 		}
-		question := sanitizePrompt(q.Question)
+		question := utils.SanitizePrompt(q.Question)
 		line := fmt.Sprintf("[%s] (%s)\n  Q: %s\n  A: %s", ts, q.Source, question, answer)
 		lineRunes := utf8.RuneCountInString(line)
 		if totalRunes+lineRunes+2 > maxChars {

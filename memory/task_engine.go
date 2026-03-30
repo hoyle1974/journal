@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"cloud.google.com/go/firestore"
+	"github.com/jackstrohm/jot/pkg/utils"
 	"google.golang.org/api/iterator"
 )
 
@@ -29,7 +30,7 @@ func (s *Store) BrainstormSubtasks(ctx context.Context, parentTaskID string) (st
 		return "", fmt.Errorf("fetch parent task: %w", err)
 	}
 
-	userPrompt := fmt.Sprintf("Break down this task into subtasks:\n%s", wrapAsUserData(sanitizePrompt(parent.Content)))
+	userPrompt := fmt.Sprintf("Break down this task into subtasks:\n%s", utils.WrapAsUserData(utils.SanitizePrompt(parent.Content)))
 
 	text, err := s.llm.Dispatch(ctx, LLMRequest{
 		SystemPrompt: decomposeSystemPrompt,
@@ -43,7 +44,7 @@ func (s *Store) BrainstormSubtasks(ctx context.Context, parentTaskID string) (st
 	text = strings.TrimSpace(text)
 	s.log.Debug("engine: decompose raw response", "text", text)
 
-	kvMap, sections := parseKeyValueMap(text)
+	kvMap, sections := utils.ParseKeyValueMap(text)
 
 	isSeq := strings.EqualFold(strings.TrimSpace(kvMap["is_sequential"]), "true")
 

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"cloud.google.com/go/firestore"
+	"github.com/jackstrohm/jot/pkg/utils"
 	"google.golang.org/api/iterator"
 )
 
@@ -60,7 +61,7 @@ func truncateForLog(s string, maxLen int) string {
 	if len([]rune(s)) <= maxLen {
 		return s
 	}
-	return truncateString(s, maxLen) + "..."
+	return utils.TruncateString(s, maxLen) + "..."
 }
 
 // FindNearestWithThreshold returns the single nearest knowledge node if within distanceThreshold, else nil.
@@ -242,7 +243,7 @@ func (s *Store) GetActiveSignals(ctx context.Context, limit int) (string, error)
 		}
 		ts := getStringField(data, "timestamp")
 		if len([]rune(ts)) > 19 {
-			ts = truncateString(ts, 19)
+			ts = utils.TruncateString(ts, 19)
 		}
 		if ts == "" {
 			ts = "(no date)"

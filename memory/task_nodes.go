@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/firestore"
+	"github.com/jackstrohm/jot/pkg/utils"
 	"google.golang.org/api/iterator"
 )
 
@@ -248,8 +249,8 @@ func (s *Store) UpdateTaskStatus(ctx context.Context, uuid, newStatus, reflectio
 	}
 
 	userPrompt := fmt.Sprintf("Task: %s\n\nReason: %s",
-		wrapAsUserData(sanitizePrompt(existing.Content)),
-		wrapAsUserData(sanitizePrompt(reflectionReason)))
+		utils.WrapAsUserData(utils.SanitizePrompt(existing.Content)),
+		utils.WrapAsUserData(utils.SanitizePrompt(reflectionReason)))
 
 	summary, err := s.llm.Dispatch(ctx, LLMRequest{
 		SystemPrompt: reflectionSystemPrompt,
@@ -260,7 +261,7 @@ func (s *Store) UpdateTaskStatus(ctx context.Context, uuid, newStatus, reflectio
 		return fmt.Errorf("generate reflection summary: %w", err)
 	}
 
-	summary = truncateString(summary, 500)
+	summary = utils.TruncateString(summary, 500)
 	// Reject malformed output (e.g. model returned "[ 1 ]" or JSON); fall back to reason.
 	if summary == "" || strings.HasPrefix(summary, "[") || strings.HasPrefix(summary, "{") {
 		summary = reflectionReason

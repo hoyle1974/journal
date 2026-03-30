@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/firestore"
+	"github.com/jackstrohm/jot/pkg/utils"
 )
 
 const factCollisionSystemPrompt = `You are a logic engine. Compare New Fact to Existing Fact. If they mean the exact same thing or New Fact is a direct update to Existing Fact, return 'update'. If they contradict each other or refer to different specific details, return 'insert'. If Existing Fact is empty, return 'update'. Reply with ONLY 'update' or 'insert'.`
@@ -16,7 +17,7 @@ const factCollisionSystemPrompt = `You are a logic engine. Compare New Fact to E
 // evaluateFactCollision decides whether the new fact should overwrite the existing one (update) or be stored as a new node (insert).
 func (s *Store) evaluateFactCollision(ctx context.Context, newFact, existingFact string) (string, error) {
 	userPrompt := fmt.Sprintf("New Fact:\n%s\n\nExisting Fact:\n%s",
-		wrapAsUserData(newFact), wrapAsUserData(existingFact))
+		utils.WrapAsUserData(newFact), utils.WrapAsUserData(existingFact))
 	text, err := s.llm.Dispatch(ctx, LLMRequest{
 		SystemPrompt: factCollisionSystemPrompt,
 		UserPrompt:   userPrompt,

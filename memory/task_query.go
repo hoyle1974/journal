@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"cloud.google.com/go/firestore"
+	"github.com/jackstrohm/jot/pkg/utils"
 	"google.golang.org/api/iterator"
 )
 
@@ -97,7 +98,7 @@ func FormatTasksForContext(tasks []Task, maxChars int) string {
 		if due == "" {
 			due = "(not set)"
 		}
-		line := fmt.Sprintf("[%s] status=%s due=%s | %s", t.UUID, t.Status, due, truncateString(t.Content, 120))
+		line := fmt.Sprintf("[%s] status=%s due=%s | %s", t.UUID, t.Status, due, utils.TruncateString(t.Content, 120))
 		if n+len(line) > maxChars {
 			break
 		}

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/jackstrohm/jot/pkg/utils"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -232,7 +233,7 @@ func (s *Store) pruneCandidates(candidates []KnowledgeNodeWithLinks, queryVector
 	scoredNodes := make([]scoredNode, len(candidates))
 	for i, c := range candidates {
 		scoredNodes[i].node = c
-		scoredNodes[i].score = cosineSimilarity(queryVector, c.Embedding)
+		scoredNodes[i].score = utils.CosineSimilarity(queryVector, c.Embedding)
 	}
 	sort.Slice(scoredNodes, func(i, j int) bool {
 		return scoredNodes[i].score > scoredNodes[j].score

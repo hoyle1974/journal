@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"cloud.google.com/go/firestore"
+	"github.com/jackstrohm/jot/pkg/utils"
 )
 
 // UpdateProjectStatus sets the status field on a project or goal node's metadata.
@@ -83,7 +84,7 @@ func (s *Store) AppendToProjectArchiveSummary(ctx context.Context, projectID, on
 	}
 	line := oneLine
 	if len(line) > 200 {
-		line = truncateToMaxBytes(line, 197) + "..."
+		line = utils.TruncateToMaxBytes(line, 197) + "..."
 	}
 	if current != "" {
 		current += "\n- " + line

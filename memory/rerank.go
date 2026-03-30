@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/jackstrohm/jot/pkg/utils"
 )
 
 const rerankSystemPrompt = "You are a re-ranker. Given a query and a numbered list of text items, output the 1-based item numbers that best answer the query, ordered by relevance. Only include relevant items. Output structured key/value lines only. No JSON, no markdown.\n\nindices:\n<number>\n(one index per line, e.g. 3 then 1 then 5)"
@@ -38,7 +40,7 @@ func (s *Store) RerankNodes(ctx context.Context, query string, nodes []Knowledge
 		return firstN(nodes, topN), nil
 	}
 
-	_, sections := parseKeyValueMap(text)
+	_, sections := utils.ParseKeyValueMap(text)
 	lineStrs := sections["indices"]
 	var indices []int
 	for _, s := range lineStrs {

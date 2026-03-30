@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/firestore"
+	"github.com/jackstrohm/jot/pkg/utils"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -238,7 +239,7 @@ func (s *Store) filterDuplicatePendingQuestions(ctx context.Context, candidates 
 			if len(ex.Embedding) == 0 {
 				continue
 			}
-			sim := cosineSimilarity(c.Embedding, ex.Embedding)
+			sim := utils.CosineSimilarity(c.Embedding, ex.Embedding)
 			if sim >= dedupSimilarityThreshold {
 				s.log.Info("dedup: dropping similar question",
 					"candidate", c.Question,
