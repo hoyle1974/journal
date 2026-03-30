@@ -100,7 +100,7 @@ func handlePendingQuestion(ctx context.Context, app *infra.App, chatID int64, te
 		infra.LoggerFrom(ctx).Warn("telegram: could not check pending questions, proceeding to FOH", "chat_id", chatID, "error", err)
 		return "", false
 	}
-	q := selectQuestionToAsk(questions)
+	q := selectQuestionToAsk(questions, text)
 	if q == nil {
 		return "", false // all questions in backoff window, run FOH
 	}
@@ -124,7 +124,7 @@ func askNextOrDone(ctx context.Context, app *infra.App, chatID int64) (string, b
 	if err != nil || len(questions) == 0 {
 		return "Got it! You're all set.", true
 	}
-	q := selectQuestionToAsk(questions)
+	q := selectQuestionToAsk(questions, "")
 	if q == nil {
 		return "Got it! You're all set.", true
 	}
@@ -153,9 +153,24 @@ func questionBackoffDays(askCount int) int {
 	return days
 }
 
-// selectQuestionToAsk returns the first question from the list whose backoff window
-// has elapsed, or nil if all questions are still in their backoff window.
-func selectQuestionToAsk(questions []memory.PendingQuestion) *memory.PendingQuestion {
+// selectQuestionToAsk returns the best question to ask next. If incomingText is non-empty,
+// questions whose content mentions terms from that text are bumped ahead of the backoff queue.
+// Otherwise returns the first question whose backoff window has elapsed, or nil.
+func selectQuestionToAsk(questions []memory.PendingQuestion, incomingText string) *memory.PendingQuestion {
+	// Relevance trigger: if the incoming message mentions entities related to a
+	// pending question, surface that question regardless of its backoff timer.
+	if incomingText != "" {
+		if terms := extractProperNouns(incomingText); len(terms) > 0 {
+			for i := range questions {
+				q := &questions[i]
+				if questionMentionsAny(q, terms) {
+					return q
+				}
+			}
+		}
+	}
+
+	// Normal backoff pass.
 	now := time.Now()
 	for i := range questions {
 		q := &questions[i]
@@ -172,6 +187,34 @@ func selectQuestionToAsk(questions []memory.PendingQuestion) *memory.PendingQues
 		}
 	}
 	return nil
+}
+
+// extractProperNouns returns lowercased words from text that start with an uppercase letter
+// and are at least 3 characters long — a lightweight proxy for entity/name detection.
+func extractProperNouns(text string) []string {
+	words := strings.Fields(text)
+	var terms []string
+	for _, w := range words {
+		w = strings.Trim(w, ".,!?;:\"'()[]{}")
+		if len(w) < 3 {
+			continue
+		}
+		if w[0] >= 'A' && w[0] <= 'Z' {
+			terms = append(terms, strings.ToLower(w))
+		}
+	}
+	return terms
+}
+
+// questionMentionsAny returns true if the question text or context contains any of the given terms.
+func questionMentionsAny(q *memory.PendingQuestion, terms []string) bool {
+	haystack := strings.ToLower(q.Question + " " + q.Context)
+	for _, t := range terms {
+		if strings.Contains(haystack, t) {
+			return true
+		}
+	}
+	return false
 }
 
 // formatQuestion returns a human-readable prompt for the pending question.
