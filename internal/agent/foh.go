@@ -224,7 +224,7 @@ func RunQueryFull(ctx context.Context, app FOHEnv, question, source string, debu
 				delay := time.Duration(emptyContentRetries) * time.Second
 				logDebug("[retry] No text or function calls (attempt %d/%d), waiting %v then retrying", emptyContentRetries, maxEmptyRetries, delay)
 				time.Sleep(delay)
-				resp2, err2 := session.SendMessage(ctx, &genai.Part{Text: question})
+				resp2, err2 := session.SendMessage(ctx, &genai.Part{Text: "Please respond to the question. Use your tools if needed."})
 				if err2 != nil {
 				
 					return &QueryResult{

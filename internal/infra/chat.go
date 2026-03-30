@@ -112,7 +112,11 @@ func NewChatSession(ctx context.Context, app *App, systemPrompt string, tools []
 		config.Tools = []*genai.Tool{{FunctionDeclarations: tools}}
 	}
 	if withThinking {
-		config.ThinkingConfig = &genai.ThinkingConfig{IncludeThoughts: true}
+		budget := int32(8192)
+		config.ThinkingConfig = &genai.ThinkingConfig{
+			IncludeThoughts: true,
+			ThinkingBudget:  &budget,
+		}
 	}
 
 	chat, err := client.Chats.Create(ctx, modelName, config, nil)
