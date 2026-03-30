@@ -188,7 +188,9 @@ func formatReflectionsSection(summaries []string) string {
 // formatTodoSection builds the OPEN TASKS (ROOT) block with --- and ## header; full task UUID + content.
 // buildActiveProjectBlock finds the most recently created open root task that has pending subtasks and
 // formats a PROJECT STATUS block for injection into the system prompt.
-// Checks up to the first 3 root tasks to bound the number of Firestore calls.
+// Note: "most recently created" is determined by timestamp at creation; UpdateTask does not
+// refresh the timestamp, so actively worked projects with old timestamps may not be selected.
+// Checks up to the first 15 root tasks to bound the number of Firestore calls.
 func buildActiveProjectBlock(ctx context.Context, env infra.ToolEnv, roots []memory.Task) string {
 	limit := 15
 	if len(roots) < limit {

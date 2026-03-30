@@ -103,7 +103,7 @@ func (s *Store) BrainstormSubtasks(ctx context.Context, parentTaskID string) (st
 	return strings.Join(resultLines, "\n"), nil
 }
 
-// GetChildTasks returns pending and active subtasks for a given parent task UUID, newest first.
+// GetChildTasks returns pending and active subtasks for a given parent task UUID, oldest first.
 // Limit caps results; 0 or negative defaults to 20.
 func (s *Store) GetChildTasks(ctx context.Context, parentID string, limit int) ([]Task, error) {
 	if limit <= 0 {

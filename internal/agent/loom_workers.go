@@ -9,11 +9,10 @@ import (
 	"github.com/jackstrohm/jot/internal/infra"
 )
 
-// runTaskWorker scans logContent for commitment signals and auto-creates Task nodes
-// after graph objects exist so the task can link to them.
+// runTaskWorker scans logContent for commitment signals and, when the confidence threshold
+// is met, queues a PendingQuestion of kind KindTaskProposal so the user is prompted to
+// confirm task creation on their next Telegram interaction.
 // extractedObjectIDs are the UUIDs of object/log nodes associated with this pipeline run.
-//
-// This replaces the commitment-detection logic previously inside ProcessEntry.
 func runTaskWorker(ctx context.Context, app *infra.App, logContent string, extractedObjectIDs []string) error {
 	parsed, err := RunEvaluatorExtract(ctx, app, logContent)
 	if err != nil {

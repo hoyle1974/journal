@@ -5,12 +5,10 @@
 `github.com/hoyle1974/memory` is a pure Go library that provides the **GraphRAG memory layer** for the Jot agentic second-brain system. It is not an application — there is no `main` package, no HTTP server, and no CLI. Callers (e.g. `jot`) construct a `Store` and use it to read and write structured knowledge to Firestore.
 
 The library handles:
-- Persistent, typed **knowledge nodes** backed by Firestore (episodic logs, semantic facts, tasks, queries, contexts, pending questions).
+- Persistent, typed **knowledge nodes** backed by Firestore (episodic logs, semantic facts, tasks, queries, pending questions).
 - **Vector + keyword hybrid search** with Reciprocal Rank Fusion (RRF) and optional LLM re-ranking.
 - **Graph traversal** (1-hop neighbourhood expansion via SPO edges and entity links).
-- **Rollup** (weekly and monthly summary nodes).
 - **Task management** (create, update, query tasks with LLM-driven decomposition).
-- **Context nodes** (active briefings).
 - **Pending questions** (knowledge gaps and contradictions to be clarified by the user).
 - **Schema validation and normalization** for all node metadata types.
 
@@ -64,9 +62,6 @@ All node types live in the **single `journal` collection** (`KnowledgeCollection
 | `task` | `Task` | Task/todo items with status, priority, subtask hierarchy. |
 | `query` | `QueryLog` | Logged Q&A pairs from the FOH loop. |
 | `pending_question` | `PendingQuestion` | Knowledge gaps/contradictions for the user to resolve. |
-| `context` | `ContextMetadata` | Active briefings with relevance decay. |
-| `weekly_summary` | `KnowledgeNode` | Weekly rollup summary node. |
-| `monthly_summary` | `KnowledgeNode` | Monthly rollup summary node. |
 
 ### SPO (Subject–Predicate–Object) Triples
 
@@ -92,7 +87,6 @@ Relational knowledge nodes use three extra fields:
 | `knowledge_project.go` | Project/goal status mutations (`UpdateProjectStatus`), archive-summary append (`AppendToProjectArchiveSummary`), completed-project lookup (`GetLinkedCompletedProjectID`). |
 | `entry_nodes.go` | CRUD for `Entry` (episodic log nodes): `AddEntry`, `GetEntries*`, `GetEntriesWithAnalysis*`, `SearchEntriesByKeyword`, etc. |
 | `entry_nodes_extended.go` | Extended entry helpers: date-range queries, source filtering, pagination. |
-| `context.go` | Context node operations: `CreateContext`, `GetActiveContexts`, `UpdateContext`, `SynthesizeContext`. |
 | `query_nodes.go` | Query log operations: `SaveQuery`, `GetRecentQueries`, `GetQueryByID`. |
 | `pending.go` | Pending question operations: `InsertPendingQuestions`, `GetPendingQuestions`, `ResolvePendingQuestion`. |
 | `pending_dedup_test.go` | Tests for pending-question deduplication. |
@@ -103,7 +97,6 @@ Relational knowledge nodes use three extra fields:
 | `rag.go` | `HybridSearch` pipeline: vector search + keyword search + RRF fusion + optional re-rank. Log helpers for search confidence. |
 | `rerank.go` | `RerankNodes`: LLM-based relevance re-ranking of a candidate node list. |
 | `analysis.go` | `JournalAnalysis`, `Entity`, `OpenLoop` types; `NormalizeEntityStatus` helper. |
-| `rollup.go` | `GetWeeklySummaryNodesInRange`, `GetMonthlySummaryNodesInRange`. |
 | `migrate.go` | `MigrateKnowledgeMetadata`: one-off schema migration with optional dry-run. |
 | `math.go` | Cosine similarity, vector utilities. |
 | `text.go` | String utilities: `truncateString`, `sanitizePrompt`, `wrapAsUserData`, `parseKeyValueMap`, tag normalization. |
@@ -191,6 +184,6 @@ Prompt text files live in `prompts/` and are embedded at compile time using `//g
 
 ### Name collision note
 
-Several domain interfaces keep original Store method names (e.g. `GetEntry`, `GetTask`,
-`CreateContext`) rather than short names. This is required because Go does not allow two methods
+Several domain interfaces keep original Store method names (e.g. `GetEntry`, `GetTask`)
+rather than short names. This is required because Go does not allow two methods
 with the same name on the same type, even with different signatures.

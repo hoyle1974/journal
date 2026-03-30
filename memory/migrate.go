@@ -12,13 +12,10 @@ import (
 )
 
 
-// MigrateKnowledgeMetadata iterates over all documents in the given Firestore collection
-// (knowledge_nodes), normalizes metadata for registered node types, and merges top-level
+// MigrateKnowledgeMetadata iterates over all documents in the journal Firestore collection
+// (KnowledgeCollection), normalizes metadata for registered node types, and merges top-level
 // archive_summary into metadata for project/goal nodes. When dryRun is true, no writes
 // are performed. Returns the number of documents updated and any error.
-// MigrateKnowledgeMetadata iterates over all knowledge_nodes documents, normalizes metadata
-// for registered node types, and merges top-level archive_summary into metadata for
-// project/goal nodes. When dryRun is true, no writes are performed.
 func (s *Store) MigrateKnowledgeMetadata(ctx context.Context, dryRun bool) (int, error) {
 	client := s.db
 	collection := KnowledgeCollection

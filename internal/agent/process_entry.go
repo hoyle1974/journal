@@ -23,7 +23,7 @@ type ProcessEntryReport struct {
 //
 //	Stage 1: Log Persistence — write the raw log node to Firestore immediately.
 //	Stage 2: Refinery       — extract KG triples and commit graph objects/relationships.
-//	Stage 3: Task Worker    — scan for commitments and create task nodes linked to graph objects.
+//	Stage 3: Task Worker    — scan for commitments and queue a PendingQuestion proposal for user confirmation.
 //
 // Stage 2 (Refinery) failures abort the pipeline and return an error so the
 // Cloud Tasks handler returns HTTP 500 and retries automatically. Stage 3

@@ -10,8 +10,9 @@ import (
 )
 
 // handleReplay accepts a multipart form with content, source, timestamp, and optional
-// image/audio files, inserting the entry through the full processing pipeline
-// (AddEntryAndEnqueue → /internal/process-entry) with the original timestamp preserved.
+// image/audio files. It uses the synchronous pipeline (AddEntryOnly → ProcessLogSequential)
+// so each entry is fully committed before the next one is replayed, ensuring graph edges
+// between consecutive entries resolve correctly. The original timestamp is preserved.
 // Intended for dev replay of prod journal archives.
 func handleReplay(s *Server, w http.ResponseWriter, r *http.Request) (any, error) {
 	ctx := r.Context()

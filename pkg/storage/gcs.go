@@ -33,7 +33,7 @@ func NewGCSImageStorage(client *storage.Client, bucket string) *GCSImageStorage 
 	return &GCSImageStorage{client: client, bucket: bucket}
 }
 
-// UploadImage writes data to GCS under objects/images/<uuid> and returns gs://bucket/images/<uuid>.
+// UploadImage writes data to GCS under images/<uuid> and returns gs://bucket/images/<uuid>.
 func (g *GCSImageStorage) UploadImage(ctx context.Context, data []byte) (string, error) {
 	if g.client == nil || g.bucket == "" {
 		return "", fmt.Errorf("image upload not configured: GCS client or bucket missing")
